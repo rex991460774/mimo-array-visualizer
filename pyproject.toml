@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mimo-array-visualizer"
+version = "0.1.0"
+description = "Desktop visualizer and evaluator for MIMO Tx/Rx antenna array layouts."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.23",
+    "matplotlib>=3.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+packaging = [
+    "pyinstaller>=6.20",
+]
+
+[project.scripts]
+mimo-array-visualizer = "virtual_array.gui:main"
+mimo-array-case4 = "virtual_array.examples.case4_5tx7rx_sel:main"
+virtual-array-gui = "virtual_array.gui:main"
+virtual-array-case4 = "virtual_array.examples.case4_5tx7rx_sel:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

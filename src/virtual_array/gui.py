@@ -18,9 +18,12 @@ from matplotlib.widgets import Button as MplButton
 from .app_state import load_state, save_state, state_path
 from .analysis import (
     AZIMUTH_FOV,
+    ELEVATION_FOV,
     MAINLOBE_GUARD_AZ,
+    MAINLOBE_GUARD_EL,
     ArrayMetrics,
     calculate_metrics_and_psf,
+    local_peak_indices,
 )
 from .element_pattern import (
     ElementPattern,
@@ -50,6 +53,11 @@ LEGACY_LAYOUT_UNITS_HALF_LAMBDA = {"lambda/2", "λ/2"}
 MAX_TX_COUNT = 16
 MAX_RX_COUNT = 16
 TITLE_SIZE = 13
+RESPONSE_MODE_AZIMUTH = "az"
+RESPONSE_MODE_ELEVATION = "el"
+RESPONSE_MODES = {RESPONSE_MODE_AZIMUTH, RESPONSE_MODE_ELEVATION}
+RESPONSE_SIDELOBE_PROMINENCE_DB = 0.5
+RESPONSE_SIDELOBE_GUARD_CLEARANCE_DB = 0.5
 
 DEFAULT_FREQUENCY_MODE = "77 GHz"
 FREQUENCY_MODES_MM = {
@@ -102,6 +110,116 @@ class EditableElement:
     name: str
     x: float
     y: float
+
+
+@dataclass(frozen=True)
+class ResponseCut:
+    mode: str
+    label: str
+    angles: np.ndarray
+    gains_db: np.ndarray
+    fov: tuple[float, float]
+    mainlobe_guard: float
+    x_label: str
+    pattern_label: str
+
+
+def _response_cut_for_mode(
+    af_db: np.ndarray,
+    azimuths: np.ndarray,
+    elevations: np.ndarray,
+    mode: str,
+) -> ResponseCut:
+    if mode == RESPONSE_MODE_ELEVATION:
+        az0_index = int(np.argmin(np.abs(azimuths)))
+        return ResponseCut(
+            mode=RESPONSE_MODE_ELEVATION,
+            label="El",
+            angles=elevations,
+            gains_db=af_db[:, az0_index],
+            fov=ELEVATION_FOV,
+            mainlobe_guard=MAINLOBE_GUARD_EL,
+            x_label="Elevation angle (deg)",
+            pattern_label="Element pattern (V)",
+        )
+
+    el0_index = int(np.argmin(np.abs(elevations)))
+    return ResponseCut(
+        mode=RESPONSE_MODE_AZIMUTH,
+        label="Az",
+        angles=azimuths,
+        gains_db=af_db[el0_index, :],
+        fov=AZIMUTH_FOV,
+        mainlobe_guard=MAINLOBE_GUARD_AZ,
+        x_label="Azimuth angle (deg)",
+        pattern_label="Element pattern (H)",
+    )
+
+
+def _response_sidelobe_marker(
+    angles: np.ndarray,
+    gains_db: np.ndarray,
+    guard: float,
+    min_prominence_db: float = RESPONSE_SIDELOBE_PROMINENCE_DB,
+    min_guard_clearance_db: float = RESPONSE_SIDELOBE_GUARD_CLEARANCE_DB,
+) -> tuple[int, bool]:
+    peak_indices = local_peak_indices(gains_db)
+    sidelobe_mask = np.abs(angles) > guard
+    sidelobe_peak_indices = np.array(
+        [
+            index
+            for index in peak_indices[sidelobe_mask[peak_indices]]
+            if _peak_prominence_db(gains_db, int(index)) >= min_prominence_db
+            and _peak_guard_clearance_db(angles, gains_db, guard, int(index))
+            >= min_guard_clearance_db
+        ],
+        dtype=int,
+    )
+    if len(sidelobe_peak_indices):
+        index = int(sidelobe_peak_indices[np.argmax(gains_db[sidelobe_peak_indices])])
+        return index, True
+    if np.any(sidelobe_mask):
+        return int(np.argmax(np.where(sidelobe_mask, gains_db, -np.inf))), False
+    return int(np.argmax(gains_db)), False
+
+
+def _peak_prominence_db(values_db: np.ndarray, peak_index: int) -> float:
+    peak_db = float(values_db[peak_index])
+    left_min = peak_db
+    for index in range(peak_index - 1, -1, -1):
+        value = float(values_db[index])
+        if value > peak_db:
+            break
+        left_min = min(left_min, value)
+
+    right_min = peak_db
+    for index in range(peak_index + 1, len(values_db)):
+        value = float(values_db[index])
+        if value > peak_db:
+            break
+        right_min = min(right_min, value)
+
+    return peak_db - max(left_min, right_min)
+
+
+def _peak_guard_clearance_db(
+    angles: np.ndarray,
+    gains_db: np.ndarray,
+    guard: float,
+    peak_index: int,
+) -> float:
+    peak_angle = float(angles[peak_index])
+    if peak_angle < 0.0:
+        side_indices = np.flatnonzero(angles < -guard)
+        if len(side_indices) == 0:
+            return 0.0
+        guard_index = int(side_indices[np.argmax(angles[side_indices])])
+    else:
+        side_indices = np.flatnonzero(angles > guard)
+        if len(side_indices) == 0:
+            return 0.0
+        guard_index = int(side_indices[np.argmin(angles[side_indices])])
+    return float(gains_db[peak_index] - gains_db[guard_index])
 
 
 # ── Formatting helpers ────────────────────────────────────────────────
@@ -332,7 +450,7 @@ class VirtualArrayGui:
       │  (Mpl Fig)  │                      │
       ├─────────────┤  Mode / Freq / Steer │
       │  Virtual    ├──────────────────────┤
-      │  Array      │  Azimuth Response    │
+      │  Array      │  Front Radar Response│
       │  (Mpl Fig)  │  (Mpl Fig)           │
       └─────────────┴──────────────────────┘
       ┌────────────────────────────────────┐
@@ -362,6 +480,8 @@ class VirtualArrayGui:
         self.psf_hover_db = np.empty((0, 0), dtype=float)
         self.psf_hover_azimuths = np.empty(0, dtype=float)
         self.psf_hover_elevations = np.empty(0, dtype=float)
+        self.psf_hover_cut_angles = np.empty(0, dtype=float)
+        self.psf_hover_cut_label = "Az"
         self.physical_buttons: list[MplButton] = []
         self.physical_button_callbacks: list[int] = []
         self.psf_buttons: list[MplButton] = []
@@ -369,6 +489,7 @@ class VirtualArrayGui:
 
         self.element_pattern: ElementPattern | None = None
         self.frequency_mode = tk.StringVar(value=DEFAULT_FREQUENCY_MODE)
+        self.response_mode = tk.StringVar(value=RESPONSE_MODE_AZIMUTH)
         self.pattern_status = tk.StringVar(value="Pattern: isotropic")
         self.status = tk.StringVar(
             value="Drag Tx/Rx points in Physical Array. Release to refresh Virtual Array and PSF."
@@ -435,8 +556,27 @@ class VirtualArrayGui:
             font=("Segoe UI", 9),
         )
         self.combined_info_label.pack(side=tk.LEFT, padx=(8, 0))
+        response_switch = ttk.Frame(info_bar)
+        response_switch.pack(side=tk.RIGHT, padx=(8, 2))
+        ttk.Label(response_switch, text="Response:", font=("Segoe UI", 9)).pack(
+            side=tk.LEFT
+        )
+        ttk.Radiobutton(
+            response_switch,
+            text="Az",
+            value=RESPONSE_MODE_AZIMUTH,
+            variable=self.response_mode,
+            command=self.on_response_mode_changed,
+        ).pack(side=tk.LEFT, padx=(4, 0))
+        ttk.Radiobutton(
+            response_switch,
+            text="El",
+            value=RESPONSE_MODE_ELEVATION,
+            variable=self.response_mode,
+            command=self.on_response_mode_changed,
+        ).pack(side=tk.LEFT, padx=(4, 0))
 
-        # PSF figure (Azimuth Response)
+        # PSF figure (Front Radar Response)
         self.psf_fig = Figure(figsize=(PSF_FIG_W, PSF_FIG_H), dpi=FIG_DPI)
         self.psf_ax = self.psf_fig.add_subplot(111)
         self.psf_fig.subplots_adjust(top=0.82, left=0.13, right=0.97, bottom=0.16)
@@ -829,6 +969,11 @@ class VirtualArrayGui:
     # ── Button handlers ───────────────────────────────────────────────
 
     def on_frequency_changed(self, _event=None) -> None:  # noqa: ANN001
+        self.generate_virtual_array()
+
+    def on_response_mode_changed(self) -> None:
+        if self.response_mode.get() not in RESPONSE_MODES:
+            self.response_mode.set(RESPONSE_MODE_AZIMUTH)
         self.generate_virtual_array()
 
     def import_element_pattern(self) -> None:
@@ -1513,43 +1658,59 @@ class VirtualArrayGui:
         metrics: ArrayMetrics,
     ) -> None:
         self.psf_ax.clear()
-        el0_index = int(np.argmin(np.abs(elevations)))
-        azimuth_cut = af_db[el0_index, :]
-        az_cut_mask = np.abs(azimuths) > MAINLOBE_GUARD_AZ
-        sidelobe_index = int(np.argmax(np.where(az_cut_mask, azimuth_cut, -np.inf)))
-        sidelobe_az = float(azimuths[sidelobe_index])
-        sidelobe_gain = float(azimuth_cut[sidelobe_index])
+        response_cut = _response_cut_for_mode(
+            af_db, azimuths, elevations, self.response_mode.get()
+        )
+        response_db = response_cut.gains_db
+        response_angles = response_cut.angles
+        sidelobe_index, sidelobe_is_peak = _response_sidelobe_marker(
+            response_angles, response_db, response_cut.mainlobe_guard
+        )
+        sidelobe_angle = float(response_angles[sidelobe_index])
+        sidelobe_gain = float(response_db[sidelobe_index])
+        sidelobe_label = "Max sidelobe" if sidelobe_is_peak else "Guard-edge max"
         psf_ylim = (-40.0, 0.0)
 
-        self.psf_ax.plot(azimuths, azimuth_cut, color="#2f6fbb", linewidth=1.8)
+        self.psf_ax.plot(response_angles, response_db, color="#2f6fbb", linewidth=1.8)
         show_legend = False
         if self.element_pattern is not None:
+            if response_cut.mode == RESPONSE_MODE_ELEVATION:
+                element_pattern_cut = self.element_pattern.normalized_elevation_gain_db_at(
+                    response_angles
+                )
+            else:
+                element_pattern_cut = self.element_pattern.normalized_horizontal_gain_db_at(
+                    response_angles
+                )
             pattern_cut = np.clip(
-                self.element_pattern.normalized_horizontal_gain_db_at(azimuths),
+                element_pattern_cut,
                 psf_ylim[0],
                 psf_ylim[1],
             )
             self.psf_ax.plot(
-                azimuths,
+                response_angles,
                 pattern_cut,
                 color="#607d8b",
                 linestyle="--",
                 linewidth=1.3,
                 alpha=0.72,
-                label="Element pattern (H)",
+                label=response_cut.pattern_label,
             )
             show_legend = True
-        self.psf_ax.set_xlim(AZIMUTH_FOV)
+        self.psf_ax.set_xlim(response_cut.fov)
         self.psf_ax.set_ylim(psf_ylim)
         self.psf_ax.axvspan(
-            -MAINLOBE_GUARD_AZ, MAINLOBE_GUARD_AZ, color="#bbbbbb", alpha=0.38
+            -response_cut.mainlobe_guard,
+            response_cut.mainlobe_guard,
+            color="#bbbbbb",
+            alpha=0.38,
         )
         self.psf_ax.scatter(
             [0.0], [0.0], marker="+", s=80, color="#111111", linewidths=2.0, zorder=4
         )
         # Max sidelobe marker
         self.psf_ax.scatter(
-            [sidelobe_az],
+            [sidelobe_angle],
             [sidelobe_gain],
             marker="x",
             s=70,
@@ -1557,10 +1718,10 @@ class VirtualArrayGui:
             linewidths=2.0,
             zorder=5,
             clip_on=True,
-            label="Max sidelobe",
+            label=sidelobe_label,
         )
 
-        x_low, x_high = AZIMUTH_FOV
+        x_low, x_high = response_cut.fov
         y_low, y_high = psf_ylim
         annotation_boxes: list[tuple[float, float, float, float]] = []
 
@@ -1599,11 +1760,14 @@ class VirtualArrayGui:
             return base_x, fallback_y, ha
 
         annotation_x, annotation_y, annotation_ha = annotation_position(
-            sidelobe_az, sidelobe_gain
+            sidelobe_angle, sidelobe_gain
         )
         self.psf_ax.annotate(
-            f"Max sidelobe\nAz = {sidelobe_az:.1f}°\nGain = {sidelobe_gain:.2f} dB",
-            xy=(sidelobe_az, sidelobe_gain),
+            (
+                f"{sidelobe_label}\n{response_cut.label} = {sidelobe_angle:.1f}°\n"
+                f"Gain = {sidelobe_gain:.2f} dB"
+            ),
+            xy=(sidelobe_angle, sidelobe_gain),
             xytext=(annotation_x, annotation_y),
             textcoords=self.psf_ax.transAxes,
             ha=annotation_ha,
@@ -1623,14 +1787,15 @@ class VirtualArrayGui:
         # Grating lobe marker
         grating_same_as_max = False
         if (
-            metrics.azimuth_grating_lobe_angle is not None
+            response_cut.mode == RESPONSE_MODE_AZIMUTH
+            and metrics.azimuth_grating_lobe_angle is not None
             and metrics.azimuth_grating_lobe_db is not None
         ):
             grating_angle = metrics.azimuth_grating_lobe_angle
             grating_gain = metrics.azimuth_grating_lobe_db
             grating_same_as_max = (
-                abs(grating_angle - sidelobe_az)
-                <= float(np.diff(azimuths).mean()) / 2.0
+                abs(grating_angle - sidelobe_angle)
+                <= float(np.diff(response_angles).mean()) / 2.0
                 and abs(grating_gain - sidelobe_gain) <= 0.05
             )
             self.psf_ax.scatter(
@@ -1676,20 +1841,23 @@ class VirtualArrayGui:
                 self.psf_ax.legend(loc="lower right", fontsize=7, framealpha=0.72)
                 show_legend = False
 
-        self.psf_ax.set_title(
-            "Front Radar Azimuth Response", pad=6, y=1.02, loc="left"
-        )
-        self.psf_ax.set_xlabel("Azimuth angle (deg)")
+        self.psf_ax.set_title("Front Radar Response", pad=6, y=1.02, loc="left")
+        self.psf_ax.set_xlabel(response_cut.x_label)
         self.psf_ax.set_ylabel("Normalized gain (dB)", labelpad=2)
         self.psf_ax.grid(True, alpha=0.3)
         if show_legend:
             self.psf_ax.legend(loc="lower right", fontsize=7, framealpha=0.72)
 
-        # Az PSL badge in lower-left corner
+        response_psl_db = (
+            metrics.elevation_psl_db
+            if response_cut.mode == RESPONSE_MODE_ELEVATION
+            else metrics.azimuth_psl_db
+        )
+        # PSL badge in lower-left corner
         self.psf_ax.text(
             0.02,
             0.08,
-            f"Az PSL: {metrics.azimuth_psl_db:.2f} dB",
+            f"{response_cut.label} PSL: {response_psl_db:.2f} dB",
             transform=self.psf_ax.transAxes,
             ha="left",
             va="bottom",
@@ -1703,9 +1871,11 @@ class VirtualArrayGui:
         )
 
         # Hover data
-        self.psf_hover_db = azimuth_cut
+        self.psf_hover_db = response_db
+        self.psf_hover_cut_angles = response_angles
+        self.psf_hover_cut_label = response_cut.label
         self.psf_hover_azimuths = azimuths
-        self.psf_hover_elevations = np.array([0.0])
+        self.psf_hover_elevations = elevations
 
         self.psf_hover_annotation = self.psf_ax.annotate(
             "",
@@ -1786,6 +1956,10 @@ class VirtualArrayGui:
             if isinstance(frequency_mode, str) and frequency_mode in FREQUENCY_MODES_MM:
                 self.frequency_mode.set(frequency_mode)
 
+            response_mode = state.get("response_mode")
+            if isinstance(response_mode, str) and response_mode in RESPONSE_MODES:
+                self.response_mode.set(response_mode)
+
             layout = state.get("layout")
             if layout is not None:
                 self.elements = self._elements_from_layout_config(layout)
@@ -1799,6 +1973,7 @@ class VirtualArrayGui:
             "last_layout_dir": str(self.last_layout_dir),
             "last_pattern_dir": str(self.last_pattern_dir),
             "frequency_mode": self.frequency_mode.get(),
+            "response_mode": self.response_mode.get(),
             "layout": self._layout_coordinates_config(),
         }
         save_state(state)
@@ -2011,15 +2186,19 @@ class VirtualArrayGui:
                 self.psf_canvas.draw_idle()
             return
 
-        az_index = int(np.argmin(np.abs(self.psf_hover_azimuths - event.xdata)))
-        az = float(self.psf_hover_azimuths[az_index])
         if self.psf_hover_db.ndim == 1:
-            gain = float(self.psf_hover_db[az_index])
-            self.psf_hover_annotation.xy = (az, gain)
+            angle_index = int(
+                np.argmin(np.abs(self.psf_hover_cut_angles - event.xdata))
+            )
+            angle = float(self.psf_hover_cut_angles[angle_index])
+            gain = float(self.psf_hover_db[angle_index])
+            self.psf_hover_annotation.xy = (angle, gain)
             self.psf_hover_annotation.set_text(
-                f"Az = {az:.1f}°\nGain = {gain:.2f} dB"
+                f"{self.psf_hover_cut_label} = {angle:.1f}°\nGain = {gain:.2f} dB"
             )
         else:
+            az_index = int(np.argmin(np.abs(self.psf_hover_azimuths - event.xdata)))
+            az = float(self.psf_hover_azimuths[az_index])
             el_index = int(np.argmin(np.abs(self.psf_hover_elevations - event.ydata)))
             el = float(self.psf_hover_elevations[el_index])
             gain = float(self.psf_hover_db[el_index, az_index])

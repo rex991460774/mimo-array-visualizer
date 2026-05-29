@@ -71,7 +71,7 @@ DISPLAY_GRID_STEP_LAMBDA = 0.5
 
 # Window geometry
 WINDOW_WIDTH = 1600
-WINDOW_HEIGHT = 900
+WINDOW_HEIGHT = 1000
 WINDOW_MIN_WIDTH = 1200
 WINDOW_MIN_HEIGHT = 800
 
@@ -80,11 +80,11 @@ FIG_DPI = 100
 
 # Figure sizes (inches → pixels at FIG_DPI)
 PHYS_FIG_W = 6.8
-PHYS_FIG_H = 3.1
+PHYS_FIG_H = 3.2
 VIRT_FIG_W = 6.8
-VIRT_FIG_H = 3.0
-PSF_FIG_W = 5.4
-PSF_FIG_H = 3.4
+VIRT_FIG_H = 3.2
+PSF_FIG_W = 6.8
+PSF_FIG_H = 2.8
 
 PSL_COLORS = {
     "Good": "#2e7d32",
@@ -444,18 +444,17 @@ class VirtualArrayGui:
     """MIMO antenna virtual-array visualizer.
 
     Layout (Tkinter grid):
-      ┌─────────────┬──────────────────────┐
-      │  Physical   │  Array Evaluation    │
-      │  Array      │  (Tkinter widgets)   │
-      │  (Mpl Fig)  │                      │
-      ├─────────────┤  Mode / Freq / Steer │
-      │  Virtual    ├──────────────────────┤
-      │  Array      │  Front Radar Response│
-      │  (Mpl Fig)  │  (Mpl Fig)           │
-      └─────────────┴──────────────────────┘
-      ┌────────────────────────────────────┐
-      │        Controls (buttons)          │
-      └────────────────────────────────────┘
+      ┌─────────────┬──────────────┬────────────────┐
+      │  Physical   │  Virtual     │                │
+      │  Array      │  Array       │  Array         │
+      │  (Mpl Fig)  │  (Mpl Fig)   │  Evaluation    │
+      ├─────────────┼──────────────┤  (Tkinter)     │
+      │  Azimuth    │  Elevation   │                │
+      │  Response   │  Response    │                │
+      │  (Mpl Fig)  │  (Mpl Fig)   │                │
+      ├─────────────┴──────────────┴────────────────┤
+      │              Controls (buttons)             │
+      └─────────────────────────────────────────────┘
     """
 
     def __init__(self, root: tk.Tk) -> None:
@@ -469,50 +468,63 @@ class VirtualArrayGui:
         self.drag_bounds: tuple[float, float, float, float] | None = None
         self.drag_axis_limits: tuple[tuple[float, float], tuple[float, float]] | None = None
         self.selected_element: EditableElement | None = None
-        self.psf_colorbar = None
 
         # Hover state
         self.physical_hover_annotation = None
-        self.hover_annotation = None
-        self.psf_hover_annotation = None
+        self.virtual_hover_annotation = None
+        self.az_hover_annotation = None
+        self.el_hover_annotation = None
         self.virtual_hover_xy = np.empty((0, 2), dtype=float)
         self.virtual_hover_text: list[str] = []
-        self.psf_hover_db = np.empty((0, 0), dtype=float)
-        self.psf_hover_azimuths = np.empty(0, dtype=float)
-        self.psf_hover_elevations = np.empty(0, dtype=float)
-        self.psf_hover_cut_angles = np.empty(0, dtype=float)
-        self.psf_hover_cut_label = "Az"
+        self.az_hover_db = np.empty(0, dtype=float)
+        self.az_hover_angles = np.empty(0, dtype=float)
+        self.el_hover_db = np.empty(0, dtype=float)
+        self.el_hover_angles = np.empty(0, dtype=float)
         self.physical_buttons: list[MplButton] = []
         self.physical_button_callbacks: list[int] = []
-        self.psf_buttons: list[MplButton] = []
-        self.psf_button_callbacks: list[int] = []
+        self.az_buttons: list[MplButton] = []
+        self.az_button_callbacks: list[int] = []
+        self.el_buttons: list[MplButton] = []
+        self.el_button_callbacks: list[int] = []
 
         self.element_pattern: ElementPattern | None = None
         self.frequency_mode = tk.StringVar(value=DEFAULT_FREQUENCY_MODE)
-        self.response_mode = tk.StringVar(value=RESPONSE_MODE_AZIMUTH)
         self.pattern_status = tk.StringVar(value="Pattern: isotropic")
         self.status = tk.StringVar(
-            value="Drag Tx/Rx points in Physical Array. Release to refresh Virtual Array and PSF."
+            value="Drag Tx/Rx points in Physical Array. Release to refresh Virtual Array and Responses."
         )
         self.last_layout_dir = Path("outputs").resolve()
         self.last_pattern_dir = Path.home()
         self._load_local_state()
 
         # ── Build the grid layout ─────────────────────────────────
-        root.grid_rowconfigure(0, weight=1)
-        root.grid_rowconfigure(1, weight=0)
-        root.grid_columnconfigure(0, weight=5)  # left panel
-        root.grid_columnconfigure(1, weight=4)  # right panel
+        root.grid_rowconfigure(0, weight=1)  # Physical + Virtual
+        root.grid_rowconfigure(1, weight=1)  # Az Response + El Response
+        root.grid_rowconfigure(2, weight=0)  # Controls
+        root.grid_columnconfigure(0, weight=1)
+        root.grid_columnconfigure(1, weight=1)
+        root.grid_columnconfigure(2, weight=0)  # Evaluation panel
         style = ttk.Style(self.root)
         style.configure("Large.TButton", font=("Segoe UI", 10), padding=(8, 5))
         style.configure("Status.TLabel", font=("Segoe UI", 10))
 
-        # ── Left panel ────────────────────────────────────────────
-        left_frame = ttk.Frame(root, padding=(4, 4, 2, 4))
+        # ── Row 0: Physical Array + Virtual Array ─────────────────
+        left_frame = ttk.Frame(root, padding=(4, 4, 2, 2))
         left_frame.grid(row=0, column=0, sticky="nsew")
-        left_frame.grid_rowconfigure(0, weight=12)
-        left_frame.grid_rowconfigure(1, weight=10)
+        left_frame.grid_rowconfigure(0, weight=1)
         left_frame.grid_columnconfigure(0, weight=1)
+
+        right_frame = ttk.Frame(root, padding=(2, 4, 2, 2))
+        right_frame.grid(row=0, column=1, sticky="nsew")
+        right_frame.grid_rowconfigure(0, weight=1)
+        right_frame.grid_columnconfigure(0, weight=1)
+
+        # ── Column 2: Array Evaluation (narrow) ──────────────────
+        eval_info_frame = ttk.Frame(root, padding=(2, 4, 2, 2))
+        eval_info_frame.grid(row=0, column=2, rowspan=2, sticky="nsew")
+        eval_info_frame.grid_rowconfigure(0, weight=1)
+        eval_info_frame.grid_columnconfigure(0, weight=1)
+        self._build_evaluation_panel(eval_info_frame)
 
         # Physical Array figure
         self.phys_fig = Figure(figsize=(PHYS_FIG_W, PHYS_FIG_H), dpi=FIG_DPI)
@@ -521,73 +533,47 @@ class VirtualArrayGui:
         self._build_physical_figure_controls()
         self.phys_canvas = FigureCanvasTkAgg(self.phys_fig, master=left_frame)
         phys_widget = self.phys_canvas.get_tk_widget()
-        phys_widget.grid(row=0, column=0, sticky="nsew", pady=(0, 2))
+        phys_widget.grid(row=0, column=0, sticky="nsew")
 
         # Virtual Array figure
         self.virt_fig = Figure(figsize=(VIRT_FIG_W, VIRT_FIG_H), dpi=FIG_DPI)
         self.virtual_ax = self.virt_fig.add_subplot(111)
-        self.virt_canvas = FigureCanvasTkAgg(self.virt_fig, master=left_frame)
+        self.virt_canvas = FigureCanvasTkAgg(self.virt_fig, master=right_frame)
         virt_widget = self.virt_canvas.get_tk_widget()
-        virt_widget.grid(row=1, column=0, sticky="nsew")
+        virt_widget.grid(row=0, column=0, sticky="nsew")
 
-        # ── Right panel ───────────────────────────────────────────
-        right_frame = ttk.Frame(root, padding=(2, 4, 4, 4))
-        right_frame.grid(row=0, column=1, sticky="nsew")
-        right_frame.grid_rowconfigure(0, weight=0)  # evaluation panel
-        right_frame.grid_rowconfigure(1, weight=0)  # mode info bar
-        right_frame.grid_rowconfigure(2, weight=1)  # PSF figure
-        right_frame.grid_columnconfigure(0, weight=1)
+        # ── Row 1: Azimuth Response + Elevation Response ──────────
+        az_frame = ttk.Frame(root, padding=(4, 2, 2, 2))
+        az_frame.grid(row=1, column=0, sticky="nsew")
+        az_frame.grid_rowconfigure(0, weight=1)
+        az_frame.grid_columnconfigure(0, weight=1)
 
-        # Array Evaluation (Tkinter, replaces stats_ax)
-        self._build_evaluation_panel(right_frame)
+        el_frame = ttk.Frame(root, padding=(2, 2, 4, 2))
+        el_frame.grid(row=1, column=1, sticky="nsew")
+        el_frame.grid_rowconfigure(0, weight=1)
+        el_frame.grid_columnconfigure(0, weight=1)
 
-        # Mode / Frequency / Steering info bar (Tkinter, replaces psf_info_ax)
-        info_bar = ttk.Frame(right_frame)
-        info_bar.grid(row=1, column=0, sticky="ew", pady=(4, 2))
-        self.mode_info_label = ttk.Label(
-            info_bar,
-            text="",
-            font=("Segoe UI", 9, "bold"),
-        )
-        self.mode_info_label.pack(side=tk.LEFT, padx=(2, 0))
-        self.combined_info_label = ttk.Label(
-            info_bar,
-            text="",
-            font=("Segoe UI", 9),
-        )
-        self.combined_info_label.pack(side=tk.LEFT, padx=(8, 0))
-        response_switch = ttk.Frame(info_bar)
-        response_switch.pack(side=tk.RIGHT, padx=(8, 2))
-        ttk.Label(response_switch, text="Response:", font=("Segoe UI", 9)).pack(
-            side=tk.LEFT
-        )
-        ttk.Radiobutton(
-            response_switch,
-            text="Az",
-            value=RESPONSE_MODE_AZIMUTH,
-            variable=self.response_mode,
-            command=self.on_response_mode_changed,
-        ).pack(side=tk.LEFT, padx=(4, 0))
-        ttk.Radiobutton(
-            response_switch,
-            text="El",
-            value=RESPONSE_MODE_ELEVATION,
-            variable=self.response_mode,
-            command=self.on_response_mode_changed,
-        ).pack(side=tk.LEFT, padx=(4, 0))
+        # Azimuth Response figure
+        self.az_fig = Figure(figsize=(PSF_FIG_W, PSF_FIG_H), dpi=FIG_DPI)
+        self.az_ax = self.az_fig.add_subplot(111)
+        self.az_fig.subplots_adjust(top=0.82, left=0.13, right=0.97, bottom=0.18)
+        self._build_az_figure_controls()
+        self.az_canvas = FigureCanvasTkAgg(self.az_fig, master=az_frame)
+        az_widget = self.az_canvas.get_tk_widget()
+        az_widget.grid(row=0, column=0, sticky="nsew")
 
-        # PSF figure (Front Radar Response)
-        self.psf_fig = Figure(figsize=(PSF_FIG_W, PSF_FIG_H), dpi=FIG_DPI)
-        self.psf_ax = self.psf_fig.add_subplot(111)
-        self.psf_fig.subplots_adjust(top=0.82, left=0.13, right=0.97, bottom=0.16)
-        self._build_psf_figure_controls()
-        self.psf_canvas = FigureCanvasTkAgg(self.psf_fig, master=right_frame)
-        psf_widget = self.psf_canvas.get_tk_widget()
-        psf_widget.grid(row=2, column=0, sticky="nsew")
+        # Elevation Response figure
+        self.el_fig = Figure(figsize=(PSF_FIG_W, PSF_FIG_H), dpi=FIG_DPI)
+        self.el_ax = self.el_fig.add_subplot(111)
+        self.el_fig.subplots_adjust(top=0.82, left=0.13, right=0.97, bottom=0.18)
+        self._build_el_figure_controls()
+        self.el_canvas = FigureCanvasTkAgg(self.el_fig, master=el_frame)
+        el_widget = self.el_canvas.get_tk_widget()
+        el_widget.grid(row=0, column=0, sticky="nsew")
 
-        # ── Bottom: Controls ──────────────────────────────────────
+        # ── Row 2: Controls ───────────────────────────────────────
         controls = ttk.Frame(root, padding=(8, 6))
-        controls.grid(row=1, column=0, columnspan=2, sticky="ew")
+        controls.grid(row=2, column=0, columnspan=3, sticky="ew")
 
         ttk.Button(
             controls,
@@ -631,8 +617,9 @@ class VirtualArrayGui:
         self.phys_canvas.mpl_connect("button_release_event", self.on_release)
         # Virtual array: hover only
         self.virt_canvas.mpl_connect("motion_notify_event", self.on_motion)
-        # PSF: hover only
-        self.psf_canvas.mpl_connect("motion_notify_event", self.on_motion)
+        # Az/El response: hover only
+        self.az_canvas.mpl_connect("motion_notify_event", self.on_motion)
+        self.el_canvas.mpl_connect("motion_notify_event", self.on_motion)
 
         self.root.bind("<Left>", self.on_arrow_key)
         self.root.bind("<Right>", self.on_arrow_key)
@@ -647,45 +634,54 @@ class VirtualArrayGui:
     def _build_evaluation_panel(self, parent: ttk.Frame) -> None:
         """Build the Array Evaluation card using Tkinter native widgets."""
         self.eval_frame = ttk.LabelFrame(
-            parent, text="Array Evaluation", padding=(8, 6)
+            parent, text="Array Evaluation", padding=(4, 4)
         )
-        self.eval_frame.grid(row=0, column=0, sticky="ew", pady=(0, 4))
+        self.eval_frame.grid(row=0, column=0, sticky="nsew")
 
         # Header row: application + frequency
         header = ttk.Frame(self.eval_frame)
-        header.pack(fill=tk.X, pady=(0, 6))
+        header.pack(fill=tk.X, pady=(0, 2))
         self.eval_app_label = ttk.Label(
-            header, text="Application: Front Radar", font=("Consolas", 11)
+            header, text="Front Radar", font=("Consolas", 9)
         )
         self.eval_app_label.pack(side=tk.LEFT)
         self.eval_freq_label = ttk.Label(
-            header, text=f"Frequency: {DEFAULT_FREQUENCY_MODE}", font=("Consolas", 11)
+            header, text=DEFAULT_FREQUENCY_MODE, font=("Consolas", 9)
         )
         self.eval_freq_label.pack(side=tk.RIGHT)
 
         # Status badge row
         badge_row = ttk.Frame(self.eval_frame)
-        badge_row.pack(fill=tk.X, pady=(0, 6))
+        badge_row.pack(fill=tk.X, pady=(0, 2))
         self.status_canvas = tk.Canvas(
-            badge_row, width=18, height=18, highlightthickness=0, bg="#e8e8e8"
+            badge_row, width=14, height=14, highlightthickness=0,
         )
-        self.status_canvas.pack(side=tk.LEFT, padx=(0, 6))
+        self.status_canvas.pack(side=tk.LEFT, padx=(0, 4))
         self.status_dot = self.status_canvas.create_oval(
-            2, 2, 16, 16, fill="#2e7d32", outline=""
+            1, 1, 13, 13, fill="#2e7d32", outline=""
         )
         self.status_text = ttk.Label(
             badge_row, text="Az Good", font=("Segoe UI", 12, "bold")
         )
         self.status_text.pack(side=tk.LEFT)
 
-        # PRIMARY / SECONDARY columns
-        cols_frame = ttk.Frame(self.eval_frame)
-        cols_frame.pack(fill=tk.X, pady=(0, 4))
+        # Mode / Freq / Steering info (integrated from info bar)
+        self.mode_info_label = ttk.Label(
+            self.eval_frame,
+            text="",
+            font=("Segoe UI", 10),
+        )
+        self.mode_info_label.pack(fill=tk.X, pady=(0, 1))
+        self.combined_info_label = ttk.Label(
+            self.eval_frame,
+            text="",
+            font=("Segoe UI", 10),
+        )
+        self.combined_info_label.pack(fill=tk.X, pady=(0, 3))
 
-        primary_frame = ttk.LabelFrame(cols_frame, text="PRIMARY", padding=(6, 4))
-        primary_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 4))
-        secondary_frame = ttk.LabelFrame(cols_frame, text="SECONDARY", padding=(6, 4))
-        secondary_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # PRIMARY section (top)
+        primary_frame = ttk.LabelFrame(self.eval_frame, text="PRIMARY", padding=(4, 2))
+        primary_frame.pack(fill=tk.X, pady=(0, 3))
 
         # Pre-create all label widgets
         primary_labels = [
@@ -703,24 +699,34 @@ class VirtualArrayGui:
 
         for i, key in enumerate(primary_labels):
             ttk.Label(
-                primary_frame, text=key, font=("Consolas", 11)
-            ).grid(row=i, column=0, sticky="w", padx=(0, 8))
-            val = ttk.Label(primary_frame, text="", font=("Consolas", 11), anchor="e")
-            val.grid(row=i, column=1, sticky="e")
+                primary_frame, text=key, font=("Consolas", 9)
+            ).grid(row=i, column=0, sticky="w", padx=(0, 4))
+            ttk.Separator(primary_frame, orient="vertical").grid(
+                row=i, column=1, sticky="ns", padx=2
+            )
+            val = ttk.Label(primary_frame, text="", font=("Consolas", 9), anchor="e")
+            val.grid(row=i, column=2, sticky="e")
             self.primary_value_labels[key] = val
+
+        # SECONDARY section (below primary)
+        secondary_frame = ttk.LabelFrame(self.eval_frame, text="SECONDARY", padding=(4, 2))
+        secondary_frame.pack(fill=tk.X, pady=(0, 3))
 
         for i, key in enumerate(secondary_labels):
             ttk.Label(
-                secondary_frame, text=key, font=("Consolas", 11)
-            ).grid(row=i, column=0, sticky="w", padx=(0, 8))
-            val = ttk.Label(secondary_frame, text="", font=("Consolas", 11), anchor="e")
-            val.grid(row=i, column=1, sticky="e")
+                secondary_frame, text=key, font=("Consolas", 9)
+            ).grid(row=i, column=0, sticky="w", padx=(0, 4))
+            ttk.Separator(secondary_frame, orient="vertical").grid(
+                row=i, column=1, sticky="ns", padx=2
+            )
+            val = ttk.Label(secondary_frame, text="", font=("Consolas", 9), anchor="e")
+            val.grid(row=i, column=2, sticky="e")
             self.secondary_value_labels[key] = val
 
         # NOTES section
         self.notes_frame = ttk.Frame(self.eval_frame)
         self.notes_frame.pack(fill=tk.X, pady=(2, 0))
-        ttk.Label(self.notes_frame, text="NOTES:", font=("Consolas", 11)).pack(
+        ttk.Label(self.notes_frame, text="NOTES:", font=("Consolas", 9)).pack(
             side=tk.LEFT
         )
         self.notes_items_frame = ttk.Frame(self.notes_frame)
@@ -778,14 +784,19 @@ class VirtualArrayGui:
         # NOTES
         self._update_notes_panel(self._notes_parts(metrics))
 
-        # Mode / Freq / Steering info bar
+        # Mode / Freq / Steering info — multi-line
         self.mode_info_label.configure(
-            text=f"Mode: Front Radar  |  Frequency: {self.frequency_mode.get()}  |  Steering: Az = 0°, El = 0°"
+            text=(
+                f"Mode: Front Radar\n"
+                f"Frequency: {self.frequency_mode.get()}\n"
+                f"Steering: Az=0°, El=0°"
+            )
         )
         self.combined_info_label.configure(
             text=(
-                f"Az PSL: {metrics.azimuth_psl_db:.2f} dB    "
-                f"2D worst PSL: {metrics.psl_db:.2f} dB    "
+                f"Az PSL: {metrics.azimuth_psl_db:.2f} dB\n"
+                f"El PSL: {metrics.elevation_psl_db:.2f} dB\n"
+                f"2D worst PSL: {metrics.psl_db:.2f} dB\n"
                 f"El ambiguity: {metrics.elevation_ambiguity_level}"
             )
         )
@@ -920,13 +931,13 @@ class VirtualArrayGui:
             self.physical_buttons.append(button)
             self.physical_button_callbacks.append(cid)
 
-    def _build_psf_figure_controls(self) -> None:
+    def _build_az_figure_controls(self) -> None:
         button_specs = (
             ("Load Pattern", [0.62, 0.84, 0.155, 0.055], self.import_element_pattern),
             ("Clear Pattern", [0.785, 0.84, 0.17, 0.055], self.clear_element_pattern),
         )
         for label, rect, callback in button_specs:
-            button_ax = self.psf_fig.add_axes(rect)
+            button_ax = self.az_fig.add_axes(rect)
             button = MplButton(
                 button_ax,
                 label,
@@ -937,8 +948,28 @@ class VirtualArrayGui:
             button.label.set_horizontalalignment("center")
             button.label.set_verticalalignment("center")
             cid = button.on_clicked(lambda _event, action=callback: action())
-            self.psf_buttons.append(button)
-            self.psf_button_callbacks.append(cid)
+            self.az_buttons.append(button)
+            self.az_button_callbacks.append(cid)
+
+    def _build_el_figure_controls(self) -> None:
+        button_specs = (
+            ("Load Pattern", [0.62, 0.84, 0.155, 0.055], self.import_element_pattern),
+            ("Clear Pattern", [0.785, 0.84, 0.17, 0.055], self.clear_element_pattern),
+        )
+        for label, rect, callback in button_specs:
+            button_ax = self.el_fig.add_axes(rect)
+            button = MplButton(
+                button_ax,
+                label,
+                color="#f7f7f7",
+                hovercolor="#e6eef8",
+            )
+            button.label.set_fontsize(8.5)
+            button.label.set_horizontalalignment("center")
+            button.label.set_verticalalignment("center")
+            cid = button.on_clicked(lambda _event, action=callback: action())
+            self.el_buttons.append(button)
+            self.el_button_callbacks.append(cid)
 
     def delete_selected_element(self) -> None:
         if self.selected_element is None:
@@ -969,11 +1000,6 @@ class VirtualArrayGui:
     # ── Button handlers ───────────────────────────────────────────────
 
     def on_frequency_changed(self, _event=None) -> None:  # noqa: ANN001
-        self.generate_virtual_array()
-
-    def on_response_mode_changed(self) -> None:
-        if self.response_mode.get() not in RESPONSE_MODES:
-            self.response_mode.set(RESPONSE_MODE_AZIMUTH)
         self.generate_virtual_array()
 
     def import_element_pattern(self) -> None:
@@ -1342,8 +1368,9 @@ class VirtualArrayGui:
 
         self._draw_physical_array()
         self._draw_virtual_array(unique, counts, pair_map, metrics)
-        self._update_evaluation_panel(metrics)  # Tkinter widgets
-        self._draw_psf(af_db, azimuths, elevations, metrics)
+        self._update_evaluation_panel(metrics)
+        self._draw_az_response(af_db, azimuths, elevations, metrics)
+        self._draw_el_response(af_db, azimuths, elevations, metrics)
 
         self.status.set(
             f"Virtual {metrics.unique_count}/{metrics.virtual_count} | "
@@ -1351,11 +1378,13 @@ class VirtualArrayGui:
             f"Y {_format_mm(self.aperture_mm(metrics.y_aperture))} | "
             f"Az Res {_format_float(metrics.azimuth_resolution, '°')} | "
             f"Az PSL {metrics.azimuth_psl_db:.2f} dB | "
+            f"El PSL {metrics.elevation_psl_db:.2f} dB | "
             f"Azimuth {metrics.front_radar_status} | El Ambiguity {metrics.elevation_ambiguity_level}"
         )
         self.phys_canvas.draw()
         self.virt_canvas.draw()
-        self.psf_canvas.draw()
+        self.az_canvas.draw()
+        self.el_canvas.draw()
 
     def _build_virtual_pair_map(
         self, array: AntennaArray
@@ -1570,7 +1599,7 @@ class VirtualArrayGui:
                 f"Multiplicity: {len(pairs)}\n{pair_text}"
             )
 
-        self.hover_annotation = self.virtual_ax.annotate(
+        self.virtual_hover_annotation = self.virtual_ax.annotate(
             "",
             xy=(0, 0),
             xytext=(12, 12),
@@ -1583,7 +1612,7 @@ class VirtualArrayGui:
             arrowprops={"arrowstyle": "->", "color": "#555555"},
             fontsize=8,
         )
-        self.hover_annotation.set_visible(False)
+        self.virtual_hover_annotation.set_visible(False)
 
         self.virtual_ax.set_title("Virtual Array", fontsize=TITLE_SIZE, pad=8, loc="left")
         self.virtual_ax.set_xlabel("x (λ)")
@@ -1650,17 +1679,14 @@ class VirtualArrayGui:
         if counts.max() > 1:
             self.virtual_ax.legend(loc="best", fontsize=8)
 
-    def _draw_psf(
+    def _draw_response_common(
         self,
-        af_db: np.ndarray,
-        azimuths: np.ndarray,
-        elevations: np.ndarray,
+        ax,
+        response_cut: ResponseCut,
         metrics: ArrayMetrics,
     ) -> None:
-        self.psf_ax.clear()
-        response_cut = _response_cut_for_mode(
-            af_db, azimuths, elevations, self.response_mode.get()
-        )
+        """Shared drawing logic for both Az and El response figures."""
+        ax.clear()
         response_db = response_cut.gains_db
         response_angles = response_cut.angles
         sidelobe_index, sidelobe_is_peak = _response_sidelobe_marker(
@@ -1671,7 +1697,7 @@ class VirtualArrayGui:
         sidelobe_label = "Max sidelobe" if sidelobe_is_peak else "Guard-edge max"
         psf_ylim = (-40.0, 0.0)
 
-        self.psf_ax.plot(response_angles, response_db, color="#2f6fbb", linewidth=1.8)
+        ax.plot(response_angles, response_db, color="#2f6fbb", linewidth=1.8)
         show_legend = False
         if self.element_pattern is not None:
             if response_cut.mode == RESPONSE_MODE_ELEVATION:
@@ -1687,7 +1713,7 @@ class VirtualArrayGui:
                 psf_ylim[0],
                 psf_ylim[1],
             )
-            self.psf_ax.plot(
+            ax.plot(
                 response_angles,
                 pattern_cut,
                 color="#607d8b",
@@ -1697,19 +1723,19 @@ class VirtualArrayGui:
                 label=response_cut.pattern_label,
             )
             show_legend = True
-        self.psf_ax.set_xlim(response_cut.fov)
-        self.psf_ax.set_ylim(psf_ylim)
-        self.psf_ax.axvspan(
+        ax.set_xlim(response_cut.fov)
+        ax.set_ylim(psf_ylim)
+        ax.axvspan(
             -response_cut.mainlobe_guard,
             response_cut.mainlobe_guard,
             color="#bbbbbb",
             alpha=0.38,
         )
-        self.psf_ax.scatter(
+        ax.scatter(
             [0.0], [0.0], marker="+", s=80, color="#111111", linewidths=2.0, zorder=4
         )
         # Max sidelobe marker
-        self.psf_ax.scatter(
+        ax.scatter(
             [sidelobe_angle],
             [sidelobe_gain],
             marker="x",
@@ -1762,14 +1788,14 @@ class VirtualArrayGui:
         annotation_x, annotation_y, annotation_ha = annotation_position(
             sidelobe_angle, sidelobe_gain
         )
-        self.psf_ax.annotate(
+        ax.annotate(
             (
                 f"{sidelobe_label}\n{response_cut.label} = {sidelobe_angle:.1f}°\n"
                 f"Gain = {sidelobe_gain:.2f} dB"
             ),
             xy=(sidelobe_angle, sidelobe_gain),
             xytext=(annotation_x, annotation_y),
-            textcoords=self.psf_ax.transAxes,
+            textcoords=ax.transAxes,
             ha=annotation_ha,
             va="center",
             fontsize=7.5,
@@ -1784,8 +1810,7 @@ class VirtualArrayGui:
             annotation_clip=True,
         )
 
-        # Grating lobe marker
-        grating_same_as_max = False
+        # Grating lobe marker (Az only)
         if (
             response_cut.mode == RESPONSE_MODE_AZIMUTH
             and metrics.azimuth_grating_lobe_angle is not None
@@ -1798,7 +1823,7 @@ class VirtualArrayGui:
                 <= float(np.diff(response_angles).mean()) / 2.0
                 and abs(grating_gain - sidelobe_gain) <= 0.05
             )
-            self.psf_ax.scatter(
+            ax.scatter(
                 [grating_angle],
                 [grating_gain],
                 marker="^",
@@ -1819,11 +1844,11 @@ class VirtualArrayGui:
                 grating_x, grating_y, grating_ha = annotation_position(
                     grating_angle, grating_gain
                 )
-                self.psf_ax.annotate(
+                ax.annotate(
                     f"Grating lobe\nAz = {grating_angle:.1f}°\nGain = {grating_gain:.2f} dB",
                     xy=(grating_angle, grating_gain),
                     xytext=(grating_x, grating_y),
-                    textcoords=self.psf_ax.transAxes,
+                    textcoords=ax.transAxes,
                     ha=grating_ha,
                     va="center",
                     fontsize=7.5,
@@ -1838,15 +1863,15 @@ class VirtualArrayGui:
                     annotation_clip=True,
                 )
             else:
-                self.psf_ax.legend(loc="lower right", fontsize=7, framealpha=0.72)
+                ax.legend(loc="lower right", fontsize=7, framealpha=0.72)
                 show_legend = False
 
-        self.psf_ax.set_title("Front Radar Response", pad=6, y=1.02, loc="left")
-        self.psf_ax.set_xlabel(response_cut.x_label)
-        self.psf_ax.set_ylabel("Normalized gain (dB)", labelpad=2)
-        self.psf_ax.grid(True, alpha=0.3)
+        ax.set_title(f"Front Radar Response ({response_cut.label})", pad=6, y=1.02, loc="left")
+        ax.set_xlabel(response_cut.x_label)
+        ax.set_ylabel("Normalized gain (dB)", labelpad=2)
+        ax.grid(True, alpha=0.3)
         if show_legend:
-            self.psf_ax.legend(loc="lower right", fontsize=7, framealpha=0.72)
+            ax.legend(loc="lower right", fontsize=7, framealpha=0.72)
 
         response_psl_db = (
             metrics.elevation_psl_db
@@ -1854,11 +1879,11 @@ class VirtualArrayGui:
             else metrics.azimuth_psl_db
         )
         # PSL badge in lower-left corner
-        self.psf_ax.text(
+        ax.text(
             0.02,
             0.08,
             f"{response_cut.label} PSL: {response_psl_db:.2f} dB",
-            transform=self.psf_ax.transAxes,
+            transform=ax.transAxes,
             ha="left",
             va="bottom",
             fontsize=9,
@@ -1870,14 +1895,22 @@ class VirtualArrayGui:
             },
         )
 
-        # Hover data
-        self.psf_hover_db = response_db
-        self.psf_hover_cut_angles = response_angles
-        self.psf_hover_cut_label = response_cut.label
-        self.psf_hover_azimuths = azimuths
-        self.psf_hover_elevations = elevations
+        return response_db, response_angles
 
-        self.psf_hover_annotation = self.psf_ax.annotate(
+    def _draw_az_response(
+        self,
+        af_db: np.ndarray,
+        azimuths: np.ndarray,
+        elevations: np.ndarray,
+        metrics: ArrayMetrics,
+    ) -> None:
+        response_cut = _response_cut_for_mode(af_db, azimuths, elevations, RESPONSE_MODE_AZIMUTH)
+        response_db, response_angles = self._draw_response_common(self.az_ax, response_cut, metrics)
+
+        # Hover data
+        self.az_hover_db = response_db
+        self.az_hover_angles = response_angles
+        self.az_hover_annotation = self.az_ax.annotate(
             "",
             xy=(0, 0),
             xytext=(12, 12),
@@ -1891,7 +1924,36 @@ class VirtualArrayGui:
             arrowprops={"arrowstyle": "->", "color": "#555555"},
             fontsize=8,
         )
-        self.psf_hover_annotation.set_visible(False)
+        self.az_hover_annotation.set_visible(False)
+
+    def _draw_el_response(
+        self,
+        af_db: np.ndarray,
+        azimuths: np.ndarray,
+        elevations: np.ndarray,
+        metrics: ArrayMetrics,
+    ) -> None:
+        response_cut = _response_cut_for_mode(af_db, azimuths, elevations, RESPONSE_MODE_ELEVATION)
+        response_db, response_angles = self._draw_response_common(self.el_ax, response_cut, metrics)
+
+        # Hover data
+        self.el_hover_db = response_db
+        self.el_hover_angles = response_angles
+        self.el_hover_annotation = self.el_ax.annotate(
+            "",
+            xy=(0, 0),
+            xytext=(12, 12),
+            textcoords="offset points",
+            bbox={
+                "boxstyle": "round,pad=0.32",
+                "facecolor": "#ffffff",
+                "edgecolor": "#aaaaaa",
+                "alpha": 0.92,
+            },
+            arrowprops={"arrowstyle": "->", "color": "#555555"},
+            fontsize=8,
+        )
+        self.el_hover_annotation.set_visible(False)
 
     # ── Notes helpers ─────────────────────────────────────────────────
 
@@ -1919,7 +1981,7 @@ class VirtualArrayGui:
             label = ttk.Label(
                 self.notes_items_frame,
                 text=text,
-                font=("Consolas", 11),
+                font=("Consolas", 9),
                 foreground=color,
             )
             label.pack(side=tk.LEFT, padx=(8 if index else 6, 0))
@@ -1956,10 +2018,6 @@ class VirtualArrayGui:
             if isinstance(frequency_mode, str) and frequency_mode in FREQUENCY_MODES_MM:
                 self.frequency_mode.set(frequency_mode)
 
-            response_mode = state.get("response_mode")
-            if isinstance(response_mode, str) and response_mode in RESPONSE_MODES:
-                self.response_mode.set(response_mode)
-
             layout = state.get("layout")
             if layout is not None:
                 self.elements = self._elements_from_layout_config(layout)
@@ -1973,7 +2031,6 @@ class VirtualArrayGui:
             "last_layout_dir": str(self.last_layout_dir),
             "last_pattern_dir": str(self.last_pattern_dir),
             "frequency_mode": self.frequency_mode.get(),
-            "response_mode": self.response_mode.get(),
             "layout": self._layout_coordinates_config(),
         }
         save_state(state)
@@ -2046,7 +2103,8 @@ class VirtualArrayGui:
 
         self._update_physical_hover(event)
         self._update_virtual_hover(event)
-        self._update_psf_hover(event)
+        self._update_az_hover(event)
+        self._update_el_hover(event)
 
     def on_release(self, event) -> None:  # noqa: ANN001
         if self.dragging is not None:
@@ -2105,7 +2163,7 @@ class VirtualArrayGui:
     # ── Hover logic ───────────────────────────────────────────────────
 
     def _update_virtual_hover(self, event) -> None:  # noqa: ANN001
-        if self.hover_annotation is None:
+        if self.virtual_hover_annotation is None:
             return
         if (
             event.inaxes != self.virtual_ax
@@ -2113,8 +2171,8 @@ class VirtualArrayGui:
             or event.ydata is None
             or len(self.virtual_hover_xy) == 0
         ):
-            if self.hover_annotation.get_visible():
-                self.hover_annotation.set_visible(False)
+            if self.virtual_hover_annotation.get_visible():
+                self.virtual_hover_annotation.set_visible(False)
                 self.virt_canvas.draw_idle()
             return
 
@@ -2126,15 +2184,15 @@ class VirtualArrayGui:
         )
         index = int(np.argmin(normalized_distance))
         if normalized_distance[index] > 0.018:
-            if self.hover_annotation.get_visible():
-                self.hover_annotation.set_visible(False)
+            if self.virtual_hover_annotation.get_visible():
+                self.virtual_hover_annotation.set_visible(False)
                 self.virt_canvas.draw_idle()
             return
 
         xy = self.virtual_hover_xy[index]
-        self.hover_annotation.xy = (xy[0], xy[1])
-        self.hover_annotation.set_text(self.virtual_hover_text[index])
-        self.hover_annotation.set_visible(True)
+        self.virtual_hover_annotation.xy = (xy[0], xy[1])
+        self.virtual_hover_annotation.set_text(self.virtual_hover_text[index])
+        self.virtual_hover_annotation.set_visible(True)
         self.virt_canvas.draw_idle()
 
     def _update_physical_hover(self, event) -> None:  # noqa: ANN001
@@ -2172,42 +2230,57 @@ class VirtualArrayGui:
         self.physical_hover_annotation.set_visible(True)
         self.phys_canvas.draw_idle()
 
-    def _update_psf_hover(self, event) -> None:  # noqa: ANN001
-        if self.psf_hover_annotation is None:
+    def _update_az_hover(self, event) -> None:  # noqa: ANN001
+        if self.az_hover_annotation is None:
             return
         if (
-            event.inaxes != self.psf_ax
+            event.inaxes != self.az_ax
             or event.xdata is None
             or event.ydata is None
-            or self.psf_hover_db.size == 0
+            or self.az_hover_db.size == 0
         ):
-            if self.psf_hover_annotation.get_visible():
-                self.psf_hover_annotation.set_visible(False)
-                self.psf_canvas.draw_idle()
+            if self.az_hover_annotation.get_visible():
+                self.az_hover_annotation.set_visible(False)
+                self.az_canvas.draw_idle()
             return
 
-        if self.psf_hover_db.ndim == 1:
-            angle_index = int(
-                np.argmin(np.abs(self.psf_hover_cut_angles - event.xdata))
-            )
-            angle = float(self.psf_hover_cut_angles[angle_index])
-            gain = float(self.psf_hover_db[angle_index])
-            self.psf_hover_annotation.xy = (angle, gain)
-            self.psf_hover_annotation.set_text(
-                f"{self.psf_hover_cut_label} = {angle:.1f}°\nGain = {gain:.2f} dB"
-            )
-        else:
-            az_index = int(np.argmin(np.abs(self.psf_hover_azimuths - event.xdata)))
-            az = float(self.psf_hover_azimuths[az_index])
-            el_index = int(np.argmin(np.abs(self.psf_hover_elevations - event.ydata)))
-            el = float(self.psf_hover_elevations[el_index])
-            gain = float(self.psf_hover_db[el_index, az_index])
-            self.psf_hover_annotation.xy = (az, el)
-            self.psf_hover_annotation.set_text(
-                f"Az = {az:.1f}°\nEl = {el:.1f}°\nGain = {gain:.2f} dB"
-            )
-        self.psf_hover_annotation.set_visible(True)
-        self.psf_canvas.draw_idle()
+        angle_index = int(
+            np.argmin(np.abs(self.az_hover_angles - event.xdata))
+        )
+        angle = float(self.az_hover_angles[angle_index])
+        gain = float(self.az_hover_db[angle_index])
+        self.az_hover_annotation.xy = (angle, gain)
+        self.az_hover_annotation.set_text(
+            f"Az = {angle:.1f}°\nGain = {gain:.2f} dB"
+        )
+        self.az_hover_annotation.set_visible(True)
+        self.az_canvas.draw_idle()
+
+    def _update_el_hover(self, event) -> None:  # noqa: ANN001
+        if self.el_hover_annotation is None:
+            return
+        if (
+            event.inaxes != self.el_ax
+            or event.xdata is None
+            or event.ydata is None
+            or self.el_hover_db.size == 0
+        ):
+            if self.el_hover_annotation.get_visible():
+                self.el_hover_annotation.set_visible(False)
+                self.el_canvas.draw_idle()
+            return
+
+        angle_index = int(
+            np.argmin(np.abs(self.el_hover_angles - event.xdata))
+        )
+        angle = float(self.el_hover_angles[angle_index])
+        gain = float(self.el_hover_db[angle_index])
+        self.el_hover_annotation.xy = (angle, gain)
+        self.el_hover_annotation.set_text(
+            f"El = {angle:.1f}°\nGain = {gain:.2f} dB"
+        )
+        self.el_hover_annotation.set_visible(True)
+        self.el_canvas.draw_idle()
 
     def _nearest_element(self, x: float, y: float) -> EditableElement | None:
         distances = [

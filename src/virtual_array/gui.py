@@ -55,7 +55,6 @@ MAX_RX_COUNT = 16
 TITLE_SIZE = 13
 RESPONSE_MODE_AZIMUTH = "az"
 RESPONSE_MODE_ELEVATION = "el"
-RESPONSE_MODES = {RESPONSE_MODE_AZIMUTH, RESPONSE_MODE_ELEVATION}
 RESPONSE_SIDELOBE_PROMINENCE_DB = 0.5
 RESPONSE_SIDELOBE_GUARD_CLEARANCE_DB = 0.5
 
@@ -83,8 +82,8 @@ PHYS_FIG_W = 6.8
 PHYS_FIG_H = 3.2
 VIRT_FIG_W = 6.8
 VIRT_FIG_H = 3.2
-PSF_FIG_W = 6.8
-PSF_FIG_H = 2.8
+RESPONSE_FIG_W = 6.8
+RESPONSE_FIG_H = 2.8
 
 PSL_COLORS = {
     "Good": "#2e7d32",
@@ -99,6 +98,37 @@ NOTE_STYLES = {
     "ambiguity high": ("🚨", "#c62828"),
     "ambiguity medium": ("⚠️", "#b58900"),
     "none": ("✅", "#2e7d32"),
+}
+
+# ── Theme ─────────────────────────────────────────────────────────────
+THEME = {
+    # Base
+    "bg": "#f5f3f0",
+    "card_bg": "#ffffff",
+    "card_border": "#e2dfdb",
+    "status_bar_bg": "#eae8e4",
+    # Accent
+    "accent": "#3b6e8f",
+    "accent_hover": "#2d5a78",
+    "accent_light": "#dce8f0",
+    # Text
+    "text_primary": "#2c2c2c",
+    "text_secondary": "#6b6b6b",
+    "text_muted": "#999999",
+    # Typography
+    "font_family": "Segoe UI",
+    "font_family_mono": "Cascadia Code",
+    "font_size_sm": 9,
+    "font_size_base": 10,
+    "font_size_lg": 13,
+    # Matplotlib
+    "fig_facecolor": "#fafaf8",
+    "grid_color": "#c0bdb8",
+    "grid_alpha": 0.15,
+    # MplButton
+    "mpl_btn_bg": "#f0eeeb",
+    "mpl_btn_hover": "#dce8f0",
+    "mpl_btn_text": "#3b6e8f",
 }
 
 
@@ -122,6 +152,30 @@ class ResponseCut:
     mainlobe_guard: float
     x_label: str
     pattern_label: str
+
+
+@dataclass
+class ResponseChart:
+    """Encapsulates per-axis response chart state (fig, axes, canvas, hover, buttons)."""
+
+    fig: Figure
+    ax: any  # matplotlib Axes
+    canvas: FigureCanvasTkAgg
+    hover_annotation: any = None  # matplotlib Annotation
+    hover_db: np.ndarray = None
+    hover_angles: np.ndarray = None
+    buttons: list = None
+    button_callbacks: list = None
+
+    def __post_init__(self) -> None:
+        if self.hover_db is None:
+            self.hover_db = np.empty(0, dtype=float)
+        if self.hover_angles is None:
+            self.hover_angles = np.empty(0, dtype=float)
+        if self.buttons is None:
+            self.buttons = []
+        if self.button_callbacks is None:
+            self.button_callbacks = []
 
 
 def _response_cut_for_mode(
@@ -460,7 +514,7 @@ class VirtualArrayGui:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title(f"MIMO Array Visualizer v{APP_VERSION}")
-        self.root.configure(bg="#e8e8e8")
+        self.root.configure(bg=THEME["bg"])
 
         # Data state
         self.elements = self._build_elements()
@@ -472,20 +526,10 @@ class VirtualArrayGui:
         # Hover state
         self.physical_hover_annotation = None
         self.virtual_hover_annotation = None
-        self.az_hover_annotation = None
-        self.el_hover_annotation = None
         self.virtual_hover_xy = np.empty((0, 2), dtype=float)
         self.virtual_hover_text: list[str] = []
-        self.az_hover_db = np.empty(0, dtype=float)
-        self.az_hover_angles = np.empty(0, dtype=float)
-        self.el_hover_db = np.empty(0, dtype=float)
-        self.el_hover_angles = np.empty(0, dtype=float)
         self.physical_buttons: list[MplButton] = []
         self.physical_button_callbacks: list[int] = []
-        self.az_buttons: list[MplButton] = []
-        self.az_button_callbacks: list[int] = []
-        self.el_buttons: list[MplButton] = []
-        self.el_button_callbacks: list[int] = []
 
         self.element_pattern: ElementPattern | None = None
         self.frequency_mode = tk.StringVar(value=DEFAULT_FREQUENCY_MODE)
@@ -505,22 +549,63 @@ class VirtualArrayGui:
         root.grid_columnconfigure(1, weight=1)
         root.grid_columnconfigure(2, weight=0)  # Evaluation panel
         style = ttk.Style(self.root)
-        style.configure("Large.TButton", font=("Segoe UI", 10), padding=(8, 5))
-        style.configure("Status.TLabel", font=("Segoe UI", 10))
+        style.theme_use("clam")
+
+        # ── Refined ttk styles ─────────────────────────────────────
+        _f = THEME["font_family"]
+        _fm = THEME["font_family_mono"]
+
+        style.configure("TFrame", background=THEME["bg"])
+        style.configure("Card.TFrame", background=THEME["card_bg"])
+        style.configure("TLabel", background=THEME["bg"], foreground=THEME["text_primary"],
+                         font=(_f, THEME["font_size_base"]))
+        style.configure("Status.TLabel", background=THEME["status_bar_bg"],
+                         foreground=THEME["text_secondary"], font=(_f, THEME["font_size_sm"]))
+        style.configure("Muted.TLabel", background=THEME["status_bar_bg"],
+                         foreground=THEME["text_muted"], font=(_f, THEME["font_size_sm"]))
+        style.configure("Card.TLabel", background=THEME["card_bg"],
+                         foreground=THEME["text_primary"], font=(_f, THEME["font_size_base"]))
+        style.configure("CardMono.TLabel", background=THEME["card_bg"],
+                         foreground=THEME["text_primary"], font=(_fm, THEME["font_size_base"]))
+        style.configure("CardHeader.TLabel", background=THEME["card_bg"],
+                         foreground=THEME["text_primary"], font=(_fm, THEME["font_size_base"]))
+        style.configure("SectionTitle.TLabel", background=THEME["card_bg"],
+                         foreground=THEME["text_secondary"], font=(_f, THEME["font_size_sm"]))
+        style.configure("Badge.TLabel", background=THEME["card_bg"],
+                         foreground=THEME["text_primary"], font=(_f, THEME["font_size_lg"], "bold"))
+
+        style.configure("Accent.TButton", font=(_f, THEME["font_size_base"], "bold"),
+                         padding=(12, 6), background=THEME["accent"], foreground="#ffffff")
+        style.map("Accent.TButton",
+                   background=[("active", THEME["accent_hover"]), ("pressed", THEME["accent_hover"])],
+                   foreground=[("active", "#ffffff"), ("pressed", "#ffffff")])
+        style.configure("Large.TButton", font=(_f, THEME["font_size_base"]),
+                         padding=(10, 5), background=THEME["card_bg"])
+        style.map("Large.TButton",
+                   background=[("active", THEME["accent_light"]), ("pressed", THEME["accent_light"])])
+
+        style.configure("TLabelframe", background=THEME["card_bg"],
+                         foreground=THEME["text_secondary"], font=(_f, THEME["font_size_sm"], "bold"))
+        style.configure("TLabelframe.Label", background=THEME["card_bg"],
+                         foreground=THEME["text_secondary"], font=(_f, THEME["font_size_sm"], "bold"))
+
+        style.configure("TCombobox", font=(_f, THEME["font_size_base"]))
+        style.configure("Status.TFrame", background=THEME["status_bar_bg"])
+        style.configure("StatusInner.TFrame", background=THEME["status_bar_bg"])
 
         # ── Row 0: Physical Array + Virtual Array ─────────────────
-        left_frame = ttk.Frame(root, padding=(4, 4, 2, 2))
+        left_frame = ttk.Frame(root, padding=(6, 6, 3, 3))
         left_frame.grid(row=0, column=0, sticky="nsew")
         left_frame.grid_rowconfigure(0, weight=1)
         left_frame.grid_columnconfigure(0, weight=1)
 
-        right_frame = ttk.Frame(root, padding=(2, 4, 2, 2))
+        right_frame = ttk.Frame(root, padding=(3, 6, 3, 3))
         right_frame.grid(row=0, column=1, sticky="nsew")
         right_frame.grid_rowconfigure(0, weight=1)
         right_frame.grid_columnconfigure(0, weight=1)
 
         # ── Column 2: Array Evaluation (narrow) ──────────────────
-        eval_info_frame = ttk.Frame(root, padding=(2, 4, 2, 2))
+        eval_info_frame = ttk.Frame(root, padding=(3, 6, 6, 3))
         eval_info_frame.grid(row=0, column=2, rowspan=2, sticky="nsew")
         eval_info_frame.grid_rowconfigure(0, weight=1)
         eval_info_frame.grid_columnconfigure(0, weight=1)
@@ -528,7 +613,9 @@ class VirtualArrayGui:
 
         # Physical Array figure
         self.phys_fig = Figure(figsize=(PHYS_FIG_W, PHYS_FIG_H), dpi=FIG_DPI)
+        self.phys_fig.set_facecolor(THEME["fig_facecolor"])
         self.physical_ax = self.phys_fig.add_subplot(111)
+        self.physical_ax.set_facecolor(THEME["fig_facecolor"])
         self.phys_fig.subplots_adjust(top=0.81, left=0.10, right=0.97, bottom=0.17)
         self._build_physical_figure_controls()
         self.phys_canvas = FigureCanvasTkAgg(self.phys_fig, master=left_frame)
@@ -537,59 +624,45 @@ class VirtualArrayGui:
 
         # Virtual Array figure
         self.virt_fig = Figure(figsize=(VIRT_FIG_W, VIRT_FIG_H), dpi=FIG_DPI)
+        self.virt_fig.set_facecolor(THEME["fig_facecolor"])
         self.virtual_ax = self.virt_fig.add_subplot(111)
+        self.virtual_ax.set_facecolor(THEME["fig_facecolor"])
         self.virt_canvas = FigureCanvasTkAgg(self.virt_fig, master=right_frame)
         virt_widget = self.virt_canvas.get_tk_widget()
         virt_widget.grid(row=0, column=0, sticky="nsew")
 
         # ── Row 1: Azimuth Response + Elevation Response ──────────
-        az_frame = ttk.Frame(root, padding=(4, 2, 2, 2))
-        az_frame.grid(row=1, column=0, sticky="nsew")
-        az_frame.grid_rowconfigure(0, weight=1)
-        az_frame.grid_columnconfigure(0, weight=1)
-
-        el_frame = ttk.Frame(root, padding=(2, 2, 4, 2))
-        el_frame.grid(row=1, column=1, sticky="nsew")
-        el_frame.grid_rowconfigure(0, weight=1)
-        el_frame.grid_columnconfigure(0, weight=1)
-
-        # Azimuth Response figure
-        self.az_fig = Figure(figsize=(PSF_FIG_W, PSF_FIG_H), dpi=FIG_DPI)
-        self.az_ax = self.az_fig.add_subplot(111)
-        self.az_fig.subplots_adjust(top=0.82, left=0.13, right=0.97, bottom=0.18)
-        self._build_az_figure_controls()
-        self.az_canvas = FigureCanvasTkAgg(self.az_fig, master=az_frame)
-        az_widget = self.az_canvas.get_tk_widget()
-        az_widget.grid(row=0, column=0, sticky="nsew")
-
-        # Elevation Response figure
-        self.el_fig = Figure(figsize=(PSF_FIG_W, PSF_FIG_H), dpi=FIG_DPI)
-        self.el_ax = self.el_fig.add_subplot(111)
-        self.el_fig.subplots_adjust(top=0.82, left=0.13, right=0.97, bottom=0.18)
-        self._build_el_figure_controls()
-        self.el_canvas = FigureCanvasTkAgg(self.el_fig, master=el_frame)
-        el_widget = self.el_canvas.get_tk_widget()
-        el_widget.grid(row=0, column=0, sticky="nsew")
+        self.az_chart = self._build_response_chart(
+            row=1, col=0, padding=(6, 3, 3, 6)
+        )
+        self.el_chart = self._build_response_chart(
+            row=1, col=1, padding=(3, 3, 6, 6)
+        )
 
         # ── Row 2: Controls ───────────────────────────────────────
-        controls = ttk.Frame(root, padding=(8, 6))
-        controls.grid(row=2, column=0, columnspan=3, sticky="ew")
+        controls_outer = ttk.Frame(root, style="Status.TFrame")
+        controls_outer.grid(row=2, column=0, columnspan=3, sticky="ew")
+        controls = ttk.Frame(controls_outer, style="Status.TFrame", padding=(10, 8))
+        controls.pack(fill=tk.X)
 
         ttk.Button(
             controls,
-            text="Import Layout",
+            text="📥 Import Layout",
             command=self.import_layout_config,
-            style="Large.TButton",
+            style="Accent.TButton",
         ).pack(side=tk.LEFT)
         ttk.Button(
             controls,
-            text="Export Layout",
+            text="📤 Export Layout",
             command=self.export_layout_config,
             style="Large.TButton",
-        ).pack(side=tk.LEFT, padx=(8, 0))
+        ).pack(side=tk.LEFT, padx=(6, 0))
+
+        ttk.Separator(controls, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=12)
+
         ttk.Label(
-            controls, text="Frequency Mode:", style="Status.TLabel"
-        ).pack(side=tk.LEFT, padx=(14, 4))
+            controls, text="Frequency:", style="Status.TLabel"
+        ).pack(side=tk.LEFT, padx=(0, 4))
         frequency_combo = ttk.Combobox(
             controls,
             textvariable=self.frequency_mode,
@@ -599,16 +672,19 @@ class VirtualArrayGui:
         )
         frequency_combo.pack(side=tk.LEFT)
         frequency_combo.bind("<<ComboboxSelected>>", self.on_frequency_changed)
+
+        ttk.Separator(controls, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=12)
+
         ttk.Label(
             controls,
             textvariable=self.pattern_status,
-            style="Status.TLabel",
-        ).pack(side=tk.LEFT, padx=(12, 0))
+            style="Muted.TLabel",
+        ).pack(side=tk.LEFT)
         ttk.Label(
             controls,
             textvariable=self.status,
             style="Status.TLabel",
-        ).pack(side=tk.LEFT, padx=14)
+        ).pack(side=tk.LEFT, padx=(12, 0))
 
         # ── Event bindings ────────────────────────────────────────
         # Physical array: press, motion, release (drag + hover)
@@ -618,8 +694,8 @@ class VirtualArrayGui:
         # Virtual array: hover only
         self.virt_canvas.mpl_connect("motion_notify_event", self.on_motion)
         # Az/El response: hover only
-        self.az_canvas.mpl_connect("motion_notify_event", self.on_motion)
-        self.el_canvas.mpl_connect("motion_notify_event", self.on_motion)
+        for chart in (self.az_chart, self.el_chart):
+            chart.canvas.mpl_connect("motion_notify_event", self.on_motion)
 
         self.root.bind("<Left>", self.on_arrow_key)
         self.root.bind("<Right>", self.on_arrow_key)
@@ -629,61 +705,120 @@ class VirtualArrayGui:
 
         self.generate_virtual_array()
 
+    # ── Response chart helpers ──────────────────────────────────────────
+
+    def _build_response_chart(
+        self, row: int, col: int, padding: tuple[int, int, int, int]
+    ) -> ResponseChart:
+        """Create a response chart (Az or El) and embed it in the grid."""
+        frame = ttk.Frame(self.root, padding=padding)
+        frame.grid(row=row, column=col, sticky="nsew")
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
+
+        fig = Figure(figsize=(RESPONSE_FIG_W, RESPONSE_FIG_H), dpi=FIG_DPI)
+        fig.set_facecolor(THEME["fig_facecolor"])
+        ax = fig.add_subplot(111)
+        ax.set_facecolor(THEME["fig_facecolor"])
+        fig.subplots_adjust(top=0.82, left=0.13, right=0.97, bottom=0.18)
+        canvas = FigureCanvasTkAgg(fig, master=frame)
+        canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+
+        chart = ResponseChart(fig=fig, ax=ax, canvas=canvas)
+        self._build_figure_buttons(
+            fig,
+            (
+                ("Load Pattern", [0.62, 0.84, 0.155, 0.055], self.import_element_pattern),
+                ("Clear Pattern", [0.785, 0.84, 0.17, 0.055], self.clear_element_pattern),
+            ),
+            chart.buttons,
+            chart.button_callbacks,
+        )
+        return chart
+
+    def _build_figure_buttons(
+        self,
+        fig: Figure,
+        button_specs: tuple[tuple[str, list[float], callable], ...],
+        buttons_list: list[MplButton],
+        callbacks_list: list[int],
+    ) -> None:
+        """Add MplButton widgets to *fig* from *button_specs*."""
+        for label, rect, callback in button_specs:
+            button_ax = fig.add_axes(rect)
+            button = MplButton(
+                button_ax, label,
+                color=THEME["mpl_btn_bg"],
+                hovercolor=THEME["mpl_btn_hover"],
+            )
+            button.label.set_fontsize(8.5)
+            button.label.set_color(THEME["mpl_btn_text"])
+            button.label.set_fontweight("bold")
+            button.label.set_horizontalalignment("center")
+            button.label.set_verticalalignment("center")
+            cid = button.on_clicked(lambda _event, action=callback: action())
+            buttons_list.append(button)
+            callbacks_list.append(cid)
+
     # ── Tkinter Evaluation Panel ──────────────────────────────────────
 
     def _build_evaluation_panel(self, parent: ttk.Frame) -> None:
         """Build the Array Evaluation card using Tkinter native widgets."""
+        _f = THEME["font_family"]
+        _fm = THEME["font_family_mono"]
+        _sm = THEME["font_size_sm"]
+        _base = THEME["font_size_base"]
+
         self.eval_frame = ttk.LabelFrame(
-            parent, text="Array Evaluation", padding=(4, 4)
+            parent, text="  ARRAY EVALUATION  ", padding=(8, 6)
         )
+        self.eval_frame.configure(style="TLabelframe")
         self.eval_frame.grid(row=0, column=0, sticky="nsew")
 
         # Header row: application + frequency
-        header = ttk.Frame(self.eval_frame)
-        header.pack(fill=tk.X, pady=(0, 2))
+        header = ttk.Frame(self.eval_frame, style="Card.TFrame")
+        header.pack(fill=tk.X, pady=(0, 6))
         self.eval_app_label = ttk.Label(
-            header, text="Front Radar", font=("Consolas", 9)
+            header, text="Front Radar", style="CardHeader.TLabel"
         )
         self.eval_app_label.pack(side=tk.LEFT)
         self.eval_freq_label = ttk.Label(
-            header, text=DEFAULT_FREQUENCY_MODE, font=("Consolas", 9)
+            header, text=DEFAULT_FREQUENCY_MODE, style="CardHeader.TLabel"
         )
         self.eval_freq_label.pack(side=tk.RIGHT)
 
         # Status badge row
-        badge_row = ttk.Frame(self.eval_frame)
-        badge_row.pack(fill=tk.X, pady=(0, 2))
+        badge_row = ttk.Frame(self.eval_frame, style="Card.TFrame")
+        badge_row.pack(fill=tk.X, pady=(0, 6))
         self.status_canvas = tk.Canvas(
-            badge_row, width=14, height=14, highlightthickness=0,
+            badge_row, width=16, height=16, highlightthickness=0,
+            bg=THEME["card_bg"]
         )
-        self.status_canvas.pack(side=tk.LEFT, padx=(0, 4))
+        self.status_canvas.pack(side=tk.LEFT, padx=(0, 6))
         self.status_dot = self.status_canvas.create_oval(
-            1, 1, 13, 13, fill="#2e7d32", outline=""
+            1, 1, 15, 15, fill="#2e7d32", outline=""
         )
         self.status_text = ttk.Label(
-            badge_row, text="Az Good", font=("Segoe UI", 12, "bold")
+            badge_row, text="Az Good", style="Badge.TLabel"
         )
         self.status_text.pack(side=tk.LEFT)
 
-        # Mode / Freq / Steering info (integrated from info bar)
-        self.mode_info_label = ttk.Label(
-            self.eval_frame,
-            text="",
-            font=("Segoe UI", 10),
+        # Compact summary line
+        summary_frame = ttk.Frame(self.eval_frame, style="Card.TFrame")
+        summary_frame.pack(fill=tk.X, pady=(0, 6))
+        self.summary_label = ttk.Label(
+            summary_frame, text="", style="Card.TLabel",
+            font=(_fm, _sm), foreground=THEME["text_secondary"],
         )
-        self.mode_info_label.pack(fill=tk.X, pady=(0, 1))
-        self.combined_info_label = ttk.Label(
-            self.eval_frame,
-            text="",
-            font=("Segoe UI", 10),
+        self.summary_label.pack(fill=tk.X)
+
+        # PRIMARY section
+        primary_frame = ttk.LabelFrame(
+            self.eval_frame, text="  PRIMARY  ", padding=(6, 4), style="TLabelframe"
         )
-        self.combined_info_label.pack(fill=tk.X, pady=(0, 3))
+        primary_frame.pack(fill=tk.X, pady=(0, 4))
+        primary_frame.grid_columnconfigure(0, weight=1)
 
-        # PRIMARY section (top)
-        primary_frame = ttk.LabelFrame(self.eval_frame, text="PRIMARY", padding=(4, 2))
-        primary_frame.pack(fill=tk.X, pady=(0, 3))
-
-        # Pre-create all label widgets
         primary_labels = [
             "Az aperture", "Az resolution", "Az -3dB BW", "Az null BW",
             "Az PSL", "First sidelobe", "Az grating lobe", "Az ISLR",
@@ -698,39 +833,50 @@ class VirtualArrayGui:
         self.secondary_value_labels: dict[str, ttk.Label] = {}
 
         for i, key in enumerate(primary_labels):
+            row_bg = THEME["card_bg"] if i % 2 == 0 else "#f8f7f5"
+            row_frame = tk.Frame(primary_frame, bg=row_bg)
+            row_frame.grid(row=i, column=0, sticky="ew")
             ttk.Label(
-                primary_frame, text=key, font=("Consolas", 9)
-            ).grid(row=i, column=0, sticky="w", padx=(0, 4))
-            ttk.Separator(primary_frame, orient="vertical").grid(
-                row=i, column=1, sticky="ns", padx=2
+                row_frame, text=key, font=(_fm, _sm), background=row_bg,
+                foreground=THEME["text_secondary"],
+            ).pack(side=tk.LEFT, padx=(2, 8))
+            val = ttk.Label(
+                row_frame, text="", font=(_fm, _sm), background=row_bg,
+                foreground=THEME["text_primary"], anchor="e",
             )
-            val = ttk.Label(primary_frame, text="", font=("Consolas", 9), anchor="e")
-            val.grid(row=i, column=2, sticky="e")
+            val.pack(side=tk.RIGHT, padx=(8, 2))
             self.primary_value_labels[key] = val
 
-        # SECONDARY section (below primary)
-        secondary_frame = ttk.LabelFrame(self.eval_frame, text="SECONDARY", padding=(4, 2))
-        secondary_frame.pack(fill=tk.X, pady=(0, 3))
+        # SECONDARY section
+        secondary_frame = ttk.LabelFrame(
+            self.eval_frame, text="  SECONDARY  ", padding=(6, 4), style="TLabelframe"
+        )
+        secondary_frame.pack(fill=tk.X, pady=(0, 4))
+        secondary_frame.grid_columnconfigure(0, weight=1)
 
         for i, key in enumerate(secondary_labels):
+            row_bg = THEME["card_bg"] if i % 2 == 0 else "#f8f7f5"
+            row_frame = tk.Frame(secondary_frame, bg=row_bg)
+            row_frame.grid(row=i, column=0, sticky="ew")
             ttk.Label(
-                secondary_frame, text=key, font=("Consolas", 9)
-            ).grid(row=i, column=0, sticky="w", padx=(0, 4))
-            ttk.Separator(secondary_frame, orient="vertical").grid(
-                row=i, column=1, sticky="ns", padx=2
+                row_frame, text=key, font=(_fm, _sm), background=row_bg,
+                foreground=THEME["text_secondary"],
+            ).pack(side=tk.LEFT, padx=(2, 8))
+            val = ttk.Label(
+                row_frame, text="", font=(_fm, _sm), background=row_bg,
+                foreground=THEME["text_primary"], anchor="e",
             )
-            val = ttk.Label(secondary_frame, text="", font=("Consolas", 9), anchor="e")
-            val.grid(row=i, column=2, sticky="e")
+            val.pack(side=tk.RIGHT, padx=(8, 2))
             self.secondary_value_labels[key] = val
 
         # NOTES section
-        self.notes_frame = ttk.Frame(self.eval_frame)
-        self.notes_frame.pack(fill=tk.X, pady=(2, 0))
-        ttk.Label(self.notes_frame, text="NOTES:", font=("Consolas", 9)).pack(
-            side=tk.LEFT
-        )
-        self.notes_items_frame = ttk.Frame(self.notes_frame)
-        self.notes_items_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.notes_frame = ttk.Frame(self.eval_frame, style="Card.TFrame")
+        self.notes_frame.pack(fill=tk.X, pady=(4, 0))
+        ttk.Label(
+            self.notes_frame, text="NOTES", style="SectionTitle.TLabel"
+        ).pack(anchor="w")
+        self.notes_items_frame = ttk.Frame(self.notes_frame, style="Card.TFrame")
+        self.notes_items_frame.pack(fill=tk.X, pady=(2, 0))
 
     def _update_evaluation_panel(self, metrics: ArrayMetrics) -> None:
         """Update the Tkinter evaluation panel with current metrics."""
@@ -784,20 +930,16 @@ class VirtualArrayGui:
         # NOTES
         self._update_notes_panel(self._notes_parts(metrics))
 
-        # Mode / Freq / Steering info — multi-line
-        self.mode_info_label.configure(
+        # Compact summary: Tx/Rx | frequency | aperture
+        freq_label = self.frequency_mode.get()
+        wavelength_mm = FREQUENCY_MODES_MM.get(freq_label, 0.0)
+        x_mm = self.aperture_mm(metrics.x_aperture)
+        y_mm = self.aperture_mm(metrics.y_aperture)
+        self.summary_label.configure(
             text=(
-                f"Mode: Front Radar\n"
-                f"Frequency: {self.frequency_mode.get()}\n"
-                f"Steering: Az=0°, El=0°"
-            )
-        )
-        self.combined_info_label.configure(
-            text=(
-                f"Az PSL: {metrics.azimuth_psl_db:.2f} dB\n"
-                f"El PSL: {metrics.elevation_psl_db:.2f} dB\n"
-                f"2D worst PSL: {metrics.psl_db:.2f} dB\n"
-                f"El ambiguity: {metrics.elevation_ambiguity_level}"
+                f"{metrics.tx_count}Tx × {metrics.rx_count}Rx  ·  "
+                f"{freq_label} (λ={wavelength_mm:.3f} mm)  ·  "
+                f"{_format_mm(x_mm)} × {_format_mm(y_mm)}"
             )
         )
 
@@ -911,65 +1053,16 @@ class VirtualArrayGui:
         )
 
     def _build_physical_figure_controls(self) -> None:
-        button_specs = (
-            ("+Tx", [0.70, 0.838, 0.07, 0.055], self.add_tx_element),
-            ("+Rx", [0.775, 0.838, 0.07, 0.055], self.add_rx_element),
-            ("Delete", [0.85, 0.838, 0.105, 0.055], self.delete_selected_element),
+        self._build_figure_buttons(
+            self.phys_fig,
+            (
+                ("+Tx", [0.70, 0.838, 0.07, 0.055], self.add_tx_element),
+                ("+Rx", [0.775, 0.838, 0.07, 0.055], self.add_rx_element),
+                ("Delete", [0.85, 0.838, 0.105, 0.055], self.delete_selected_element),
+            ),
+            self.physical_buttons,
+            self.physical_button_callbacks,
         )
-        for label, rect, callback in button_specs:
-            button_ax = self.phys_fig.add_axes(rect)
-            button = MplButton(
-                button_ax,
-                label,
-                color="#f7f7f7",
-                hovercolor="#e6eef8",
-            )
-            button.label.set_fontsize(8.5)
-            button.label.set_horizontalalignment("center")
-            button.label.set_verticalalignment("center")
-            cid = button.on_clicked(lambda _event, action=callback: action())
-            self.physical_buttons.append(button)
-            self.physical_button_callbacks.append(cid)
-
-    def _build_az_figure_controls(self) -> None:
-        button_specs = (
-            ("Load Pattern", [0.62, 0.84, 0.155, 0.055], self.import_element_pattern),
-            ("Clear Pattern", [0.785, 0.84, 0.17, 0.055], self.clear_element_pattern),
-        )
-        for label, rect, callback in button_specs:
-            button_ax = self.az_fig.add_axes(rect)
-            button = MplButton(
-                button_ax,
-                label,
-                color="#f7f7f7",
-                hovercolor="#e6eef8",
-            )
-            button.label.set_fontsize(8.5)
-            button.label.set_horizontalalignment("center")
-            button.label.set_verticalalignment("center")
-            cid = button.on_clicked(lambda _event, action=callback: action())
-            self.az_buttons.append(button)
-            self.az_button_callbacks.append(cid)
-
-    def _build_el_figure_controls(self) -> None:
-        button_specs = (
-            ("Load Pattern", [0.62, 0.84, 0.155, 0.055], self.import_element_pattern),
-            ("Clear Pattern", [0.785, 0.84, 0.17, 0.055], self.clear_element_pattern),
-        )
-        for label, rect, callback in button_specs:
-            button_ax = self.el_fig.add_axes(rect)
-            button = MplButton(
-                button_ax,
-                label,
-                color="#f7f7f7",
-                hovercolor="#e6eef8",
-            )
-            button.label.set_fontsize(8.5)
-            button.label.set_horizontalalignment("center")
-            button.label.set_verticalalignment("center")
-            cid = button.on_clicked(lambda _event, action=callback: action())
-            self.el_buttons.append(button)
-            self.el_button_callbacks.append(cid)
 
     def delete_selected_element(self) -> None:
         if self.selected_element is None:
@@ -1369,22 +1462,14 @@ class VirtualArrayGui:
         self._draw_physical_array()
         self._draw_virtual_array(unique, counts, pair_map, metrics)
         self._update_evaluation_panel(metrics)
-        self._draw_az_response(af_db, azimuths, elevations, metrics)
-        self._draw_el_response(af_db, azimuths, elevations, metrics)
+        self._draw_response(RESPONSE_MODE_AZIMUTH, self.az_chart, af_db, azimuths, elevations, metrics)
+        self._draw_response(RESPONSE_MODE_ELEVATION, self.el_chart, af_db, azimuths, elevations, metrics)
 
-        self.status.set(
-            f"Virtual {metrics.unique_count}/{metrics.virtual_count} | "
-            f"X {_format_mm(self.aperture_mm(metrics.x_aperture))} | "
-            f"Y {_format_mm(self.aperture_mm(metrics.y_aperture))} | "
-            f"Az Res {_format_float(metrics.azimuth_resolution, '°')} | "
-            f"Az PSL {metrics.azimuth_psl_db:.2f} dB | "
-            f"El PSL {metrics.elevation_psl_db:.2f} dB | "
-            f"Azimuth {metrics.front_radar_status} | El Ambiguity {metrics.elevation_ambiguity_level}"
-        )
-        self.phys_canvas.draw()
-        self.virt_canvas.draw()
-        self.az_canvas.draw()
-        self.el_canvas.draw()
+        self.status.set("Ready")
+        self.phys_canvas.draw_idle()
+        self.virt_canvas.draw_idle()
+        self.az_chart.canvas.draw_idle()
+        self.el_chart.canvas.draw_idle()
 
     def _build_virtual_pair_map(
         self, array: AntennaArray
@@ -1458,10 +1543,12 @@ class VirtualArrayGui:
                 )
 
         self.physical_ax.set_title(
-            "Physical Array", fontsize=TITLE_SIZE, pad=6, y=1.02, loc="left"
+            "Physical Array", fontsize=TITLE_SIZE, pad=6, y=1.02, loc="left",
+            color=THEME["text_primary"], fontweight="bold",
         )
-        self.physical_ax.set_xlabel("x (λ)")
-        self.physical_ax.set_ylabel("y (λ)")
+        self.physical_ax.set_xlabel("x (λ)", color=THEME["text_secondary"])
+        self.physical_ax.set_ylabel("y (λ)", color=THEME["text_secondary"])
+        self.physical_ax.tick_params(colors=THEME["text_secondary"], labelsize=8)
         if self.drag_axis_limits is not None:
             x_limits, y_limits = self.drag_axis_limits
         else:
@@ -1502,10 +1589,10 @@ class VirtualArrayGui:
             minor=True,
         )
         self.physical_ax.grid(
-            True, which="major", color="#a8a8a8", linewidth=0.65, alpha=0.34
+            True, which="major", color=THEME["grid_color"], linewidth=0.5, alpha=0.25
         )
         self.physical_ax.grid(
-            True, which="minor", color="#cfcfcf", linewidth=0.42, alpha=0.22
+            True, which="minor", color=THEME["grid_color"], linewidth=0.3, alpha=0.12
         )
         self.physical_ax.legend(loc="upper right", framealpha=0.72)
         self.physical_ax.set_aspect("auto")
@@ -1515,13 +1602,15 @@ class VirtualArrayGui:
             xytext=(12, 12),
             textcoords="offset points",
             bbox={
-                "boxstyle": "round,pad=0.32",
+                "boxstyle": "round,pad=0.35",
                 "facecolor": "#ffffff",
-                "edgecolor": "#aaaaaa",
-                "alpha": 0.92,
+                "edgecolor": THEME["card_border"],
+                "alpha": 0.95,
+                "linewidth": 0.8,
             },
-            arrowprops={"arrowstyle": "->", "color": "#555555"},
+            arrowprops={"arrowstyle": "->", "color": "#888888", "linewidth": 0.8},
             fontsize=8,
+            color=THEME["text_primary"],
         )
         self.physical_hover_annotation.set_visible(False)
 
@@ -1606,18 +1695,22 @@ class VirtualArrayGui:
             textcoords="offset points",
             bbox={
                 "boxstyle": "round,pad=0.35",
-                "facecolor": "#ffffe0",
-                "edgecolor": "#8c8c72",
+                "facecolor": "#ffffff",
+                "edgecolor": THEME["card_border"],
+                "alpha": 0.95,
+                "linewidth": 0.8,
             },
-            arrowprops={"arrowstyle": "->", "color": "#555555"},
+            arrowprops={"arrowstyle": "->", "color": "#888888", "linewidth": 0.8},
             fontsize=8,
         )
         self.virtual_hover_annotation.set_visible(False)
 
-        self.virtual_ax.set_title("Virtual Array", fontsize=TITLE_SIZE, pad=8, loc="left")
-        self.virtual_ax.set_xlabel("x (λ)")
-        self.virtual_ax.set_ylabel("y (λ)")
-        self.virtual_ax.grid(True, alpha=0.36)
+        self.virtual_ax.set_title("Virtual Array", fontsize=TITLE_SIZE, pad=8, loc="left",
+                                    color=THEME["text_primary"], fontweight="bold")
+        self.virtual_ax.set_xlabel("x (λ)", color=THEME["text_secondary"])
+        self.virtual_ax.set_ylabel("y (λ)", color=THEME["text_secondary"])
+        self.virtual_ax.tick_params(colors=THEME["text_secondary"], labelsize=8)
+        self.virtual_ax.grid(True, alpha=THEME["grid_alpha"], color=THEME["grid_color"], linewidth=0.5)
 
         # Simple padded limits — let set_aspect("equal") handle the rest
         x_limits = _axis_limits(unique_display[:, 0], minimum_span=6.0, padding=2.0)
@@ -1695,7 +1788,7 @@ class VirtualArrayGui:
         sidelobe_angle = float(response_angles[sidelobe_index])
         sidelobe_gain = float(response_db[sidelobe_index])
         sidelobe_label = "Max sidelobe" if sidelobe_is_peak else "Guard-edge max"
-        psf_ylim = (-40.0, 0.0)
+        response_ylim = (-40.0, 0.0)
 
         ax.plot(response_angles, response_db, color="#2f6fbb", linewidth=1.8)
         show_legend = False
@@ -1710,8 +1803,8 @@ class VirtualArrayGui:
                 )
             pattern_cut = np.clip(
                 element_pattern_cut,
-                psf_ylim[0],
-                psf_ylim[1],
+                response_ylim[0],
+                response_ylim[1],
             )
             ax.plot(
                 response_angles,
@@ -1724,7 +1817,7 @@ class VirtualArrayGui:
             )
             show_legend = True
         ax.set_xlim(response_cut.fov)
-        ax.set_ylim(psf_ylim)
+        ax.set_ylim(response_ylim)
         ax.axvspan(
             -response_cut.mainlobe_guard,
             response_cut.mainlobe_guard,
@@ -1748,7 +1841,7 @@ class VirtualArrayGui:
         )
 
         x_low, x_high = response_cut.fov
-        y_low, y_high = psf_ylim
+        y_low, y_high = response_ylim
         annotation_boxes: list[tuple[float, float, float, float]] = []
 
         def annotation_position(angle: float, gain: float) -> tuple[float, float, str]:
@@ -1799,14 +1892,15 @@ class VirtualArrayGui:
             ha=annotation_ha,
             va="center",
             fontsize=7.5,
-            color="#8a3a00",
+            color="#6b4226",
             bbox={
                 "boxstyle": "round,pad=0.25",
-                "facecolor": "#fff3e0",
-                "edgecolor": "#d95f02",
-                "alpha": 0.9,
+                "facecolor": "#fff8f0",
+                "edgecolor": "#d4a574",
+                "alpha": 0.92,
+                "linewidth": 0.7,
             },
-            arrowprops={"arrowstyle": "->", "color": "#d95f02"},
+            arrowprops={"arrowstyle": "->", "color": "#b8875a", "linewidth": 0.7},
             annotation_clip=True,
         )
 
@@ -1852,24 +1946,27 @@ class VirtualArrayGui:
                     ha=grating_ha,
                     va="center",
                     fontsize=7.5,
-                    color="#4a148c",
+                    color="#4a235a",
                     bbox={
                         "boxstyle": "round,pad=0.25",
-                        "facecolor": "#f3e5f5",
-                        "edgecolor": "#7b1fa2",
-                        "alpha": 0.9,
+                        "facecolor": "#f5eef8",
+                        "edgecolor": "#9b72b0",
+                        "alpha": 0.92,
+                        "linewidth": 0.7,
                     },
-                    arrowprops={"arrowstyle": "->", "color": "#7b1fa2"},
+                    arrowprops={"arrowstyle": "->", "color": "#9b72b0", "linewidth": 0.7},
                     annotation_clip=True,
                 )
             else:
                 ax.legend(loc="lower right", fontsize=7, framealpha=0.72)
                 show_legend = False
 
-        ax.set_title(f"Front Radar Response ({response_cut.label})", pad=6, y=1.02, loc="left")
-        ax.set_xlabel(response_cut.x_label)
-        ax.set_ylabel("Normalized gain (dB)", labelpad=2)
-        ax.grid(True, alpha=0.3)
+        ax.set_title(f"Front Radar Response ({response_cut.label})", pad=6, y=1.02, loc="left",
+                      color=THEME["text_primary"], fontweight="bold")
+        ax.set_xlabel(response_cut.x_label, color=THEME["text_secondary"])
+        ax.set_ylabel("Normalized gain (dB)", labelpad=2, color=THEME["text_secondary"])
+        ax.tick_params(colors=THEME["text_secondary"], labelsize=8)
+        ax.grid(True, alpha=THEME["grid_alpha"], color=THEME["grid_color"], linewidth=0.5)
         if show_legend:
             ax.legend(loc="lower right", fontsize=7, framealpha=0.72)
 
@@ -1887,73 +1984,50 @@ class VirtualArrayGui:
             ha="left",
             va="bottom",
             fontsize=9,
+            color=THEME["text_primary"],
             bbox={
                 "boxstyle": "round,pad=0.25",
                 "facecolor": "#ffffff",
-                "edgecolor": "#cfcfcf",
-                "alpha": 0.85,
+                "edgecolor": THEME["card_border"],
+                "alpha": 0.9,
+                "linewidth": 0.7,
             },
         )
 
         return response_db, response_angles
 
-    def _draw_az_response(
+    def _draw_response(
         self,
+        mode: str,
+        chart: ResponseChart,
         af_db: np.ndarray,
         azimuths: np.ndarray,
         elevations: np.ndarray,
         metrics: ArrayMetrics,
     ) -> None:
-        response_cut = _response_cut_for_mode(af_db, azimuths, elevations, RESPONSE_MODE_AZIMUTH)
-        response_db, response_angles = self._draw_response_common(self.az_ax, response_cut, metrics)
+        """Draw a response chart (Az or El) and set up hover data."""
+        response_cut = _response_cut_for_mode(af_db, azimuths, elevations, mode)
+        response_db, response_angles = self._draw_response_common(chart.ax, response_cut, metrics)
 
-        # Hover data
-        self.az_hover_db = response_db
-        self.az_hover_angles = response_angles
-        self.az_hover_annotation = self.az_ax.annotate(
+        chart.hover_db = response_db
+        chart.hover_angles = response_angles
+        chart.hover_annotation = chart.ax.annotate(
             "",
             xy=(0, 0),
             xytext=(12, 12),
             textcoords="offset points",
             bbox={
-                "boxstyle": "round,pad=0.32",
+                "boxstyle": "round,pad=0.35",
                 "facecolor": "#ffffff",
-                "edgecolor": "#aaaaaa",
-                "alpha": 0.92,
+                "edgecolor": THEME["card_border"],
+                "alpha": 0.95,
+                "linewidth": 0.8,
             },
-            arrowprops={"arrowstyle": "->", "color": "#555555"},
+            arrowprops={"arrowstyle": "->", "color": "#888888", "linewidth": 0.8},
             fontsize=8,
+            color=THEME["text_primary"],
         )
-        self.az_hover_annotation.set_visible(False)
-
-    def _draw_el_response(
-        self,
-        af_db: np.ndarray,
-        azimuths: np.ndarray,
-        elevations: np.ndarray,
-        metrics: ArrayMetrics,
-    ) -> None:
-        response_cut = _response_cut_for_mode(af_db, azimuths, elevations, RESPONSE_MODE_ELEVATION)
-        response_db, response_angles = self._draw_response_common(self.el_ax, response_cut, metrics)
-
-        # Hover data
-        self.el_hover_db = response_db
-        self.el_hover_angles = response_angles
-        self.el_hover_annotation = self.el_ax.annotate(
-            "",
-            xy=(0, 0),
-            xytext=(12, 12),
-            textcoords="offset points",
-            bbox={
-                "boxstyle": "round,pad=0.32",
-                "facecolor": "#ffffff",
-                "edgecolor": "#aaaaaa",
-                "alpha": 0.92,
-            },
-            arrowprops={"arrowstyle": "->", "color": "#555555"},
-            fontsize=8,
-        )
-        self.el_hover_annotation.set_visible(False)
+        chart.hover_annotation.set_visible(False)
 
     # ── Notes helpers ─────────────────────────────────────────────────
 
@@ -1978,13 +2052,15 @@ class VirtualArrayGui:
 
         for index, note in enumerate(notes_parts):
             text, color = _note_display(note)
-            label = ttk.Label(
-                self.notes_items_frame,
+            pill = tk.Frame(self.notes_items_frame, bg=color, padx=6, pady=2)
+            pill.pack(anchor="w", pady=(1 if index else 0, 1))
+            ttk.Label(
+                pill,
                 text=text,
-                font=("Consolas", 9),
-                foreground=color,
-            )
-            label.pack(side=tk.LEFT, padx=(8 if index else 6, 0))
+                font=(THEME["font_family"], THEME["font_size_sm"]),
+                foreground="#ffffff",
+                background=color,
+            ).pack()
 
     def _element_pattern_export_info(self) -> dict[str, object]:
         if self.element_pattern is None:
@@ -2103,8 +2179,8 @@ class VirtualArrayGui:
 
         self._update_physical_hover(event)
         self._update_virtual_hover(event)
-        self._update_az_hover(event)
-        self._update_el_hover(event)
+        self._update_response_hover(event, self.az_chart, "Az")
+        self._update_response_hover(event, self.el_chart, "El")
 
     def on_release(self, event) -> None:  # noqa: ANN001
         if self.dragging is not None:
@@ -2230,57 +2306,32 @@ class VirtualArrayGui:
         self.physical_hover_annotation.set_visible(True)
         self.phys_canvas.draw_idle()
 
-    def _update_az_hover(self, event) -> None:  # noqa: ANN001
-        if self.az_hover_annotation is None:
+    def _update_response_hover(
+        self, event, chart: ResponseChart, label: str  # noqa: ANN001
+    ) -> None:
+        """Update hover tooltip for a response chart (Az or El)."""
+        if chart.hover_annotation is None:
             return
         if (
-            event.inaxes != self.az_ax
+            event.inaxes != chart.ax
             or event.xdata is None
             or event.ydata is None
-            or self.az_hover_db.size == 0
+            or chart.hover_db.size == 0
         ):
-            if self.az_hover_annotation.get_visible():
-                self.az_hover_annotation.set_visible(False)
-                self.az_canvas.draw_idle()
+            if chart.hover_annotation.get_visible():
+                chart.hover_annotation.set_visible(False)
+                chart.canvas.draw_idle()
             return
 
-        angle_index = int(
-            np.argmin(np.abs(self.az_hover_angles - event.xdata))
+        angle_index = int(np.argmin(np.abs(chart.hover_angles - event.xdata)))
+        angle = float(chart.hover_angles[angle_index])
+        gain = float(chart.hover_db[angle_index])
+        chart.hover_annotation.xy = (angle, gain)
+        chart.hover_annotation.set_text(
+            f"{label} = {angle:.1f}°\nGain = {gain:.2f} dB"
         )
-        angle = float(self.az_hover_angles[angle_index])
-        gain = float(self.az_hover_db[angle_index])
-        self.az_hover_annotation.xy = (angle, gain)
-        self.az_hover_annotation.set_text(
-            f"Az = {angle:.1f}°\nGain = {gain:.2f} dB"
-        )
-        self.az_hover_annotation.set_visible(True)
-        self.az_canvas.draw_idle()
-
-    def _update_el_hover(self, event) -> None:  # noqa: ANN001
-        if self.el_hover_annotation is None:
-            return
-        if (
-            event.inaxes != self.el_ax
-            or event.xdata is None
-            or event.ydata is None
-            or self.el_hover_db.size == 0
-        ):
-            if self.el_hover_annotation.get_visible():
-                self.el_hover_annotation.set_visible(False)
-                self.el_canvas.draw_idle()
-            return
-
-        angle_index = int(
-            np.argmin(np.abs(self.el_hover_angles - event.xdata))
-        )
-        angle = float(self.el_hover_angles[angle_index])
-        gain = float(self.el_hover_db[angle_index])
-        self.el_hover_annotation.xy = (angle, gain)
-        self.el_hover_annotation.set_text(
-            f"El = {angle:.1f}°\nGain = {gain:.2f} dB"
-        )
-        self.el_hover_annotation.set_visible(True)
-        self.el_canvas.draw_idle()
+        chart.hover_annotation.set_visible(True)
+        chart.canvas.draw_idle()
 
     def _nearest_element(self, x: float, y: float) -> EditableElement | None:
         distances = [

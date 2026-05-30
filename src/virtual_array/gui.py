@@ -728,8 +728,8 @@ class VirtualArrayGui:
         self._build_figure_buttons(
             fig,
             (
-                ("Load Pattern", [0.62, 0.84, 0.155, 0.055], self.import_element_pattern),
-                ("Clear Pattern", [0.785, 0.84, 0.17, 0.055], self.clear_element_pattern),
+                ("Load", [0.62, 0.84, 0.12, 0.055], self.import_element_pattern),
+                ("Clear", [0.76, 0.84, 0.12, 0.055], self.clear_element_pattern),
             ),
             chart.buttons,
             chart.button_callbacks,

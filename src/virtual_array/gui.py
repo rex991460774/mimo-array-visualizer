@@ -58,12 +58,8 @@ RESPONSE_MODE_ELEVATION = "el"
 RESPONSE_SIDELOBE_PROMINENCE_DB = 0.5
 RESPONSE_SIDELOBE_GUARD_CLEARANCE_DB = 0.5
 
-DEFAULT_FREQUENCY_MODE = "77 GHz"
-FREQUENCY_MODES_MM = {
-    "77 GHz": 3.896,
-    "92 GHz": 3.259,
-    "60 GHz": 4.997,
-}
+DEFAULT_FREQUENCY_GHZ = 77.0
+LIGHT_SPEED_MM_PER_NS = 299.792458  # mm/ns = GHz·mm
 
 DISPLAY_SCALE_LAMBDA = 0.5
 DISPLAY_GRID_STEP_LAMBDA = 0.5
@@ -532,7 +528,7 @@ class VirtualArrayGui:
         self.physical_button_callbacks: list[int] = []
 
         self.element_pattern: ElementPattern | None = None
-        self.frequency_mode = tk.StringVar(value=DEFAULT_FREQUENCY_MODE)
+        self.frequency_ghz = tk.StringVar(value=str(DEFAULT_FREQUENCY_GHZ))
         self.pattern_status = tk.StringVar(value="Pattern: isotropic")
         self.status = tk.StringVar(
             value="Drag Tx/Rx points in Physical Array. Release to refresh Virtual Array and Responses."
@@ -661,25 +657,45 @@ class VirtualArrayGui:
         ttk.Separator(controls, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=12)
 
         ttk.Label(
-            controls, text="Frequency:", style="Status.TLabel"
+            controls, text="Freq (GHz):", style="Status.TLabel"
         ).pack(side=tk.LEFT, padx=(0, 4))
-        frequency_combo = ttk.Combobox(
+        freq_entry = ttk.Entry(
             controls,
-            textvariable=self.frequency_mode,
-            values=list(FREQUENCY_MODES_MM),
+            textvariable=self.frequency_ghz,
             width=8,
-            state="readonly",
+            justify="right",
         )
-        frequency_combo.pack(side=tk.LEFT)
-        frequency_combo.bind("<<ComboboxSelected>>", self.on_frequency_changed)
+        freq_entry.pack(side=tk.LEFT)
+        freq_entry.bind("<Return>", self.on_frequency_changed)
+        freq_entry.bind("<FocusOut>", self.on_frequency_changed)
 
         ttk.Separator(controls, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=12)
+
+        # Pattern indicator and controls
+        self.pattern_canvas = tk.Canvas(
+            controls, width=12, height=12, highlightthickness=0
+        )
+        self.pattern_canvas.pack(side=tk.LEFT, padx=(0, 4))
+        self.pattern_dot = self.pattern_canvas.create_oval(1, 1, 11, 11, fill="#999999", outline="")
 
         ttk.Label(
             controls,
             textvariable=self.pattern_status,
             style="Muted.TLabel",
         ).pack(side=tk.LEFT)
+
+        ttk.Button(
+            controls,
+            text="Load Pattern",
+            command=self.import_element_pattern,
+            style="Large.TButton",
+        ).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(
+            controls,
+            text="Clear Pattern",
+            command=self.clear_element_pattern,
+            style="Large.TButton",
+        ).pack(side=tk.LEFT, padx=(4, 0))
         ttk.Label(
             controls,
             textvariable=self.status,
@@ -724,17 +740,7 @@ class VirtualArrayGui:
         canvas = FigureCanvasTkAgg(fig, master=frame)
         canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
 
-        chart = ResponseChart(fig=fig, ax=ax, canvas=canvas)
-        self._build_figure_buttons(
-            fig,
-            (
-                ("Load", [0.62, 0.84, 0.12, 0.055], self.import_element_pattern),
-                ("Clear", [0.76, 0.84, 0.12, 0.055], self.clear_element_pattern),
-            ),
-            chart.buttons,
-            chart.button_callbacks,
-        )
-        return chart
+        return ResponseChart(fig=fig, ax=ax, canvas=canvas)
 
     def _build_figure_buttons(
         self,
@@ -783,7 +789,7 @@ class VirtualArrayGui:
         )
         self.eval_app_label.pack(side=tk.LEFT)
         self.eval_freq_label = ttk.Label(
-            header, text=DEFAULT_FREQUENCY_MODE, style="CardHeader.TLabel"
+            header, text=f"{DEFAULT_FREQUENCY_GHZ} GHz", style="CardHeader.TLabel"
         )
         self.eval_freq_label.pack(side=tk.RIGHT)
 
@@ -891,7 +897,7 @@ class VirtualArrayGui:
         self.status_text.configure(text=status_text, foreground=grade_color)
 
         # Update header
-        self.eval_freq_label.configure(text=f"Frequency: {self.frequency_mode.get()}")
+        self.eval_freq_label.configure(text=f"Frequency: {self.frequency_ghz.get()} GHz")
 
         # PRIMARY values
         values = {
@@ -931,14 +937,14 @@ class VirtualArrayGui:
         self._update_notes_panel(self._notes_parts(metrics))
 
         # Compact summary: Tx/Rx | frequency | aperture
-        freq_label = self.frequency_mode.get()
-        wavelength_mm = FREQUENCY_MODES_MM.get(freq_label, 0.0)
+        freq_ghz = self.frequency_ghz.get()
+        wavelength_mm = LIGHT_SPEED_MM_PER_NS / float(freq_ghz) if freq_ghz else 0.0
         x_mm = self.aperture_mm(metrics.x_aperture)
         y_mm = self.aperture_mm(metrics.y_aperture)
         self.summary_label.configure(
             text=(
                 f"{metrics.tx_count}Tx × {metrics.rx_count}Rx  ·  "
-                f"{freq_label} (λ={wavelength_mm:.3f} mm)  ·  "
+                f"{freq_ghz} GHz (λ={wavelength_mm:.3f} mm)  ·  "
                 f"{_format_mm(x_mm)} × {_format_mm(y_mm)}"
             )
         )
@@ -946,8 +952,11 @@ class VirtualArrayGui:
     # ── Array data ────────────────────────────────────────────────────
 
     def wavelength_mm(self) -> float:
-        mode = self.frequency_mode.get()
-        return FREQUENCY_MODES_MM.get(mode, FREQUENCY_MODES_MM[DEFAULT_FREQUENCY_MODE])
+        try:
+            freq_ghz = float(self.frequency_ghz.get())
+        except ValueError:
+            freq_ghz = DEFAULT_FREQUENCY_GHZ
+        return LIGHT_SPEED_MM_PER_NS / freq_ghz if freq_ghz > 0 else LIGHT_SPEED_MM_PER_NS / DEFAULT_FREQUENCY_GHZ
 
     def half_wavelength_mm(self) -> float:
         return self.wavelength_mm() / 2.0
@@ -1125,6 +1134,7 @@ class VirtualArrayGui:
         pattern = confirmed_pattern
         self.element_pattern = pattern
         self.pattern_status.set(f"Pattern: {pattern.name}")
+        self.pattern_canvas.itemconfig(self.pattern_dot, fill="#2e7d32")
         LOGGER.info("Imported element pattern from %s", filename)
         self.generate_virtual_array()
         self.status.set(f"Element pattern loaded: {pattern.name}")
@@ -1136,6 +1146,7 @@ class VirtualArrayGui:
         LOGGER.info("Cleared element pattern: %s", self.element_pattern.source_path)
         self.element_pattern = None
         self.pattern_status.set("Pattern: isotropic")
+        self.pattern_canvas.itemconfig(self.pattern_dot, fill="#999999")
         self.generate_virtual_array()
         self.status.set("Element pattern cleared. Using isotropic elements.")
 
@@ -1413,7 +1424,7 @@ class VirtualArrayGui:
     def _layout_evaluation(self, metrics: ArrayMetrics) -> dict[str, object]:
         utilization = metrics.unique_count / metrics.virtual_count if metrics.virtual_count else 0.0
         return {
-            "frequency_mode": self.frequency_mode.get(),
+            "frequency_ghz": self.frequency_ghz.get(),
             "virtual_utilization": {
                 "unique_points": metrics.unique_count,
                 "virtual_channels": metrics.virtual_count,
@@ -2090,13 +2101,32 @@ class VirtualArrayGui:
             if isinstance(pattern_dir, str) and pattern_dir:
                 self.last_pattern_dir = Path(pattern_dir)
 
-            frequency_mode = state.get("frequency_mode")
-            if isinstance(frequency_mode, str) and frequency_mode in FREQUENCY_MODES_MM:
-                self.frequency_mode.set(frequency_mode)
+            frequency = state.get("frequency_ghz")
+            if isinstance(frequency, (int, float)) and frequency > 0:
+                self.frequency_ghz.set(str(frequency))
+            elif isinstance(frequency, str):
+                try:
+                    freq_val = float(frequency)
+                    if freq_val > 0:
+                        self.frequency_ghz.set(frequency)
+                except ValueError:
+                    pass
 
             layout = state.get("layout")
             if layout is not None:
                 self.elements = self._elements_from_layout_config(layout)
+
+            pattern_path = state.get("element_pattern_path")
+            if isinstance(pattern_path, str) and pattern_path:
+                try:
+                    pattern = load_element_pattern(pattern_path)
+                    self.element_pattern = pattern
+                    self.pattern_status.set(f"Pattern: {pattern.name}")
+                    self.pattern_canvas.itemconfig(self.pattern_dot, fill="#2e7d32")
+                    LOGGER.info("Restored element pattern from %s", pattern_path)
+                except Exception:
+                    LOGGER.warning("Failed to restore element pattern from %s", pattern_path)
+
             LOGGER.info("Loaded local state from %s", state_path())
         except Exception:
             LOGGER.exception("Failed to load local state from %s", state_path())
@@ -2106,9 +2136,11 @@ class VirtualArrayGui:
             "version": LOCAL_STATE_VERSION,
             "last_layout_dir": str(self.last_layout_dir),
             "last_pattern_dir": str(self.last_pattern_dir),
-            "frequency_mode": self.frequency_mode.get(),
+            "frequency_ghz": self.frequency_ghz.get(),
             "layout": self._layout_coordinates_config(),
         }
+        if self.element_pattern is not None and self.element_pattern.source_path:
+            state["element_pattern_path"] = str(self.element_pattern.source_path)
         save_state(state)
         LOGGER.info("Saved local state to %s", state_path())
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import tkinter as tk
 import json
 import logging
-from collections import defaultdict
+import math
+import re
+import tkinter as tk
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -18,20 +20,31 @@ from matplotlib.widgets import Button as MplButton
 from .app_state import load_state, save_state, state_path
 from .analysis import (
     AZIMUTH_FOV,
+    DBF_SCAN_FOV,
+    DBF_SCAN_GRID_SIZE,
+    DBF_SCAN_STEP_DEG,
     ELEVATION_FOV,
     MAINLOBE_GUARD_AZ,
     MAINLOBE_GUARD_EL,
     ArrayMetrics,
     calculate_metrics_and_psf,
+    dbf_azimuth_spectrum_bank,
+    dbf_elevation_spectrum_bank,
     local_peak_indices,
 )
 from .element_pattern import (
+    PATTERN_KIND_AMPLITUDE,
+    PATTERN_KIND_PHASE,
+    PATTERN_PLANE_ELEVATION,
+    PATTERN_PLANE_HORIZONTAL,
+    ChannelPatternSet,
     ElementPattern,
     format_pattern_cut_metrics,
+    load_hfss_pattern_series,
+    load_hfss_summary_pattern,
     load_element_pattern,
     pattern_cut_metrics,
 )
-from .examples.case4_5tx7rx_sel import build_array
 from .geometry import AntennaArray, ArrayPoint
 from .grid import GRID_STEP, snap_to_grid
 from .logging_config import configure_logging, current_log_path, install_excepthook
@@ -52,11 +65,16 @@ LAYOUT_UNITS_LAMBDA = {"lambda", "λ"}
 LEGACY_LAYOUT_UNITS_HALF_LAMBDA = {"lambda/2", "λ/2"}
 MAX_TX_COUNT = 16
 MAX_RX_COUNT = 16
+MAX_HISTORY_STATES = 50
+AUTO_LAYOUT_SPACING = 2.0
+AUTO_LAYOUT_TX_Y = 4.0
+AUTO_LAYOUT_RX_Y = -4.0
 TITLE_SIZE = 13
 RESPONSE_MODE_AZIMUTH = "az"
 RESPONSE_MODE_ELEVATION = "el"
 RESPONSE_SIDELOBE_PROMINENCE_DB = 0.5
 RESPONSE_SIDELOBE_GUARD_CLEARANCE_DB = 0.5
+DBF_SCAN_INTERVAL_MS = 55
 
 DEFAULT_FREQUENCY_GHZ = 77.0
 LIGHT_SPEED_MM_PER_NS = 299.792458  # mm/ns = GHz·mm
@@ -69,6 +87,9 @@ WINDOW_WIDTH = 1600
 WINDOW_HEIGHT = 1000
 WINDOW_MIN_WIDTH = 1200
 WINDOW_MIN_HEIGHT = 800
+WINDOW_GEOMETRY_RE = re.compile(
+    r"^(?P<width>\d+)x(?P<height>\d+)(?:(?P<x>[+-]\d+)(?P<y>[+-]\d+))?$"
+)
 
 # Figure DPI (fixed for consistent rendering across displays)
 FIG_DPI = 100
@@ -139,6 +160,12 @@ class EditableElement:
 
 
 @dataclass(frozen=True)
+class LayoutSnapshot:
+    elements: tuple[tuple[str, int, str, float, float], ...]
+    selected_key: tuple[str, int, str] | None
+
+
+@dataclass(frozen=True)
 class ResponseCut:
     mode: str
     label: str
@@ -157,6 +184,9 @@ class ResponseChart:
     fig: Figure
     ax: any  # matplotlib Axes
     canvas: FigureCanvasTkAgg
+    progress_var: tk.DoubleVar | None = None
+    progress_scale: ttk.Scale | None = None
+    progress_label: ttk.Label | None = None
     hover_annotation: any = None  # matplotlib Annotation
     hover_db: np.ndarray = None
     hover_angles: np.ndarray = None
@@ -295,6 +325,46 @@ def _format_mm(value: float) -> str:
     return f"{value:.1f} mm"
 
 
+def _parse_frequency_ghz(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        frequency = float(value)
+    elif isinstance(value, str):
+        text = value.strip().lower().replace(",", ".")
+        if text.endswith("ghz"):
+            text = text[:-3].strip()
+        elif text.endswith("g"):
+            text = text[:-1].strip()
+        if not text:
+            return None
+        try:
+            frequency = float(text)
+        except ValueError:
+            return None
+    else:
+        return None
+    return frequency if math.isfinite(frequency) and frequency > 0 else None
+
+
+def _format_frequency_ghz(frequency: float) -> str:
+    if abs(frequency - round(frequency)) < 1e-9:
+        return str(int(round(frequency)))
+    return f"{frequency:.6f}".rstrip("0").rstrip(".")
+
+
+def _validated_window_geometry(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    geometry = value.strip()
+    match = WINDOW_GEOMETRY_RE.fullmatch(geometry)
+    if match is None:
+        return None
+    width = int(match.group("width"))
+    height = int(match.group("height"))
+    return geometry if width > 0 and height > 0 else None
+
+
 def _json_number(value: float | None, digits: int = 6) -> float | int | None:
     if value is None or not np.isfinite(value):
         return None
@@ -426,6 +496,60 @@ def _max_elements_for_kind(kind: str) -> int:
     raise ValueError(f"Unknown element kind: {kind!r}")
 
 
+def _validate_element_count(raw_value, kind: str) -> int:  # noqa: ANN001
+    prefix = _element_prefix(kind)
+    max_count = _max_elements_for_kind(kind)
+    try:
+        count = int(str(raw_value).strip())
+    except (TypeError, ValueError):
+        raise ValueError(f"{prefix} count must be an integer from 1 to {max_count}.")
+    if count < 1 or count > max_count:
+        raise ValueError(f"{prefix} count must be from 1 to {max_count}.")
+    return count
+
+
+def _centered_auto_positions(count: int) -> list[float]:
+    offset = (count - 1) * AUTO_LAYOUT_SPACING / 2.0
+    return [
+        float(snap_to_grid(index * AUTO_LAYOUT_SPACING - offset))
+        for index in range(count)
+    ]
+
+
+def _build_auto_layout_elements(tx_count: int, rx_count: int) -> list[EditableElement]:
+    tx_x = _centered_auto_positions(tx_count)
+    rx_x = _centered_auto_positions(rx_count)
+    return [
+        *[
+            EditableElement(
+                kind="tx",
+                index=index,
+                name=f"Tx{index + 1}",
+                x=x,
+                y=AUTO_LAYOUT_TX_Y,
+            )
+            for index, x in enumerate(tx_x)
+        ],
+        *[
+            EditableElement(
+                kind="rx",
+                index=index,
+                name=f"Rx{index + 1}",
+                x=x,
+                y=AUTO_LAYOUT_RX_Y,
+            )
+            for index, x in enumerate(rx_x)
+        ],
+    ]
+
+
+def _starter_layout_elements() -> list[EditableElement]:
+    return [
+        EditableElement(kind="tx", index=0, name="Tx1", x=0.0, y=AUTO_LAYOUT_TX_Y),
+        EditableElement(kind="rx", index=0, name="Rx1", x=0.0, y=AUTO_LAYOUT_RX_Y),
+    ]
+
+
 def _snap_to_grid_inside(value: float, low: float, high: float) -> float:
     snapped = snap_to_grid(value)
     if snapped < low:
@@ -433,6 +557,25 @@ def _snap_to_grid_inside(value: float, low: float, high: float) -> float:
     elif snapped > high:
         snapped = np.floor(high / GRID_STEP) * GRID_STEP
     return _clip_to_bounds(float(snapped), low, high)
+
+
+def _event_widget_is_text_input(event) -> bool:  # noqa: ANN001
+    widget = getattr(event, "widget", None)
+    if widget is None:
+        return False
+    try:
+        widget_class = widget.winfo_class()
+    except tk.TclError:
+        return False
+    return widget_class in {
+        "Entry",
+        "TEntry",
+        "Text",
+        "Combobox",
+        "TCombobox",
+        "Spinbox",
+        "TSpinbox",
+    }
 
 
 def _axis_limits(
@@ -487,6 +630,58 @@ def _azimuth_status_label(metrics: ArrayMetrics) -> str:
     return f"Az {metrics.front_radar_status}"
 
 
+def _dbf_mode_label(mode: str | None) -> str:
+    if mode == "elevation":
+        return "Elevation"
+    return "Azimuth"
+
+
+def _dbf_short_label(mode: str | None) -> str:
+    if mode == "elevation":
+        return "El"
+    return "Az"
+
+
+def _format_dbf_angle_label(angle: float) -> str:
+    if abs(angle) < 0.05:
+        return "0 deg"
+    return f"{angle:+.0f} deg"
+
+
+def _series_table_label(series) -> str:  # noqa: ANN001
+    if series is None:
+        return "ideal"
+    return series.short_label()
+
+
+def _pattern_slot_label(kind: str, plane: str) -> str:
+    kind_label = "Amp" if kind == PATTERN_KIND_AMPLITUDE else "Phase"
+    plane_label = "E" if plane == PATTERN_PLANE_ELEVATION else "H"
+    return f"{kind_label} {plane_label}"
+
+
+def _dbf_frame_index_for_angle(angle: float) -> int:
+    frame = int(round((angle - DBF_SCAN_FOV[0]) / DBF_SCAN_STEP_DEG))
+    return max(0, min(DBF_SCAN_GRID_SIZE - 1, frame))
+
+
+def _dbf_peak_index(
+    scan_angles: np.ndarray,
+    spectrum_db: np.ndarray,
+    true_angle: float,
+    tolerance_db: float = 1e-6,
+) -> int:
+    peak_gain = float(np.max(spectrum_db))
+    candidate_indices = np.flatnonzero(spectrum_db >= peak_gain - tolerance_db)
+    if len(candidate_indices) == 0:
+        return int(np.argmax(spectrum_db))
+    return int(
+        candidate_indices[
+            int(np.argmin(np.abs(scan_angles[candidate_indices] - true_angle)))
+        ]
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  Main GUI class
 # ═══════════════════════════════════════════════════════════════════════
@@ -517,7 +712,11 @@ class VirtualArrayGui:
         self.dragging: EditableElement | None = None
         self.drag_bounds: tuple[float, float, float, float] | None = None
         self.drag_axis_limits: tuple[tuple[float, float], tuple[float, float]] | None = None
+        self.drag_start_snapshot: LayoutSnapshot | None = None
         self.selected_element: EditableElement | None = None
+        self.delete_mode = False
+        self.undo_stack: deque[LayoutSnapshot] = deque(maxlen=MAX_HISTORY_STATES)
+        self.redo_stack: deque[LayoutSnapshot] = deque(maxlen=MAX_HISTORY_STATES)
 
         # Hover state
         self.physical_hover_annotation = None
@@ -526,16 +725,36 @@ class VirtualArrayGui:
         self.virtual_hover_text: list[str] = []
         self.physical_buttons: list[MplButton] = []
         self.physical_button_callbacks: list[int] = []
+        self.dbf_scan_active = False
+        self.dbf_scan_paused = False
+        self.dbf_scan_mode: str | None = None
+        self.dbf_scan_after_id: str | None = None
+        self.dbf_true_angles = np.empty(0, dtype=float)
+        self.dbf_scan_angles = np.empty(0, dtype=float)
+        self.dbf_spectra_db = np.empty((0, 0), dtype=float)
+        self.dbf_scan_frame = 0
+        self.dbf_progress_updating = False
+        self.dbf_az_toolbar_button: ttk.Button | None = None
+        self.dbf_el_toolbar_button: ttk.Button | None = None
+        self.dbf_stop_toolbar_button: ttk.Button | None = None
 
         self.element_pattern: ElementPattern | None = None
-        self.frequency_ghz = tk.StringVar(value=str(DEFAULT_FREQUENCY_GHZ))
-        self.pattern_status = tk.StringVar(value="Pattern: isotropic")
+        self.channel_patterns = ChannelPatternSet()
+        self.auto_tx_count = tk.StringVar(value="1")
+        self.auto_rx_count = tk.StringVar(value="1")
+        self.last_valid_frequency_ghz = DEFAULT_FREQUENCY_GHZ
+        self.frequency_ghz = tk.StringVar(
+            value=_format_frequency_ghz(DEFAULT_FREQUENCY_GHZ)
+        )
+        self.frequency_entry: ttk.Entry | None = None
+        self.pattern_status = tk.StringVar(value="Patterns: ideal")
         self.status = tk.StringVar(
             value="Drag Tx/Rx points in Physical Array. Release to refresh Virtual Array and Responses."
         )
         self.last_layout_dir = Path("outputs").resolve()
         self.last_pattern_dir = Path.home()
         self._load_local_state()
+        self._sync_auto_count_inputs()
 
         # ── Build the grid layout ─────────────────────────────────
         root.grid_rowconfigure(0, weight=1)  # Physical + Virtual
@@ -629,27 +848,29 @@ class VirtualArrayGui:
 
         # ── Row 1: Azimuth Response + Elevation Response ──────────
         self.az_chart = self._build_response_chart(
-            row=1, col=0, padding=(6, 3, 3, 6)
+            row=1, col=0, padding=(6, 3, 3, 6), mode="azimuth"
         )
         self.el_chart = self._build_response_chart(
-            row=1, col=1, padding=(3, 3, 6, 6)
+            row=1, col=1, padding=(3, 3, 6, 6), mode="elevation"
         )
 
         # ── Row 2: Controls ───────────────────────────────────────
         controls_outer = ttk.Frame(root, style="Status.TFrame")
         controls_outer.grid(row=2, column=0, columnspan=3, sticky="ew")
-        controls = ttk.Frame(controls_outer, style="Status.TFrame", padding=(10, 8))
+        controls = ttk.Frame(controls_outer, style="Status.TFrame", padding=(10, 6, 10, 3))
         controls.pack(fill=tk.X)
+        status_row = ttk.Frame(controls_outer, style="Status.TFrame", padding=(10, 0, 10, 6))
+        status_row.pack(fill=tk.X)
 
         ttk.Button(
             controls,
-            text="📥 Import Layout",
+            text="Import Layout",
             command=self.import_layout_config,
             style="Accent.TButton",
         ).pack(side=tk.LEFT)
         ttk.Button(
             controls,
-            text="📤 Export Layout",
+            text="Export Layout",
             command=self.export_layout_config,
             style="Large.TButton",
         ).pack(side=tk.LEFT, padx=(6, 0))
@@ -665,9 +886,44 @@ class VirtualArrayGui:
             width=8,
             justify="right",
         )
+        self.frequency_entry = freq_entry
         freq_entry.pack(side=tk.LEFT)
         freq_entry.bind("<Return>", self.on_frequency_changed)
         freq_entry.bind("<FocusOut>", self.on_frequency_changed)
+
+        ttk.Separator(controls, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=12)
+
+        ttk.Label(
+            controls, text="Auto:", style="Status.TLabel"
+        ).pack(side=tk.LEFT, padx=(0, 4))
+        auto_tx_entry = ttk.Entry(
+            controls,
+            textvariable=self.auto_tx_count,
+            width=3,
+            justify="right",
+        )
+        auto_tx_entry.pack(side=tk.LEFT)
+        auto_tx_entry.bind("<Return>", self.apply_auto_array_layout)
+        ttk.Label(
+            controls, text="T", style="Status.TLabel"
+        ).pack(side=tk.LEFT, padx=(2, 4))
+        auto_rx_entry = ttk.Entry(
+            controls,
+            textvariable=self.auto_rx_count,
+            width=3,
+            justify="right",
+        )
+        auto_rx_entry.pack(side=tk.LEFT)
+        auto_rx_entry.bind("<Return>", self.apply_auto_array_layout)
+        ttk.Label(
+            controls, text="R", style="Status.TLabel"
+        ).pack(side=tk.LEFT, padx=(2, 6))
+        ttk.Button(
+            controls,
+            text="Apply Array",
+            command=self.apply_auto_array_layout,
+            style="Large.TButton",
+        ).pack(side=tk.LEFT)
 
         ttk.Separator(controls, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=12)
 
@@ -686,21 +942,41 @@ class VirtualArrayGui:
 
         ttk.Button(
             controls,
-            text="Load Pattern",
-            command=self.import_element_pattern,
+            text="Channel Patterns...",
+            command=self.open_channel_patterns_dialog,
             style="Large.TButton",
         ).pack(side=tk.LEFT, padx=(8, 0))
-        ttk.Button(
+
+        ttk.Separator(controls, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=12)
+
+        self.dbf_az_toolbar_button = ttk.Button(
             controls,
-            text="Clear Pattern",
-            command=self.clear_element_pattern,
+            text="Play Az DBF",
+            command=self.toggle_az_dbf_animation,
+            style="Accent.TButton",
+        )
+        self.dbf_az_toolbar_button.pack(side=tk.LEFT)
+        self.dbf_el_toolbar_button = ttk.Button(
+            controls,
+            text="Play El DBF",
+            command=self.toggle_el_dbf_animation,
             style="Large.TButton",
-        ).pack(side=tk.LEFT, padx=(4, 0))
-        ttk.Label(
+        )
+        self.dbf_el_toolbar_button.pack(side=tk.LEFT, padx=(6, 0))
+        self.dbf_stop_toolbar_button = ttk.Button(
             controls,
+            text="Stop DBF",
+            command=self.stop_dbf_scan_animation,
+            style="Large.TButton",
+        )
+        self.dbf_stop_toolbar_button.pack(side=tk.LEFT, padx=(6, 0))
+        self.dbf_stop_toolbar_button.configure(state=tk.DISABLED)
+
+        ttk.Label(
+            status_row,
             textvariable=self.status,
             style="Status.TLabel",
-        ).pack(side=tk.LEFT, padx=(12, 0))
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # ── Event bindings ────────────────────────────────────────
         # Physical array: press, motion, release (drag + hover)
@@ -718,18 +994,37 @@ class VirtualArrayGui:
         self.root.bind("<Up>", self.on_arrow_key)
         self.root.bind("<Down>", self.on_arrow_key)
         self.root.bind("<Delete>", self.on_delete_key)
+        self._bind_keyboard_shortcuts()
 
         self.generate_virtual_array()
 
     # ── Response chart helpers ──────────────────────────────────────────
 
+    def _bind_keyboard_shortcuts(self) -> None:
+        for sequence in ("<Control-z>", "<Control-Z>"):
+            self.root.bind(sequence, self.undo_layout_change)
+        for sequence in ("<Control-y>", "<Control-Y>", "<Control-Shift-Z>", "<Control-Shift-z>"):
+            self.root.bind(sequence, self.redo_layout_change)
+        self.root.bind("<Control-s>", self.on_save_shortcut)
+        self.root.bind("<Control-S>", self.on_save_shortcut)
+        self.root.bind("<Control-o>", self.on_import_shortcut)
+        self.root.bind("<Control-O>", self.on_import_shortcut)
+        self.root.bind("<Control-g>", self.on_refresh_shortcut)
+        self.root.bind("<Control-G>", self.on_refresh_shortcut)
+        self.root.bind("<Control-r>", self.on_refresh_shortcut)
+        self.root.bind("<Control-R>", self.on_refresh_shortcut)
+        self.root.bind("<Control-f>", self.on_focus_frequency_shortcut)
+        self.root.bind("<Control-F>", self.on_focus_frequency_shortcut)
+        self.root.bind("<Escape>", self.on_escape_key)
+
     def _build_response_chart(
-        self, row: int, col: int, padding: tuple[int, int, int, int]
+        self, row: int, col: int, padding: tuple[int, int, int, int], mode: str
     ) -> ResponseChart:
         """Create a response chart (Az or El) and embed it in the grid."""
         frame = ttk.Frame(self.root, padding=padding)
         frame.grid(row=row, column=col, sticky="nsew")
         frame.grid_rowconfigure(0, weight=1)
+        frame.grid_rowconfigure(1, weight=0)
         frame.grid_columnconfigure(0, weight=1)
 
         fig = Figure(figsize=(RESPONSE_FIG_W, RESPONSE_FIG_H), dpi=FIG_DPI)
@@ -740,7 +1035,38 @@ class VirtualArrayGui:
         canvas = FigureCanvasTkAgg(fig, master=frame)
         canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
 
-        return ResponseChart(fig=fig, ax=ax, canvas=canvas)
+        progress_frame = ttk.Frame(frame)
+        progress_frame.grid(row=1, column=0, sticky="ew", pady=(2, 0))
+        progress_frame.grid_columnconfigure(0, weight=1)
+        progress_var = tk.DoubleVar(value=_dbf_frame_index_for_angle(0.0))
+        progress_scale = ttk.Scale(
+            progress_frame,
+            from_=0,
+            to=DBF_SCAN_GRID_SIZE - 1,
+            orient=tk.HORIZONTAL,
+            variable=progress_var,
+            command=lambda value, chart_mode=mode: self.on_dbf_progress_changed(
+                chart_mode, value
+            ),
+        )
+        progress_scale.grid(row=0, column=0, sticky="ew")
+        progress_label = ttk.Label(
+            progress_frame,
+            text=f"{_dbf_short_label(mode)} 0 deg",
+            style="Status.TLabel",
+            width=16,
+            anchor="e",
+        )
+        progress_label.grid(row=0, column=1, sticky="e", padx=(8, 0))
+
+        return ResponseChart(
+            fig=fig,
+            ax=ax,
+            canvas=canvas,
+            progress_var=progress_var,
+            progress_scale=progress_scale,
+            progress_label=progress_label,
+        )
 
     def _build_figure_buttons(
         self,
@@ -897,7 +1223,9 @@ class VirtualArrayGui:
         self.status_text.configure(text=status_text, foreground=grade_color)
 
         # Update header
-        self.eval_freq_label.configure(text=f"Frequency: {self.frequency_ghz.get()} GHz")
+        freq_ghz = self.current_frequency_ghz()
+        freq_text = _format_frequency_ghz(freq_ghz)
+        self.eval_freq_label.configure(text=f"Frequency: {freq_text} GHz")
 
         # PRIMARY values
         values = {
@@ -937,26 +1265,38 @@ class VirtualArrayGui:
         self._update_notes_panel(self._notes_parts(metrics))
 
         # Compact summary: Tx/Rx | frequency | aperture
-        freq_ghz = self.frequency_ghz.get()
-        wavelength_mm = LIGHT_SPEED_MM_PER_NS / float(freq_ghz) if freq_ghz else 0.0
+        wavelength_mm = LIGHT_SPEED_MM_PER_NS / freq_ghz
         x_mm = self.aperture_mm(metrics.x_aperture)
         y_mm = self.aperture_mm(metrics.y_aperture)
         self.summary_label.configure(
             text=(
                 f"{metrics.tx_count}Tx × {metrics.rx_count}Rx  ·  "
-                f"{freq_ghz} GHz (λ={wavelength_mm:.3f} mm)  ·  "
+                f"{freq_text} GHz (λ={wavelength_mm:.3f} mm)  ·  "
                 f"{_format_mm(x_mm)} × {_format_mm(y_mm)}"
             )
         )
 
     # ── Array data ────────────────────────────────────────────────────
 
+    def _set_frequency_ghz(self, frequency: float) -> None:
+        self.last_valid_frequency_ghz = frequency
+        self.frequency_ghz.set(_format_frequency_ghz(frequency))
+
+    def _normalize_frequency_input(self) -> tuple[float, bool]:
+        frequency = _parse_frequency_ghz(self.frequency_ghz.get())
+        if frequency is None:
+            fallback = self.last_valid_frequency_ghz
+            self.frequency_ghz.set(_format_frequency_ghz(fallback))
+            return fallback, False
+        self._set_frequency_ghz(frequency)
+        return frequency, True
+
+    def current_frequency_ghz(self) -> float:
+        frequency = _parse_frequency_ghz(self.frequency_ghz.get())
+        return frequency if frequency is not None else self.last_valid_frequency_ghz
+
     def wavelength_mm(self) -> float:
-        try:
-            freq_ghz = float(self.frequency_ghz.get())
-        except ValueError:
-            freq_ghz = DEFAULT_FREQUENCY_GHZ
-        return LIGHT_SPEED_MM_PER_NS / freq_ghz if freq_ghz > 0 else LIGHT_SPEED_MM_PER_NS / DEFAULT_FREQUENCY_GHZ
+        return LIGHT_SPEED_MM_PER_NS / self.current_frequency_ghz()
 
     def half_wavelength_mm(self) -> float:
         return self.wavelength_mm() / 2.0
@@ -965,17 +1305,7 @@ class VirtualArrayGui:
         return aperture_half_lambda * self.half_wavelength_mm()
 
     def _build_elements(self) -> list[EditableElement]:
-        array = build_array()
-        elements: list[EditableElement] = []
-        elements.extend(
-            EditableElement(kind="tx", index=i, name=point.name, x=point.x, y=point.y)
-            for i, point in enumerate(array.tx)
-        )
-        elements.extend(
-            EditableElement(kind="rx", index=i, name=point.name, x=point.x, y=point.y)
-            for i, point in enumerate(array.rx)
-        )
-        return elements
+        return _starter_layout_elements()
 
     def current_array(self) -> AntennaArray:
         tx = [
@@ -993,12 +1323,24 @@ class VirtualArrayGui:
     def _elements_of_kind(self, kind: str) -> list[EditableElement]:
         return [element for element in self.elements if element.kind == kind]
 
+    def _sync_auto_count_inputs(self) -> None:
+        auto_tx_count = getattr(self, "auto_tx_count", None)
+        auto_rx_count = getattr(self, "auto_rx_count", None)
+        if auto_tx_count is not None:
+            auto_tx_count.set(str(len(self._elements_of_kind("tx"))))
+        if auto_rx_count is not None:
+            auto_rx_count.set(str(len(self._elements_of_kind("rx"))))
+
     def _renumber_elements(self) -> None:
         selected = self.selected_element
         renumbered: list[EditableElement] = []
         for kind in ("tx", "rx"):
             prefix = _element_prefix(kind)
-            for index, element in enumerate(self._elements_of_kind(kind)):
+            sorted_elements = sorted(
+                self._elements_of_kind(kind),
+                key=lambda element: (element.x, element.y, element.index),
+            )
+            for index, element in enumerate(sorted_elements):
                 element.index = index
                 element.name = f"{prefix}{index + 1}"
                 renumbered.append(element)
@@ -1007,6 +1349,103 @@ class VirtualArrayGui:
             self.selected_element = selected
         else:
             self.selected_element = None
+
+    def _clear_interaction_state(self) -> None:
+        self.delete_mode = False
+        self.selected_element = None
+        self.dragging = None
+        self.drag_bounds = None
+        self.drag_axis_limits = None
+        self.drag_start_snapshot = None
+        self._sync_auto_count_inputs()
+        self.delete_mode = False
+
+    def _layout_snapshot_for(
+        self,
+        elements: list[EditableElement],
+        selected_element: EditableElement | None,
+    ) -> LayoutSnapshot:
+        selected_key = (
+            (selected_element.kind, selected_element.index, selected_element.name)
+            if selected_element is not None
+            else None
+        )
+        return LayoutSnapshot(
+            elements=tuple(
+                (
+                    element.kind,
+                    int(element.index),
+                    element.name,
+                    round(float(element.x), ROUND_DECIMALS),
+                    round(float(element.y), ROUND_DECIMALS),
+                )
+                for element in elements
+            ),
+            selected_key=selected_key,
+        )
+
+    def _capture_layout_snapshot(self) -> LayoutSnapshot:
+        return self._layout_snapshot_for(self.elements, self.selected_element)
+
+    def _push_undo_snapshot(self, snapshot: LayoutSnapshot | None = None) -> None:
+        snapshot = snapshot if snapshot is not None else self._capture_layout_snapshot()
+        if not self.undo_stack or self.undo_stack[-1] != snapshot:
+            self.undo_stack.append(snapshot)
+        self.redo_stack.clear()
+
+    def _restore_layout_snapshot(self, snapshot: LayoutSnapshot) -> None:
+        self.elements = [
+            EditableElement(kind=kind, index=index, name=name, x=x, y=y)
+            for kind, index, name, x, y in snapshot.elements
+        ]
+        self.selected_element = None
+        if snapshot.selected_key is not None:
+            for element in self.elements:
+                key = (element.kind, element.index, element.name)
+                if key == snapshot.selected_key:
+                    self.selected_element = element
+                    break
+        self.dragging = None
+        self.drag_bounds = None
+        self.drag_axis_limits = None
+        self.drag_start_snapshot = None
+
+    def undo_layout_change(self, event=None) -> str | None:  # noqa: ANN001
+        if event is not None and _event_widget_is_text_input(event):
+            return None
+
+        current_snapshot = self._capture_layout_snapshot()
+        while self.undo_stack and self.undo_stack[-1] == current_snapshot:
+            self.undo_stack.pop()
+        if not self.undo_stack:
+            self.status.set("Nothing to undo.")
+            return "break"
+
+        previous_snapshot = self.undo_stack.pop()
+        self.redo_stack.append(current_snapshot)
+        self._restore_layout_snapshot(previous_snapshot)
+        self.generate_virtual_array()
+        self.status.set("Undid layout edit.")
+        return "break"
+
+    def redo_layout_change(self, event=None) -> str | None:  # noqa: ANN001
+        if event is not None and _event_widget_is_text_input(event):
+            return None
+
+        current_snapshot = self._capture_layout_snapshot()
+        while self.redo_stack and self.redo_stack[-1] == current_snapshot:
+            self.redo_stack.pop()
+        if not self.redo_stack:
+            self.status.set("Nothing to redo.")
+            return "break"
+
+        next_snapshot = self.redo_stack.pop()
+        if not self.undo_stack or self.undo_stack[-1] != current_snapshot:
+            self.undo_stack.append(current_snapshot)
+        self._restore_layout_snapshot(next_snapshot)
+        self.generate_virtual_array()
+        self.status.set("Redid layout edit.")
+        return "break"
 
     def _next_element_position(self, kind: str) -> tuple[float, float]:
         same_kind = self._elements_of_kind(kind)
@@ -1040,6 +1479,7 @@ class VirtualArrayGui:
             messagebox.showinfo("Antenna limit", f"{prefix} count is limited to {max_count}.")
             return
 
+        self._push_undo_snapshot()
         x, y = self._next_element_position(kind)
         element = EditableElement(
             kind=kind,
@@ -1051,9 +1491,12 @@ class VirtualArrayGui:
         self.elements.append(element)
         self.selected_element = element
         self._renumber_elements()
+        self.delete_mode = False
         self.dragging = None
         self.drag_bounds = None
         self.drag_axis_limits = None
+        self.drag_start_snapshot = None
+        self._sync_auto_count_inputs()
         self.generate_virtual_array()
         self.status.set(
             f"Added {element.name} | "
@@ -1065,20 +1508,68 @@ class VirtualArrayGui:
         self._build_figure_buttons(
             self.phys_fig,
             (
-                ("+Tx", [0.70, 0.838, 0.07, 0.055], self.add_tx_element),
-                ("+Rx", [0.775, 0.838, 0.07, 0.055], self.add_rx_element),
-                ("Delete", [0.85, 0.838, 0.105, 0.055], self.delete_selected_element),
+                ("+Tx", [0.55, 0.838, 0.07, 0.055], self.add_tx_element),
+                ("+Rx", [0.625, 0.838, 0.07, 0.055], self.add_rx_element),
+                ("Delete", [0.70, 0.838, 0.105, 0.055], self.toggle_delete_mode),
+                ("Clear", [0.81, 0.838, 0.105, 0.055], self.clear_array_layout),
             ),
             self.physical_buttons,
             self.physical_button_callbacks,
         )
 
+    def toggle_delete_mode(self, _event=None) -> None:  # noqa: ANN001
+        self.delete_mode = not self.delete_mode
+        self.dragging = None
+        self.drag_bounds = None
+        self.drag_axis_limits = None
+        self.drag_start_snapshot = None
+        if self.delete_mode:
+            self.status.set("Delete mode: click Tx/Rx elements to remove them. Press Esc to exit.")
+        else:
+            self.status.set("Delete mode off.")
+
+    def clear_array_layout(self, _event=None) -> None:  # noqa: ANN001
+        new_elements = _starter_layout_elements()
+        if self._layout_snapshot_for(new_elements, None) == self._capture_layout_snapshot():
+            self.status.set("Layout already clear.")
+            return
+        self._push_undo_snapshot()
+        self.elements = new_elements
+        self._clear_interaction_state()
+        self._sync_auto_count_inputs()
+        self.generate_virtual_array()
+        self.status.set("Cleared layout to 1T1R starter points.")
+
+    def apply_auto_array_layout(self, _event=None) -> str:  # noqa: ANN001
+        try:
+            tx_count = _validate_element_count(self.auto_tx_count.get(), "tx")
+            rx_count = _validate_element_count(self.auto_rx_count.get(), "rx")
+        except ValueError as exc:
+            self.status.set(str(exc))
+            messagebox.showinfo("Auto array layout", str(exc))
+            return "break"
+
+        new_elements = _build_auto_layout_elements(tx_count, rx_count)
+        if self._layout_snapshot_for(new_elements, None) == self._capture_layout_snapshot():
+            self.status.set(f"Auto layout already applied: {tx_count}T{rx_count}R.")
+            return "break"
+
+        self._push_undo_snapshot()
+        self.elements = new_elements
+        self._clear_interaction_state()
+        self._sync_auto_count_inputs()
+        self.generate_virtual_array()
+        self.status.set(f"Auto layout applied: {tx_count}T{rx_count}R.")
+        return "break"
+
     def delete_selected_element(self) -> None:
         if self.selected_element is None:
-            self.status.set("No antenna selected. Click a Tx/Rx element first.")
+            self.toggle_delete_mode()
             return
 
-        element = self.selected_element
+        self._delete_element(self.selected_element)
+
+    def _delete_element(self, element: EditableElement) -> bool:
         same_kind_count = len(self._elements_of_kind(element.kind))
         if same_kind_count <= 1:
             prefix = _element_prefix(element.kind)
@@ -1087,22 +1578,691 @@ class VirtualArrayGui:
                 "Antenna limit",
                 f"At least one {prefix} element is required for analysis.",
             )
-            return
+            return False
 
         deleted_name = element.name
+        self._push_undo_snapshot()
         self.elements = [candidate for candidate in self.elements if candidate is not element]
         self.selected_element = None
         self.dragging = None
         self.drag_bounds = None
         self.drag_axis_limits = None
+        self.drag_start_snapshot = None
         self._renumber_elements()
+        self._sync_auto_count_inputs()
         self.generate_virtual_array()
-        self.status.set(f"Deleted {deleted_name}. Antenna numbering updated.")
+        mode_suffix = " Delete mode remains on." if self.delete_mode else ""
+        self.status.set(f"Deleted {deleted_name}. Tx/Rx numbering aligned.{mode_suffix}")
+        return True
 
     # ── Button handlers ───────────────────────────────────────────────
 
-    def on_frequency_changed(self, _event=None) -> None:  # noqa: ANN001
+    def on_frequency_changed(self, _event=None) -> str:  # noqa: ANN001
+        frequency, is_valid = self._normalize_frequency_input()
         self.generate_virtual_array()
+        if is_valid:
+            self.status.set(f"Frequency set to {_format_frequency_ghz(frequency)} GHz.")
+        else:
+            self.status.set(
+                f"Invalid frequency. Restored {_format_frequency_ghz(frequency)} GHz."
+            )
+        return "break"
+
+    def on_save_shortcut(self, _event=None) -> str:  # noqa: ANN001
+        self.export_layout_config()
+        return "break"
+
+    def on_import_shortcut(self, _event=None) -> str:  # noqa: ANN001
+        self.import_layout_config()
+        return "break"
+
+    def on_refresh_shortcut(self, _event=None) -> str:  # noqa: ANN001
+        _frequency, is_valid = self._normalize_frequency_input()
+        self.generate_virtual_array()
+        self.status.set("Refreshed." if is_valid else "Invalid frequency restored and refreshed.")
+        return "break"
+
+    def on_focus_frequency_shortcut(self, _event=None) -> str:  # noqa: ANN001
+        if self.frequency_entry is not None:
+            self.frequency_entry.focus_set()
+            self.frequency_entry.selection_range(0, tk.END)
+        return "break"
+
+    def on_escape_key(self, _event=None) -> str:  # noqa: ANN001
+        if self.delete_mode:
+            self.delete_mode = False
+            self.status.set("Delete mode off.")
+            return "break"
+
+        if self.dragging is not None and self.drag_start_snapshot is not None:
+            self._restore_layout_snapshot(self.drag_start_snapshot)
+            self.generate_virtual_array()
+            self.status.set("Drag canceled.")
+            return "break"
+
+        self.dragging = None
+        self.drag_bounds = None
+        self.drag_axis_limits = None
+        self.drag_start_snapshot = None
+        if self.selected_element is None:
+            self.status.set("No selection.")
+            return "break"
+        self.selected_element = None
+        self._draw_physical_array()
+        self.phys_canvas.draw_idle()
+        self.status.set("Selection cleared.")
+        return "break"
+
+    def toggle_az_dbf_animation(self, _event=None) -> None:  # noqa: ANN001
+        self.toggle_dbf_scan_animation("azimuth")
+
+    def toggle_el_dbf_animation(self, _event=None) -> None:  # noqa: ANN001
+        self.toggle_dbf_scan_animation("elevation")
+
+    def toggle_dbf_scan_animation(self, mode: str = "azimuth") -> None:
+        if self.dbf_scan_active and self.dbf_scan_mode == mode:
+            if self.dbf_scan_paused:
+                self.resume_dbf_scan_animation()
+            else:
+                self.pause_dbf_scan_animation()
+            return
+        self.start_dbf_scan_animation(mode)
+
+    def start_dbf_scan_animation(self, mode: str = "azimuth") -> None:
+        self.stop_dbf_scan_animation(restore_response=True)
+        _frequency, is_valid = self._normalize_frequency_input()
+        self._load_dbf_spectra(mode)
+        self.dbf_scan_frame = 0
+        self.dbf_scan_active = True
+        self.dbf_scan_paused = False
+        self._update_dbf_scan_controls()
+        self._draw_dbf_scan_frame()
+        self._schedule_dbf_scan_frame()
+        label = _dbf_mode_label(mode)
+        self.status.set(
+            f"Playing {label} DBF spectra from -90 deg to +90 deg."
+            if is_valid
+            else f"Invalid frequency restored. Playing {label} DBF spectra."
+        )
+
+    def _dbf_spectrum_bank_for_mode(self, mode: str):
+        if mode == "azimuth":
+            return dbf_azimuth_spectrum_bank
+        if mode == "elevation":
+            return dbf_elevation_spectrum_bank
+        raise ValueError(f"Unknown DBF animation mode: {mode!r}")
+
+    def _load_dbf_spectra(self, mode: str) -> None:
+        spectrum_bank = self._dbf_spectrum_bank_for_mode(mode)
+        self.dbf_true_angles, self.dbf_scan_angles, self.dbf_spectra_db = (
+            spectrum_bank(
+                self.current_array(),
+                tx_pattern=self.element_pattern,
+                rx_pattern=self.element_pattern,
+                channel_patterns=self.channel_patterns,
+            )
+        )
+        self.dbf_scan_mode = mode
+
+    def pause_dbf_scan_animation(self) -> None:
+        if not self.dbf_scan_active or self.dbf_scan_paused:
+            return
+        if self.dbf_scan_after_id is not None:
+            try:
+                self.root.after_cancel(self.dbf_scan_after_id)
+            except tk.TclError:
+                pass
+        self.dbf_scan_after_id = None
+        self.dbf_scan_paused = True
+        self._update_dbf_scan_controls()
+        label = _dbf_mode_label(self.dbf_scan_mode)
+        true_angle = self._current_dbf_true_angle()
+        self.status.set(f"Paused {label} DBF spectrum at {true_angle:+.1f} deg.")
+
+    def resume_dbf_scan_animation(self) -> None:
+        if not self.dbf_scan_active or not self.dbf_scan_paused:
+            return
+        self.dbf_scan_paused = False
+        self._update_dbf_scan_controls()
+        self._schedule_dbf_scan_frame()
+        label = _dbf_mode_label(self.dbf_scan_mode)
+        self.status.set(f"Resumed {label} DBF spectrum animation.")
+
+    def stop_dbf_scan_animation(self, restore_response: bool = True) -> None:
+        had_animation = self.dbf_scan_active or self.dbf_scan_mode is not None
+        if self.dbf_scan_after_id is not None:
+            try:
+                self.root.after_cancel(self.dbf_scan_after_id)
+            except tk.TclError:
+                pass
+        self.dbf_scan_after_id = None
+        self.dbf_scan_active = False
+        self.dbf_scan_paused = False
+        self.dbf_scan_mode = None
+        self._update_dbf_scan_controls()
+        if restore_response and had_animation:
+            self.generate_virtual_array()
+
+    def _schedule_dbf_scan_frame(self) -> None:
+        self.dbf_scan_after_id = self.root.after(
+            DBF_SCAN_INTERVAL_MS,
+            self._advance_dbf_scan_animation,
+        )
+
+    def _advance_dbf_scan_animation(self) -> None:
+        if not self.dbf_scan_active or self.dbf_scan_paused:
+            return
+        self.dbf_scan_frame += 1
+        if self.dbf_scan_frame >= len(self.dbf_true_angles):
+            self.dbf_scan_after_id = None
+            self.dbf_scan_active = False
+            self.dbf_scan_paused = False
+            label = _dbf_mode_label(self.dbf_scan_mode)
+            self._update_dbf_scan_controls()
+            self.status.set(f"{label} DBF spectrum animation complete.")
+            return
+        self._draw_dbf_scan_frame()
+        self._schedule_dbf_scan_frame()
+
+    def _update_dbf_scan_controls(self) -> None:
+        az_text = "Play Az DBF"
+        el_text = "Play El DBF"
+        if self.dbf_scan_active and self.dbf_scan_mode == "azimuth":
+            az_text = "Resume Az" if self.dbf_scan_paused else "Pause Az"
+        elif self.dbf_scan_active and self.dbf_scan_mode == "elevation":
+            el_text = "Resume El" if self.dbf_scan_paused else "Pause El"
+
+        if self.dbf_az_toolbar_button is not None:
+            self.dbf_az_toolbar_button.configure(text=az_text)
+        if self.dbf_el_toolbar_button is not None:
+            self.dbf_el_toolbar_button.configure(text=el_text)
+        if self.dbf_stop_toolbar_button is not None:
+            state = (
+                tk.NORMAL
+                if self.dbf_scan_active or self.dbf_scan_mode is not None
+                else tk.DISABLED
+            )
+            self.dbf_stop_toolbar_button.configure(state=state)
+
+    def on_dbf_progress_changed(self, mode: str, raw_value: str) -> None:
+        if self.dbf_progress_updating:
+            return
+
+        try:
+            frame = int(round(float(raw_value)))
+        except (TypeError, ValueError):
+            return
+        frame = max(0, min(DBF_SCAN_GRID_SIZE - 1, frame))
+
+        if self.dbf_scan_after_id is not None:
+            try:
+                self.root.after_cancel(self.dbf_scan_after_id)
+            except tk.TclError:
+                pass
+            self.dbf_scan_after_id = None
+
+        if (
+            self.dbf_scan_mode != mode
+            or self.dbf_true_angles.size == 0
+            or self.dbf_scan_angles.size == 0
+            or self.dbf_spectra_db.size == 0
+        ):
+            self._normalize_frequency_input()
+            self._load_dbf_spectra(mode)
+
+        self.dbf_scan_frame = min(frame, len(self.dbf_true_angles) - 1)
+        self.dbf_scan_active = True
+        self.dbf_scan_paused = True
+        self._draw_dbf_scan_frame()
+        self._update_dbf_scan_controls()
+        label = _dbf_mode_label(mode)
+        true_angle = self._current_dbf_true_angle()
+        self.status.set(f"Paused {label} DBF spectrum at {true_angle:+.1f} deg.")
+
+    def _chart_for_dbf_mode(self, mode: str) -> ResponseChart:
+        return self.el_chart if mode == "elevation" else self.az_chart
+
+    def _set_dbf_progress(
+        self, mode: str, frame_index: int, true_angle: float
+    ) -> None:
+        chart = self._chart_for_dbf_mode(mode)
+        if chart.progress_var is not None:
+            self.dbf_progress_updating = True
+            try:
+                chart.progress_var.set(float(frame_index))
+            finally:
+                self.dbf_progress_updating = False
+        if chart.progress_label is not None:
+            chart.progress_label.configure(
+                text=(
+                    f"{_dbf_short_label(mode)} {_format_dbf_angle_label(true_angle)} "
+                    f"({frame_index + 1}/{DBF_SCAN_GRID_SIZE})"
+                )
+            )
+
+    def _current_dbf_true_angle(self) -> float:
+        if self.dbf_true_angles.size == 0:
+            return 0.0
+        frame = min(self.dbf_scan_frame, len(self.dbf_true_angles) - 1)
+        return float(self.dbf_true_angles[frame])
+
+    def _draw_dbf_reference_spectrum(self, mode: str) -> None:
+        spectrum_bank = self._dbf_spectrum_bank_for_mode(mode)
+        _true_angles, scan_angles, spectra_db = spectrum_bank(
+            self.current_array(),
+            true_angles_deg=np.asarray([0.0], dtype=float),
+            tx_pattern=self.element_pattern,
+            rx_pattern=self.element_pattern,
+            channel_patterns=self.channel_patterns,
+        )
+        self._draw_dbf_spectrum(
+            mode=mode,
+            true_angle=0.0,
+            scan_angles=scan_angles,
+            spectrum_db=spectra_db[0],
+            frame_label="Reference: 0 deg",
+            frame_index=_dbf_frame_index_for_angle(0.0),
+        )
+
+    def _draw_dbf_scan_frame(self) -> None:
+        if (
+            self.dbf_true_angles.size == 0
+            or self.dbf_scan_angles.size == 0
+            or self.dbf_spectra_db.size == 0
+        ):
+            return
+
+        frame = min(self.dbf_scan_frame, len(self.dbf_true_angles) - 1)
+        true_angle = float(self.dbf_true_angles[frame])
+        spectrum_db = self.dbf_spectra_db[frame]
+        self._draw_dbf_spectrum(
+            mode=self.dbf_scan_mode or "azimuth",
+            true_angle=true_angle,
+            scan_angles=self.dbf_scan_angles,
+            spectrum_db=spectrum_db,
+            frame_label=f"Frame: {frame + 1}/{len(self.dbf_true_angles)}",
+            frame_index=frame,
+        )
+
+    def _draw_dbf_spectrum(
+        self,
+        mode: str,
+        true_angle: float,
+        scan_angles: np.ndarray,
+        spectrum_db: np.ndarray,
+        frame_label: str,
+        frame_index: int | None = None,
+    ) -> None:
+        peak_index = _dbf_peak_index(scan_angles, spectrum_db, true_angle)
+        peak_angle = float(scan_angles[peak_index])
+        peak_gain = float(spectrum_db[peak_index])
+        true_index = int(np.argmin(np.abs(scan_angles - true_angle)))
+        true_gain = float(spectrum_db[true_index])
+        mode_label = _dbf_mode_label(mode)
+        chart = self._chart_for_dbf_mode(mode)
+        ax = chart.ax
+        ax.clear()
+        if frame_index is not None:
+            self._set_dbf_progress(mode, frame_index, true_angle)
+
+        ax.plot(
+            scan_angles,
+            np.clip(spectrum_db, -40.0, 0.0),
+            color="#2f6fbb",
+            linewidth=1.8,
+        )
+        ax.axvline(
+            true_angle,
+            color="#d95f02",
+            linewidth=1.8,
+            linestyle="-",
+            zorder=4,
+            label="true angle",
+        )
+        ax.scatter(
+            [true_angle],
+            [max(true_gain, -40.0)],
+            marker="o",
+            s=58,
+            color="#d95f02",
+            edgecolors="#ffffff",
+            linewidths=0.9,
+            zorder=5,
+        )
+        if abs(peak_angle - true_angle) > 1e-9:
+            ax.scatter(
+                [peak_angle],
+                [max(peak_gain, -40.0)],
+                marker="x",
+                s=70,
+                color="#7b1fa2",
+                linewidths=1.8,
+                zorder=6,
+                label="peak",
+            )
+        ax.set_xlim(DBF_SCAN_FOV)
+        ax.set_ylim(-40.0, 1.0)
+        ax.set_title(
+            f"{mode_label} DBF Dictionary Spectrum",
+            pad=6,
+            y=1.02,
+            loc="left",
+            color=THEME["text_primary"],
+            fontweight="bold",
+        )
+        ax.set_xlabel(f"{mode_label} angle (deg)", color=THEME["text_secondary"])
+        ax.set_ylabel("Normalized gain (dB)", labelpad=2, color=THEME["text_secondary"])
+        ax.tick_params(colors=THEME["text_secondary"], labelsize=8)
+        ax.grid(True, alpha=THEME["grid_alpha"], color=THEME["grid_color"], linewidth=0.5)
+        ax.text(
+            0.02,
+            0.08,
+            (
+                f"True angle: {true_angle:+.1f} deg\n"
+                f"Peak angle: {peak_angle:+.1f} deg\n"
+                f"{frame_label}"
+            ),
+            transform=ax.transAxes,
+            ha="left",
+            va="bottom",
+            fontsize=9,
+            color=THEME["text_primary"],
+            bbox={
+                "boxstyle": "round,pad=0.25",
+                "facecolor": "#ffffff",
+                "edgecolor": THEME["card_border"],
+                "alpha": 0.9,
+                "linewidth": 0.7,
+            },
+        )
+        ax.legend(loc="lower right", fontsize=7, framealpha=0.72)
+
+        chart.hover_db = spectrum_db
+        chart.hover_angles = scan_angles
+        chart.hover_annotation = ax.annotate(
+            "",
+            xy=(0, 0),
+            xytext=(12, 12),
+            textcoords="offset points",
+            bbox={
+                "boxstyle": "round,pad=0.35",
+                "facecolor": "#ffffff",
+                "edgecolor": THEME["card_border"],
+                "alpha": 0.95,
+                "linewidth": 0.8,
+            },
+            arrowprops={"arrowstyle": "->", "color": "#888888", "linewidth": 0.8},
+            fontsize=8,
+            color=THEME["text_primary"],
+        )
+        chart.hover_annotation.set_visible(False)
+        chart.canvas.draw_idle()
+
+    def open_channel_patterns_dialog(self) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Channel Amplitude/Phase Patterns")
+        dialog.transient(self.root)
+        dialog.geometry("900x560")
+        dialog.minsize(760, 460)
+
+        root_frame = ttk.Frame(dialog, padding=10)
+        root_frame.pack(fill=tk.BOTH, expand=True)
+        root_frame.grid_columnconfigure(0, weight=1)
+        root_frame.grid_rowconfigure(1, weight=1)
+
+        summary_frame = ttk.LabelFrame(
+            root_frame,
+            text="  SUMMARY CSV  ",
+            padding=(8, 6),
+        )
+        summary_frame.grid(row=0, column=0, sticky="ew")
+        summary_frame.grid_columnconfigure(4, weight=1)
+
+        summary_specs = (
+            ("Amp H", PATTERN_KIND_AMPLITUDE, PATTERN_PLANE_HORIZONTAL),
+            ("Amp E", PATTERN_KIND_AMPLITUDE, PATTERN_PLANE_ELEVATION),
+            ("Phase H", PATTERN_KIND_PHASE, PATTERN_PLANE_HORIZONTAL),
+            ("Phase E", PATTERN_KIND_PHASE, PATTERN_PLANE_ELEVATION),
+        )
+        for column, (label, kind, plane) in enumerate(summary_specs):
+            ttk.Button(
+                summary_frame,
+                text=f"Load {label} Summary",
+                command=lambda k=kind, p=plane: self._load_summary_channel_pattern(
+                    k, p, dialog, refresh_tree
+                ),
+                style="Large.TButton",
+            ).grid(row=0, column=column, sticky="w", padx=(0 if column == 0 else 6, 0))
+
+        ttk.Button(
+            summary_frame,
+            text="Clear All",
+            command=lambda: clear_all_patterns(),
+            style="Large.TButton",
+        ).grid(row=0, column=5, sticky="e", padx=(8, 0))
+
+        table_frame = ttk.LabelFrame(
+            root_frame,
+            text="  PHYSICAL CHANNELS  ",
+            padding=(8, 6),
+        )
+        table_frame.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
+
+        columns = ("channel", "amp_h", "amp_e", "phase_h", "phase_e")
+        tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=10)
+        headings = {
+            "channel": "Channel",
+            "amp_h": "Amp H",
+            "amp_e": "Amp E",
+            "phase_h": "Phase H",
+            "phase_e": "Phase E",
+        }
+        widths = {
+            "channel": 90,
+            "amp_h": 170,
+            "amp_e": 170,
+            "phase_h": 170,
+            "phase_e": 170,
+        }
+        for column in columns:
+            tree.heading(column, text=headings[column])
+            tree.column(column, width=widths[column], minwidth=70, anchor="w")
+        tree.grid(row=0, column=0, sticky="nsew")
+
+        scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=tree.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        tree.configure(yscrollcommand=scrollbar.set)
+
+        button_row = ttk.Frame(root_frame)
+        button_row.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        for label, kind, plane in summary_specs:
+            ttk.Button(
+                button_row,
+                text=f"Set {label}",
+                command=lambda k=kind, p=plane: self._load_single_channel_pattern(
+                    tree, k, p, dialog, refresh_tree
+                ),
+                style="Large.TButton",
+            ).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(
+            button_row,
+            text="Clear Channel",
+            command=lambda: clear_selected_channel(),
+            style="Large.TButton",
+        ).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(
+            button_row,
+            text="Done",
+            command=dialog.destroy,
+            style="Accent.TButton",
+        ).pack(side=tk.RIGHT)
+
+        def refresh_tree() -> None:
+            selected = tree.selection()
+            selected_channel = selected[0] if selected else None
+            for item in tree.get_children():
+                tree.delete(item)
+            for channel_name in self._physical_channel_names():
+                pattern = self.channel_patterns.pattern_for(channel_name)
+                tree.insert(
+                    "",
+                    tk.END,
+                    iid=channel_name,
+                    values=(
+                        channel_name,
+                        _series_table_label(pattern.amplitude_horizontal),
+                        _series_table_label(pattern.amplitude_elevation),
+                        _series_table_label(pattern.phase_horizontal),
+                        _series_table_label(pattern.phase_elevation),
+                    ),
+                )
+            if selected_channel in tree.get_children():
+                tree.selection_set(selected_channel)
+                tree.focus(selected_channel)
+
+        def clear_selected_channel() -> None:
+            channel_name = self._selected_pattern_channel(tree)
+            if channel_name is None:
+                return
+            self.channel_patterns.clear_channel(channel_name)
+            self._after_channel_patterns_changed(
+                f"Cleared channel patterns: {channel_name}."
+            )
+            refresh_tree()
+
+        def clear_all_patterns() -> None:
+            if self.channel_patterns.is_empty() and self.element_pattern is None:
+                self.status.set("Channel patterns already ideal.")
+                return
+            self.channel_patterns.clear()
+            self.element_pattern = None
+            self._after_channel_patterns_changed("Cleared all channel patterns.")
+            refresh_tree()
+
+        refresh_tree()
+        if tree.get_children():
+            first = tree.get_children()[0]
+            tree.selection_set(first)
+            tree.focus(first)
+
+    def _physical_channel_names(self) -> list[str]:
+        array = self.current_array()
+        return [point.name for point in array.tx] + [point.name for point in array.rx]
+
+    def _selected_pattern_channel(self, tree: ttk.Treeview) -> str | None:
+        selected = tree.selection()
+        if not selected:
+            messagebox.showinfo(
+                "Channel patterns",
+                "Select one physical channel first.",
+            )
+            return None
+        return str(selected[0])
+
+    def _load_summary_channel_pattern(
+        self,
+        kind: str,
+        plane: str,
+        parent: tk.Toplevel,
+        refresh_callback: callable,
+    ) -> None:
+        filename = self._ask_channel_pattern_file(
+            title=f"Load {_pattern_slot_label(kind, plane)} summary CSV",
+            parent=parent,
+        )
+        if not filename:
+            return
+        try:
+            series_by_channel = load_hfss_summary_pattern(
+                filename,
+                self._physical_channel_names(),
+                value_kind=kind,
+            )
+        except Exception as exc:
+            LOGGER.exception("Load channel pattern summary failed: %s", filename)
+            messagebox.showerror("Load channel pattern summary failed", str(exc))
+            return
+
+        self.channel_patterns.update_many(series_by_channel, kind, plane)
+        self._after_channel_patterns_changed(
+            f"Loaded {_pattern_slot_label(kind, plane)} summary: {Path(filename).name}."
+        )
+        refresh_callback()
+
+    def _load_single_channel_pattern(
+        self,
+        tree: ttk.Treeview,
+        kind: str,
+        plane: str,
+        parent: tk.Toplevel,
+        refresh_callback: callable,
+    ) -> None:
+        channel_name = self._selected_pattern_channel(tree)
+        if channel_name is None:
+            return
+        filename = self._ask_channel_pattern_file(
+            title=f"Load {_pattern_slot_label(kind, plane)} for {channel_name}",
+            parent=parent,
+        )
+        if not filename:
+            return
+        try:
+            series = load_hfss_pattern_series(filename, value_kind=kind)
+        except Exception as exc:
+            LOGGER.exception("Load channel pattern failed: %s", filename)
+            messagebox.showerror("Load channel pattern failed", str(exc))
+            return
+
+        self.channel_patterns.set_series(channel_name, kind, plane, series)
+        self._after_channel_patterns_changed(
+            f"Loaded {_pattern_slot_label(kind, plane)} for {channel_name}: {Path(filename).name}."
+        )
+        refresh_callback()
+
+    def _ask_channel_pattern_file(
+        self,
+        title: str,
+        parent: tk.Toplevel,
+    ) -> str:
+        filename = filedialog.askopenfilename(
+            parent=parent,
+            title=title,
+            initialdir=str(self.last_pattern_dir),
+            filetypes=[
+                ("HFSS CSV/TSV", "*.csv *.tsv"),
+                ("CSV files", "*.csv"),
+                ("TSV files", "*.tsv"),
+                ("All files", "*.*"),
+            ],
+        )
+        if filename:
+            self.last_pattern_dir = Path(filename).parent
+        return filename
+
+    def _after_channel_patterns_changed(self, message: str) -> None:
+        self._update_channel_pattern_status()
+        self.generate_virtual_array()
+        self.status.set(message)
+
+    def _update_channel_pattern_status(self) -> None:
+        current_patterns = [
+            self.channel_patterns.pattern_for(channel_name)
+            for channel_name in self._physical_channel_names()
+        ]
+        channels = sum(not pattern.is_empty() for pattern in current_patterns)
+        series = sum(pattern.series_count() for pattern in current_patterns)
+        if channels == 0:
+            if self.element_pattern is not None:
+                self.pattern_status.set("Patterns: legacy element")
+                self.pattern_canvas.itemconfig(self.pattern_dot, fill="#b58900")
+                return
+            self.pattern_status.set("Patterns: ideal")
+            self.pattern_canvas.itemconfig(self.pattern_dot, fill="#999999")
+            return
+        self.pattern_status.set(f"Patterns: {channels} ch / {series} files")
+        self.pattern_canvas.itemconfig(self.pattern_dot, fill="#2e7d32")
 
     def import_element_pattern(self) -> None:
         filename = filedialog.askopenfilename(
@@ -1313,19 +2473,26 @@ class VirtualArrayGui:
         if not filename:
             return
         self.last_layout_dir = Path(filename).parent
+        previous_snapshot = self._capture_layout_snapshot()
         try:
             with open(filename, "r", encoding="utf-8") as file:
                 config = json.load(file)
-            self.elements = self._elements_from_layout_config(config)
+            imported_elements = self._elements_from_layout_config(config)
         except Exception as exc:
             LOGGER.exception("Import layout failed: %s", filename)
             messagebox.showerror("Import layout failed", str(exc))
             return
 
+        imported_snapshot = self._layout_snapshot_for(imported_elements, None)
+        if imported_snapshot != previous_snapshot:
+            self._push_undo_snapshot(previous_snapshot)
+        self.elements = imported_elements
         self.dragging = None
         self.drag_bounds = None
         self.drag_axis_limits = None
+        self.drag_start_snapshot = None
         self.selected_element = None
+        self._sync_auto_count_inputs()
         self.generate_virtual_array()
         tx = [element for element in self.elements if element.kind == "tx"]
         rx = [element for element in self.elements if element.kind == "rx"]
@@ -1418,13 +2585,14 @@ class VirtualArrayGui:
             counts,
             tx_pattern=self.element_pattern,
             rx_pattern=self.element_pattern,
+            channel_patterns=self.channel_patterns,
         )
         return metrics
 
     def _layout_evaluation(self, metrics: ArrayMetrics) -> dict[str, object]:
         utilization = metrics.unique_count / metrics.virtual_count if metrics.virtual_count else 0.0
         return {
-            "frequency_ghz": self.frequency_ghz.get(),
+            "frequency_ghz": _format_frequency_ghz(self.current_frequency_ghz()),
             "virtual_utilization": {
                 "unique_points": metrics.unique_count,
                 "virtual_channels": metrics.virtual_count,
@@ -1453,12 +2621,14 @@ class VirtualArrayGui:
                 "el": _json_number(metrics.sidelobe_elevation, digits=3),
             },
             "element_pattern": self._element_pattern_export_info(),
+            "channel_patterns": self._channel_pattern_export_info(),
             "notes": self._notes_parts(metrics),
         }
 
     # ── Main generation pipeline ──────────────────────────────────────
 
     def generate_virtual_array(self) -> None:
+        self.stop_dbf_scan_animation(restore_response=False)
         array = self.current_array()
         unique, counts = array.unique_virtual_xy(decimals=ROUND_DECIMALS)
         pair_map = self._build_virtual_pair_map(array)
@@ -1468,13 +2638,15 @@ class VirtualArrayGui:
             counts,
             tx_pattern=self.element_pattern,
             rx_pattern=self.element_pattern,
+            channel_patterns=self.channel_patterns,
         )
 
         self._draw_physical_array()
         self._draw_virtual_array(unique, counts, pair_map, metrics)
         self._update_evaluation_panel(metrics)
-        self._draw_response(RESPONSE_MODE_AZIMUTH, self.az_chart, af_db, azimuths, elevations, metrics)
-        self._draw_response(RESPONSE_MODE_ELEVATION, self.el_chart, af_db, azimuths, elevations, metrics)
+        self._update_channel_pattern_status()
+        self._draw_dbf_reference_spectrum("azimuth")
+        self._draw_dbf_reference_spectrum("elevation")
 
         self.status.set("Ready")
         self.phys_canvas.draw_idle()
@@ -1600,11 +2772,41 @@ class VirtualArrayGui:
             minor=True,
         )
         self.physical_ax.grid(
-            True, which="major", color=THEME["grid_color"], linewidth=0.5, alpha=0.25
+            True, which="major", color="#8f989f", linewidth=0.82, alpha=0.54
         )
         self.physical_ax.grid(
-            True, which="minor", color=THEME["grid_color"], linewidth=0.3, alpha=0.12
+            True, which="minor", color="#aeb6bc", linewidth=0.48, alpha=0.32
         )
+        if self.dragging is not None:
+            snap_x = self.dragging.x * DISPLAY_SCALE_LAMBDA
+            snap_y = self.dragging.y * DISPLAY_SCALE_LAMBDA
+            self.physical_ax.axvline(
+                snap_x,
+                color="#f0b429",
+                linestyle="--",
+                linewidth=1.35,
+                alpha=0.86,
+                zorder=3,
+            )
+            self.physical_ax.axhline(
+                snap_y,
+                color="#f0b429",
+                linestyle="--",
+                linewidth=1.35,
+                alpha=0.86,
+                zorder=3,
+            )
+            self.physical_ax.scatter(
+                [snap_x],
+                [snap_y],
+                marker="o",
+                s=430,
+                facecolors="none",
+                edgecolors="#f0b429",
+                linewidths=2.8,
+                zorder=6,
+                label="_nolegend_",
+            )
         self.physical_ax.legend(loc="upper right", framealpha=0.72)
         self.physical_ax.set_aspect("auto")
         self.physical_hover_annotation = self.physical_ax.annotate(
@@ -2084,6 +3286,32 @@ class VirtualArrayGui:
             "elevation_column": self.element_pattern.elevation_column,
         }
 
+    def _channel_pattern_export_info(self) -> dict[str, object]:
+        current_channels = self._physical_channel_names()
+        configured = []
+        for channel_name in current_channels:
+            pattern = self.channel_patterns.pattern_for(channel_name)
+            if pattern.is_empty():
+                continue
+            configured.append(
+                {
+                    "channel": channel_name,
+                    "amplitude_h": _series_table_label(pattern.amplitude_horizontal),
+                    "amplitude_e": _series_table_label(pattern.amplitude_elevation),
+                    "phase_h": _series_table_label(pattern.phase_horizontal),
+                    "phase_e": _series_table_label(pattern.phase_elevation),
+                }
+            )
+        return {
+            "mode": "ideal" if not configured else "channel_patterns",
+            "configured_channels": len(configured),
+            "configured_series": sum(
+                self.channel_patterns.pattern_for(channel).series_count()
+                for channel in current_channels
+            ),
+            "channels": configured,
+        }
+
     def _load_local_state(self) -> None:
         try:
             state = load_state()
@@ -2102,15 +3330,21 @@ class VirtualArrayGui:
                 self.last_pattern_dir = Path(pattern_dir)
 
             frequency = state.get("frequency_ghz")
-            if isinstance(frequency, (int, float)) and frequency > 0:
-                self.frequency_ghz.set(str(frequency))
-            elif isinstance(frequency, str):
-                try:
-                    freq_val = float(frequency)
-                    if freq_val > 0:
-                        self.frequency_ghz.set(frequency)
-                except ValueError:
-                    pass
+            parsed_frequency = _parse_frequency_ghz(frequency)
+            if parsed_frequency is not None:
+                self._set_frequency_ghz(parsed_frequency)
+
+            window = state.get("window")
+            if isinstance(window, dict):
+                geometry = _validated_window_geometry(window.get("geometry"))
+                if geometry is not None:
+                    self.root.geometry(geometry)
+                window_state = window.get("state")
+                if window_state == "zoomed":
+                    self.root.after(
+                        0,
+                        lambda: self._restore_window_state("zoomed"),
+                    )
 
             layout = state.get("layout")
             if layout is not None:
@@ -2131,13 +3365,30 @@ class VirtualArrayGui:
         except Exception:
             LOGGER.exception("Failed to load local state from %s", state_path())
 
+    def _restore_window_state(self, window_state: str) -> None:
+        try:
+            self.root.state(window_state)
+        except tk.TclError:
+            LOGGER.warning("Failed to restore window state: %s", window_state)
+
+    def _window_state_config(self) -> dict[str, str]:
+        self.root.update_idletasks()
+        window_state = self.root.state()
+        if window_state == "iconic":
+            window_state = "normal"
+        return {
+            "geometry": self.root.winfo_geometry(),
+            "state": window_state,
+        }
+
     def _save_local_state(self) -> None:
         state = {
             "version": LOCAL_STATE_VERSION,
             "last_layout_dir": str(self.last_layout_dir),
             "last_pattern_dir": str(self.last_pattern_dir),
-            "frequency_ghz": self.frequency_ghz.get(),
+            "frequency_ghz": _format_frequency_ghz(self.current_frequency_ghz()),
             "layout": self._layout_coordinates_config(),
+            "window": self._window_state_config(),
         }
         if self.element_pattern is not None and self.element_pattern.source_path:
             state["element_pattern_path"] = str(self.element_pattern.source_path)
@@ -2146,6 +3397,7 @@ class VirtualArrayGui:
 
     def on_close(self) -> None:
         try:
+            self.stop_dbf_scan_animation(restore_response=False)
             self._save_local_state()
         except Exception:
             LOGGER.exception("Failed to save local state")
@@ -2158,8 +3410,18 @@ class VirtualArrayGui:
             return
         internal_x = _to_internal_half_lambda(event.xdata)
         internal_y = _to_internal_half_lambda(event.ydata)
+
+        if self.delete_mode:
+            element = self._nearest_element(internal_x, internal_y)
+            if element is None:
+                self.status.set("Delete mode: click directly on a Tx/Rx element.")
+                return
+            self._delete_element(element)
+            return
+
         self.dragging = self._nearest_element(internal_x, internal_y)
         if self.dragging is not None:
+            self.drag_start_snapshot = self._capture_layout_snapshot()
             x_limits = tuple(float(value) for value in self.physical_ax.get_xlim())
             y_limits = tuple(float(value) for value in self.physical_ax.get_ylim())
             self.drag_axis_limits = (x_limits, y_limits)
@@ -2178,12 +3440,15 @@ class VirtualArrayGui:
             self._draw_physical_array()
             self.phys_canvas.draw()
         elif self.selected_element is not None:
+            self.drag_start_snapshot = None
             self.selected_element = None
             self.status.set(
                 "Selection cleared. Click an antenna element to select."
             )
             self._draw_physical_array()
             self.phys_canvas.draw()
+        else:
+            self.drag_start_snapshot = None
 
     def on_motion(self, event) -> None:  # noqa: ANN001
         if self.dragging is not None:
@@ -2198,10 +3463,15 @@ class VirtualArrayGui:
                 min_x, max_x, min_y, max_y = self.drag_bounds
                 internal_x = _clip_to_bounds(internal_x, min_x, max_x)
                 internal_y = _clip_to_bounds(internal_y, min_y, max_y)
+                internal_x = _snap_to_grid_inside(internal_x, min_x, max_x)
+                internal_y = _snap_to_grid_inside(internal_y, min_y, max_y)
+            else:
+                internal_x = snap_to_grid(internal_x)
+                internal_y = snap_to_grid(internal_y)
             self.dragging.x = internal_x
             self.dragging.y = internal_y
             self.status.set(
-                f"{self.dragging.name}: "
+                f"Snap {self.dragging.name}: "
                 f"x={self.dragging.x * DISPLAY_SCALE_LAMBDA:g} λ, "
                 f"y={self.dragging.y * DISPLAY_SCALE_LAMBDA:g} λ"
             )
@@ -2232,12 +3502,21 @@ class VirtualArrayGui:
                 f"x={self.dragging.x * DISPLAY_SCALE_LAMBDA:g} λ, "
                 f"y={self.dragging.y * DISPLAY_SCALE_LAMBDA:g} λ"
             )
+            current_snapshot = self._capture_layout_snapshot()
+            if (
+                self.drag_start_snapshot is not None
+                and self.drag_start_snapshot != current_snapshot
+            ):
+                self._push_undo_snapshot(self.drag_start_snapshot)
             self.dragging = None
             self.drag_bounds = None
             self.drag_axis_limits = None
+            self.drag_start_snapshot = None
             self.generate_virtual_array()
 
-    def on_arrow_key(self, event) -> str:
+    def on_arrow_key(self, event) -> str | None:
+        if _event_widget_is_text_input(event):
+            return None
         if self.selected_element is None:
             return "break"
 
@@ -2254,8 +3533,14 @@ class VirtualArrayGui:
         else:
             return "break"
 
-        self.selected_element.x = snap_to_grid(self.selected_element.x + dx)
-        self.selected_element.y = snap_to_grid(self.selected_element.y + dy)
+        new_x = snap_to_grid(self.selected_element.x + dx)
+        new_y = snap_to_grid(self.selected_element.y + dy)
+        if new_x == self.selected_element.x and new_y == self.selected_element.y:
+            return "break"
+
+        self._push_undo_snapshot()
+        self.selected_element.x = new_x
+        self.selected_element.y = new_y
         self.generate_virtual_array()
         self.status.set(
             f"Selected {self.selected_element.name} | "
@@ -2264,7 +3549,9 @@ class VirtualArrayGui:
         )
         return "break"
 
-    def on_delete_key(self, _event) -> str:  # noqa: ANN001
+    def on_delete_key(self, event) -> str | None:  # noqa: ANN001
+        if _event_widget_is_text_input(event):
+            return None
         self.delete_selected_element()
         return "break"
 

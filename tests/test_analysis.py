@@ -5,7 +5,12 @@ import pytest
 
 from virtual_array.analysis import (
     AF_GRID_SIZE,
+    DBF_SCAN_GRID_SIZE,
     calculate_metrics_and_psf,
+    dbf_azimuth_spectrum,
+    dbf_azimuth_spectrum_bank,
+    dbf_elevation_spectrum,
+    dbf_elevation_spectrum_bank,
     estimate_resolution,
 )
 from virtual_array.examples.case4_5tx7rx_sel import build_array
@@ -67,6 +72,85 @@ def test_single_element_array_factor_is_flat() -> None:
     assert metrics.elevation_resolution is None
     assert metrics.azimuth_psl_db == pytest.approx(0.0)
     assert metrics.psl_grade == "Bad"
+
+
+def test_dbf_azimuth_spectrum_defaults_to_full_scan_range() -> None:
+    array = AntennaArray.from_xy(tx_x=[0], tx_y=[0], rx_x=[0, 1], rx_y=[0, 0])
+
+    angles, spectrum_db = dbf_azimuth_spectrum(array)
+
+    assert len(angles) == DBF_SCAN_GRID_SIZE
+    assert angles[0] == -90.0
+    assert angles[-1] == 90.0
+    assert spectrum_db[int(np.argmin(np.abs(angles)))] == pytest.approx(0.0)
+    assert spectrum_db[0] < -100.0
+    assert spectrum_db[-1] < -100.0
+
+
+def test_dbf_azimuth_spectrum_matches_psf_azimuth_cut() -> None:
+    array = AntennaArray.from_xy(tx_x=[0], tx_y=[0], rx_x=[0, 1, 2], rx_y=[0, 0, 0])
+    af_db, azimuths, elevations, _metrics = calculate_metrics_and_psf(array)
+
+    dbf_angles, dbf_db = dbf_azimuth_spectrum(array, angles_deg=azimuths)
+    el0_index = int(np.argmin(np.abs(elevations)))
+
+    assert np.array_equal(dbf_angles, azimuths)
+    assert np.allclose(dbf_db, af_db[el0_index, :])
+
+
+def test_dbf_azimuth_spectrum_bank_builds_91_true_angle_spectra() -> None:
+    array = AntennaArray.from_xy(
+        tx_x=[0],
+        tx_y=[0],
+        rx_x=[0, 1, 2, 3],
+        rx_y=[0, 0, 0, 0],
+    )
+
+    true_angles, scan_angles, spectra_db = dbf_azimuth_spectrum_bank(array)
+
+    assert len(true_angles) == DBF_SCAN_GRID_SIZE == 91
+    assert len(scan_angles) == DBF_SCAN_GRID_SIZE == 91
+    assert true_angles[0] == -90.0
+    assert true_angles[1] == -88.0
+    assert true_angles[-1] == 90.0
+    assert spectra_db.shape == (91, 91)
+    for index in (0, 15, 45, 75, 89):
+        peak_index = int(np.argmax(spectra_db[index]))
+        assert scan_angles[peak_index] == pytest.approx(true_angles[index])
+        assert spectra_db[index, peak_index] == pytest.approx(0.0)
+
+
+def test_dbf_elevation_spectrum_matches_psf_elevation_cut() -> None:
+    array = AntennaArray.from_xy(tx_x=[0], tx_y=[0], rx_x=[0, 0, 0], rx_y=[0, 1, 2])
+    af_db, azimuths, elevations, _metrics = calculate_metrics_and_psf(array)
+
+    dbf_angles, dbf_db = dbf_elevation_spectrum(array, angles_deg=elevations)
+    az0_index = int(np.argmin(np.abs(azimuths)))
+
+    assert np.array_equal(dbf_angles, elevations)
+    assert np.allclose(dbf_db, af_db[:, az0_index])
+
+
+def test_dbf_elevation_spectrum_bank_builds_91_true_angle_spectra() -> None:
+    array = AntennaArray.from_xy(
+        tx_x=[0],
+        tx_y=[0],
+        rx_x=[0, 0, 0, 0],
+        rx_y=[0, 1, 2, 3],
+    )
+
+    true_angles, scan_angles, spectra_db = dbf_elevation_spectrum_bank(array)
+
+    assert len(true_angles) == DBF_SCAN_GRID_SIZE == 91
+    assert len(scan_angles) == DBF_SCAN_GRID_SIZE == 91
+    assert true_angles[0] == -90.0
+    assert true_angles[1] == -88.0
+    assert true_angles[-1] == 90.0
+    assert spectra_db.shape == (91, 91)
+    for index in (0, 15, 45, 75, 89):
+        peak_index = int(np.argmax(spectra_db[index]))
+        assert scan_angles[peak_index] == pytest.approx(true_angles[index])
+        assert spectra_db[index, peak_index] == pytest.approx(0.0)
 
 
 def test_estimate_resolution_uses_half_lambda_aperture_units() -> None:

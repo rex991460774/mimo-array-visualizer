@@ -4,13 +4,18 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .element_pattern import ElementPattern
+from .element_pattern import ChannelPatternSet, ElementPattern
 from .geometry import AntennaArray
 
 
 AZIMUTH_FOV = (-75.0, 75.0)
 ELEVATION_FOV = (-15.0, 15.0)
 AF_GRID_SIZE = 181
+DBF_SCAN_FOV = (-90.0, 90.0)
+DBF_SCAN_STEP_DEG = 2.0
+DBF_SCAN_GRID_SIZE = 91
+DBF_DEFAULT_STEERING_SIGN = -1
+DBF_SIGN_SELECTION_LIMIT_DEG = 70.0
 MAINLOBE_GUARD_AZ = 2.0
 MAINLOBE_GUARD_EL = 6.0
 
@@ -56,6 +61,7 @@ def calculate_metrics_and_psf(
     decimals: int = 9,
     tx_pattern: ElementPattern | None = None,
     rx_pattern: ElementPattern | None = None,
+    channel_patterns: ChannelPatternSet | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, ArrayMetrics]:
     if unique is None or counts is None:
         unique, counts = array.unique_virtual_xy(decimals=decimals)
@@ -79,7 +85,11 @@ def calculate_metrics_and_psf(
         virtual_xy[:, 0, None, None] * u[None, :, :]
         + virtual_xy[:, 1, None, None] * v[None, :, :]
     )
-    array_factor = np.exp(1j * phase).sum(axis=0)
+    steering = np.exp(1j * phase)
+    channel_weight = _channel_pattern_weight(
+        channel_patterns, array, az_grid, el_grid
+    )
+    array_factor = (steering * channel_weight).sum(axis=0)
     pattern_weight = _element_pattern_weight(tx_pattern, az_grid, el_grid)
     pattern_weight *= _element_pattern_weight(rx_pattern, az_grid, el_grid)
     af = np.abs(array_factor * pattern_weight)
@@ -157,6 +167,303 @@ def calculate_metrics_and_psf(
         psl_grade=psl_grade(psl_db),
     )
     return af_db, azimuths, elevations, metrics
+
+
+def dbf_azimuth_spectrum(
+    array: AntennaArray,
+    true_angle_deg: float = 0.0,
+    angles_deg: np.ndarray | None = None,
+    tx_pattern: ElementPattern | None = None,
+    rx_pattern: ElementPattern | None = None,
+    channel_patterns: ChannelPatternSet | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return one conventional DBF azimuth spectrum for a true source angle."""
+    true_angles, scan_angles, spectra_db = dbf_azimuth_spectrum_bank(
+        array,
+        true_angles_deg=np.asarray([true_angle_deg], dtype=float),
+        scan_angles_deg=angles_deg,
+        tx_pattern=tx_pattern,
+        rx_pattern=rx_pattern,
+        channel_patterns=channel_patterns,
+    )
+    _ = true_angles
+    return scan_angles, spectra_db[0]
+
+
+def dbf_elevation_spectrum(
+    array: AntennaArray,
+    true_angle_deg: float = 0.0,
+    angles_deg: np.ndarray | None = None,
+    tx_pattern: ElementPattern | None = None,
+    rx_pattern: ElementPattern | None = None,
+    channel_patterns: ChannelPatternSet | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return one conventional DBF elevation spectrum for a true source angle."""
+    true_angles, scan_angles, spectra_db = dbf_elevation_spectrum_bank(
+        array,
+        true_angles_deg=np.asarray([true_angle_deg], dtype=float),
+        scan_angles_deg=angles_deg,
+        tx_pattern=tx_pattern,
+        rx_pattern=rx_pattern,
+        channel_patterns=channel_patterns,
+    )
+    _ = true_angles
+    return scan_angles, spectra_db[0]
+
+
+def dbf_azimuth_spectrum_bank(
+    array: AntennaArray,
+    true_angles_deg: np.ndarray | None = None,
+    scan_angles_deg: np.ndarray | None = None,
+    tx_pattern: ElementPattern | None = None,
+    rx_pattern: ElementPattern | None = None,
+    channel_patterns: ChannelPatternSet | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return DBF spectra for many true azimuth angles.
+
+    The returned matrix has shape ``(len(true_angles), len(scan_angles))``.
+    Each row is computed as ``A(scan).H @ a(true)``, where ``A`` is the
+    beamforming dictionary and ``a(true)`` is the simulated channel phase vector.
+    Coordinates are stored in lambda/2 units, so the azimuth phase is
+    ``pi * x * sin(theta)``.
+    """
+    return _dbf_spectrum_bank(
+        array,
+        axis="azimuth",
+        true_angles_deg=true_angles_deg,
+        scan_angles_deg=scan_angles_deg,
+        tx_pattern=tx_pattern,
+        rx_pattern=rx_pattern,
+        channel_patterns=channel_patterns,
+    )
+
+
+def dbf_elevation_spectrum_bank(
+    array: AntennaArray,
+    true_angles_deg: np.ndarray | None = None,
+    scan_angles_deg: np.ndarray | None = None,
+    tx_pattern: ElementPattern | None = None,
+    rx_pattern: ElementPattern | None = None,
+    channel_patterns: ChannelPatternSet | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return DBF spectra for many true elevation angles.
+
+    The returned matrix has shape ``(len(true_angles), len(scan_angles))``.
+    Each row is computed as ``A(scan).H @ a(true)`` with the elevation steering
+    phase ``pi * y * sin(theta)``.
+    """
+    return _dbf_spectrum_bank(
+        array,
+        axis="elevation",
+        true_angles_deg=true_angles_deg,
+        scan_angles_deg=scan_angles_deg,
+        tx_pattern=tx_pattern,
+        rx_pattern=rx_pattern,
+        channel_patterns=channel_patterns,
+    )
+
+
+def _dbf_spectrum_bank(
+    array: AntennaArray,
+    axis: str,
+    true_angles_deg: np.ndarray | None = None,
+    scan_angles_deg: np.ndarray | None = None,
+    tx_pattern: ElementPattern | None = None,
+    rx_pattern: ElementPattern | None = None,
+    channel_patterns: ChannelPatternSet | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if true_angles_deg is None:
+        true_angles_deg = _default_dbf_angles()
+    else:
+        true_angles_deg = np.asarray(true_angles_deg, dtype=float)
+
+    if scan_angles_deg is None:
+        scan_angles_deg = _default_dbf_angles()
+    else:
+        scan_angles_deg = np.asarray(scan_angles_deg, dtype=float)
+
+    signal_phase = _dbf_signal_matrix(
+        array,
+        true_angles_deg,
+        axis=axis,
+        channel_patterns=channel_patterns,
+    )
+    steering_sign = _select_dbf_steering_sign(
+        array,
+        true_angles_deg,
+        scan_angles_deg,
+        signal_phase,
+        axis=axis,
+        channel_patterns=channel_patterns,
+    )
+    dictionary = _dbf_scan_matrix(
+        array,
+        scan_angles_deg,
+        axis=axis,
+        steering_sign=steering_sign,
+    )
+    response = dictionary @ signal_phase
+
+    zeros = np.zeros_like(scan_angles_deg, dtype=float)
+    if axis == "azimuth":
+        pattern_azimuths = scan_angles_deg
+        pattern_elevations = zeros
+    elif axis == "elevation":
+        pattern_azimuths = zeros
+        pattern_elevations = scan_angles_deg
+    else:
+        raise ValueError(f"Unknown DBF axis: {axis!r}")
+
+    pattern_weight = _element_pattern_weight(
+        tx_pattern, pattern_azimuths, pattern_elevations
+    )
+    pattern_weight *= _element_pattern_weight(
+        rx_pattern, pattern_azimuths, pattern_elevations
+    )
+    pattern_weight = np.asarray(pattern_weight, dtype=float)
+    if pattern_weight.ndim == 0:
+        pattern_weight = np.full_like(scan_angles_deg, float(pattern_weight))
+
+    spectra = np.abs(response.T * pattern_weight[None, :])
+    maxima = np.max(spectra, axis=1, keepdims=True)
+    spectra = np.divide(spectra, maxima, out=np.zeros_like(spectra), where=maxima > 0)
+    spectra_db = 20.0 * np.log10(np.maximum(spectra, 1e-6))
+    return true_angles_deg, scan_angles_deg, spectra_db
+
+
+def _default_dbf_angles() -> np.ndarray:
+    return np.arange(
+        DBF_SCAN_FOV[0],
+        DBF_SCAN_FOV[1] + DBF_SCAN_STEP_DEG / 2.0,
+        DBF_SCAN_STEP_DEG,
+        dtype=float,
+    )
+
+
+def _steering_matrix(
+    array: AntennaArray,
+    angles_deg: np.ndarray,
+    axis: str,
+) -> np.ndarray:
+    virtual_xy = array.virtual_xy()
+    if axis == "azimuth":
+        positions = virtual_xy[:, 0]
+    elif axis == "elevation":
+        positions = virtual_xy[:, 1]
+    else:
+        raise ValueError(f"Unknown DBF axis: {axis!r}")
+    u = np.sin(np.radians(angles_deg))
+    phase = np.pi * positions[:, None] * u[None, :]
+    return np.exp(1j * phase)
+
+
+def _dbf_scan_matrix(
+    array: AntennaArray,
+    angles_deg: np.ndarray,
+    axis: str,
+    steering_sign: int = DBF_DEFAULT_STEERING_SIGN,
+) -> np.ndarray:
+    virtual_xy = array.virtual_xy()
+    if axis == "azimuth":
+        positions = virtual_xy[:, 0]
+    elif axis == "elevation":
+        positions = virtual_xy[:, 1]
+    else:
+        raise ValueError(f"Unknown DBF axis: {axis!r}")
+    u = np.sin(np.radians(angles_deg))
+    phase = steering_sign * np.pi * u[:, None] * positions[None, :]
+    return np.exp(1j * phase)
+
+
+def _axis_pattern_angles(
+    axis: str,
+    angles_deg: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    zeros = np.zeros_like(angles_deg, dtype=float)
+    if axis == "azimuth":
+        return angles_deg, zeros
+    if axis == "elevation":
+        return zeros, angles_deg
+    raise ValueError(f"Unknown DBF axis: {axis!r}")
+
+
+def _dbf_signal_matrix(
+    array: AntennaArray,
+    true_angles_deg: np.ndarray,
+    axis: str,
+    channel_patterns: ChannelPatternSet | None,
+) -> np.ndarray:
+    true_azimuths, true_elevations = _axis_pattern_angles(axis, true_angles_deg)
+    channel_weight = _channel_pattern_weight(
+        channel_patterns, array, true_azimuths, true_elevations
+    )
+    if _channel_pattern_has_phase(channel_patterns, array, axis):
+        return np.asarray(channel_weight, dtype=complex)
+    return _steering_matrix(array, true_angles_deg, axis=axis) * channel_weight
+
+
+def _select_dbf_steering_sign(
+    array: AntennaArray,
+    true_angles_deg: np.ndarray,
+    scan_angles_deg: np.ndarray,
+    signal_phase: np.ndarray,
+    axis: str,
+    channel_patterns: ChannelPatternSet | None,
+) -> int:
+    if not _channel_pattern_has_phase(channel_patterns, array, axis):
+        return DBF_DEFAULT_STEERING_SIGN
+
+    selected = np.abs(true_angles_deg) <= DBF_SIGN_SELECTION_LIMIT_DEG
+    if not np.any(selected):
+        selected = np.ones_like(true_angles_deg, dtype=bool)
+
+    candidates: list[tuple[float, int]] = []
+    for steering_sign in (DBF_DEFAULT_STEERING_SIGN, 1):
+        dictionary = _dbf_scan_matrix(
+            array,
+            scan_angles_deg,
+            axis=axis,
+            steering_sign=steering_sign,
+        )
+        score = np.abs(dictionary @ signal_phase) ** 2
+        estimates = scan_angles_deg[np.argmax(score, axis=0)]
+        error = estimates[selected] - true_angles_deg[selected]
+        rms = float(np.sqrt(np.mean(error**2))) if len(error) else float("inf")
+        candidates.append((rms, steering_sign))
+    return min(candidates, key=lambda item: (item[0], 0 if item[1] == DBF_DEFAULT_STEERING_SIGN else 1))[1]
+
+
+def _channel_pattern_weight(
+    patterns: ChannelPatternSet | None,
+    array: AntennaArray,
+    azimuth_deg: np.ndarray,
+    elevation_deg: np.ndarray,
+) -> np.ndarray | float:
+    if patterns is None or patterns.is_empty():
+        return 1.0
+    tx_names = [point.name for point in array.tx]
+    rx_names = [point.name for point in array.rx]
+    tx_weights = patterns.complex_weights(tx_names, azimuth_deg, elevation_deg)
+    rx_weights = patterns.complex_weights(rx_names, azimuth_deg, elevation_deg)
+    virtual_weights = tx_weights[:, None, ...] * rx_weights[None, :, ...]
+    return virtual_weights.reshape(len(tx_names) * len(rx_names), *tx_weights.shape[1:])
+
+
+def _channel_pattern_has_phase(
+    patterns: ChannelPatternSet | None,
+    array: AntennaArray,
+    axis: str,
+) -> bool:
+    if patterns is None or patterns.is_empty():
+        return False
+    channel_names = [point.name for point in array.tx] + [point.name for point in array.rx]
+    for channel_name in channel_names:
+        pattern = patterns.pattern_for(channel_name)
+        if axis == "azimuth" and pattern.phase_horizontal is not None:
+            return True
+        if axis == "elevation" and pattern.phase_elevation is not None:
+            return True
+    return False
 
 
 def _element_pattern_weight(

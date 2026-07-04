@@ -11,6 +11,7 @@ requires-python = ">=3.9"
 dependencies = [
     "numpy>=1.23",
     "matplotlib>=3.7",
+    "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]

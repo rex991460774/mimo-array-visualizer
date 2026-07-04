@@ -17,9 +17,15 @@ JSON for later use.
 - Virtual-array visualization with duplicate-channel statistics.
 - Array evaluation panel for aperture, resolution, 3 dB beamwidth, PSL, ISLR,
   grating-lobe and elevation-ambiguity indicators.
-- Custom frequency input with GHz suffix parsing.
+- Custom frequency input with GHz suffix parsing, plus configurable DBF
+  competitor-peak margin threshold.
 - DBF dictionary spectrum animation for azimuth and elevation, with draggable
-  progress sliders over 91 true angles from -90 deg to +90 deg in 2 deg steps.
+  progress sliders over 181 true angles from -90 deg to +90 deg in 1 deg steps.
+- 2D DBF heatmap in the evaluation panel, with independent azimuth/elevation
+  sliders and playback controls for combined angle scanning.
+- Configurable DBF dictionary modes, including ideal, phase-reversed,
+  channel-pattern calibrated, zero-degree reference calibrated, and imported
+  azimuth/elevation CSV/XLSX dictionary matrices with tabular preview.
 - HFSS channel-pattern CSV import for per-physical-channel amplitude and phase,
   with separate H/E plane files and summary-column mapping.
 - Readable JSON layout import/export with optional evaluation metadata.
@@ -70,16 +76,29 @@ DBF/Bartlett-style dictionary spectrum over the virtual-array positions.
 When no animation is playing, both panels show the `0 deg` true-angle DBF
 reference spectrum.
 
-Use **Play Az DBF** or **Play El DBF** in the bottom toolbar. Each animation has
-91 frames. Every frame simulates one true incoming angle from `-90 deg` to
-`+90 deg` in `2 deg` steps, multiplies that phase vector by the beamforming
+Use the compact **Play** button under each 1D DBF plot. Each animation has 181
+frames. Every frame simulates one true incoming angle from `-90 deg` to
+`+90 deg` in `1 deg` steps, multiplies that phase vector by the beamforming
 dictionary, and plots the resulting angle spectrum.
 
-The active button changes to **Pause Az** or **Pause El** while playing. Click it
-to pause on the current spectrum, then click **Resume Az** or **Resume El** to
-continue. Drag either progress slider under the DBF plots to jump to a frame;
-the animation pauses at the selected true angle. Use **Stop DBF** to return to
-the normal response view.
+The active button changes to **Pause** while playing. Click it to pause on the
+current spectrum, then click **Resume** to continue. Drag either full-width
+progress slider under the DBF plots to jump to a frame; the animation pauses at
+the selected true angle. Use **Stop** to return to the normal response view.
+The toolbar **Peak margin (dB)** input controls the competitor-peak margin
+threshold used by the no-fold ambiguity evaluation.
+
+Use **Configuration -> Configure DBF Dictionary** to choose the DBF dictionary.
+Imported CSV/XLSX dictionaries are loaded separately for azimuth and elevation.
+Each file may provide one row per angle with either virtual channel columns or
+physical Tx/Rx columns. Numeric values are treated as phase degrees; complex
+values such as `1+0.2j` are treated as channel responses. The dictionary dialog
+previews the active axis as an angle-by-channel matrix.
+
+The right-side evaluation panel also includes a 2D DBF heatmap. The horizontal
+slider selects the true azimuth angle and the vertical slider selects the true
+elevation angle. Each axis can play or pause independently, so one axis can stay
+fixed while the other scans, or both axes can scan at the same time.
 
 ## Layout Editing
 
@@ -93,6 +112,10 @@ The physical canvas starts from a clean 1T1R layout. Dragged elements snap to
 the grid live, with a highlighted snap target and guide lines while dragging.
 Use the bottom toolbar `Auto` T/R inputs and **Apply Array** to generate a
 centered Tx row and Rx row for common quick-start layouts.
+
+Use the **Configuration** menu for array JSON import/export and channel
+amplitude/phase CSV setup. Use the **Language** menu to switch the UI between
+Chinese, English, and Japanese.
 
 ## Packaged EXE
 
@@ -138,7 +161,7 @@ traceability and can be ignored on import.
 
 ## Channel Pattern CSV
 
-Use **Channel Patterns...** in the bottom toolbar to configure HFSS amplitude
+Use **Configuration → Set Channel Amp/Phase CSV** to configure HFSS amplitude
 and phase patterns for physical Tx/Rx channels. The dialog supports:
 
 - summary amplitude/phase CSV files for H and E planes,

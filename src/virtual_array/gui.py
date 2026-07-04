@@ -18,16 +18,31 @@ from matplotlib.patches import Rectangle
 from matplotlib.widgets import Button as MplButton
 
 from .app_state import load_state, save_state, state_path
+from .dbf_dictionary import (
+    DBF_DICT_CHANNEL_PATTERN,
+    DBF_DICT_CHANNEL_PATTERN_ZERO_REF,
+    DBF_DICT_CUSTOM,
+    DBF_DICT_IDEAL,
+    DBF_DICT_IDEAL_REVERSED,
+    DbfDictionaryConfig,
+    DbfDictionaryTable,
+    dictionary_phase_preview,
+    load_dbf_dictionary_table,
+)
 from .analysis import (
     AZIMUTH_FOV,
+    DBF_AMBIGUITY_MARGIN_DB,
     DBF_SCAN_FOV,
     DBF_SCAN_GRID_SIZE,
     DBF_SCAN_STEP_DEG,
+    DbfAngleMetrics,
     ELEVATION_FOV,
     MAINLOBE_GUARD_AZ,
     MAINLOBE_GUARD_EL,
     ArrayMetrics,
     calculate_metrics_and_psf,
+    dbf_angle_metrics_from_spectra,
+    dbf_2d_spectrum,
     dbf_azimuth_spectrum_bank,
     dbf_elevation_spectrum_bank,
     local_peak_indices,
@@ -75,12 +90,24 @@ RESPONSE_MODE_ELEVATION = "el"
 RESPONSE_SIDELOBE_PROMINENCE_DB = 0.5
 RESPONSE_SIDELOBE_GUARD_CLEARANCE_DB = 0.5
 DBF_SCAN_INTERVAL_MS = 55
+LANGUAGE_ZH = "zh"
+LANGUAGE_EN = "en"
+LANGUAGE_JA = "ja"
+SUPPORTED_LANGUAGES = (LANGUAGE_ZH, LANGUAGE_EN, LANGUAGE_JA)
+LANGUAGE_LABELS = {
+    LANGUAGE_ZH: "中文",
+    LANGUAGE_EN: "English",
+    LANGUAGE_JA: "日本語",
+}
 
 DEFAULT_FREQUENCY_GHZ = 77.0
 LIGHT_SPEED_MM_PER_NS = 299.792458  # mm/ns = GHz·mm
 
 DISPLAY_SCALE_LAMBDA = 0.5
 DISPLAY_GRID_STEP_LAMBDA = 0.5
+PHYSICAL_MAJOR_GRID_STEP_LAMBDA = 1.0
+PHYSICAL_AXIS_MIN_SPAN_LAMBDA = 4.0
+PHYSICAL_AXIS_PADDING_LAMBDA = 2.0
 
 # Window geometry
 WINDOW_WIDTH = 1600
@@ -102,36 +129,433 @@ VIRT_FIG_H = 3.2
 RESPONSE_FIG_W = 6.8
 RESPONSE_FIG_H = 2.8
 
-PSL_COLORS = {
-    "Good": "#2e7d32",
-    "Acceptable": "#b58900",
-    "Risky": "#ef6c00",
-    "Bad": "#c62828",
+NOTE_STYLES = {
+    "duplicate": ("WARN", "#c2410c"),
+    "windowing": ("TAPER", "#a16207"),
+    "ambiguity high": ("RISK", "#b91c1c"),
+    "ambiguity medium": ("WATCH", "#a16207"),
+    "none": ("OK", "#15803d"),
 }
 
-NOTE_STYLES = {
-    "duplicate": ("⚠️", "#ef6c00"),
-    "windowing": ("📉", "#b58900"),
-    "ambiguity high": ("🚨", "#c62828"),
-    "ambiguity medium": ("⚠️", "#b58900"),
-    "none": ("✅", "#2e7d32"),
+UI_TEXT = {
+    "app_title": {
+        "zh": "MIMO阵列可视化工具 v{version}",
+        "en": "MIMO Array Visualizer v{version}",
+        "ja": "MIMOアレイ可視化ツール v{version}",
+    },
+    "status_initial": {
+        "zh": "拖动TX/RX通道调整物理阵列，松开后自动刷新虚拟阵列和响应。",
+        "en": "Drag Tx/Rx channels in the physical array. Release to refresh the virtual array and responses.",
+        "ja": "物理アレイ上のTX/RXチャネルをドラッグします。離すと仮想アレイと応答を更新します。",
+    },
+    "status_ready": {"zh": "就绪", "en": "Ready", "ja": "準備完了"},
+    "menu_config": {"zh": "配置", "en": "Configuration", "ja": "設定"},
+    "menu_import_layout": {
+        "zh": "导入阵面JSON",
+        "en": "Import Array JSON",
+        "ja": "アレイJSONを読み込み",
+    },
+    "menu_export_layout": {
+        "zh": "导出阵面JSON",
+        "en": "Export Array JSON",
+        "ja": "アレイJSONを書き出し",
+    },
+    "menu_channel_patterns": {
+        "zh": "设置通道幅相CSV",
+        "en": "Set Channel Amp/Phase CSV",
+        "ja": "チャネル振幅/位相CSVを設定",
+    },
+    "menu_dbf_dictionary": {
+        "zh": "配置DBF字典",
+        "en": "Configure DBF Dictionary",
+        "ja": "DBF辞書を設定",
+    },
+    "menu_language": {"zh": "语言", "en": "Language", "ja": "言語"},
+    "language_zh": {"zh": "中文", "en": "Chinese", "ja": "中国語"},
+    "language_en": {"zh": "英文", "en": "English", "ja": "英語"},
+    "language_ja": {"zh": "日语", "en": "Japanese", "ja": "日本語"},
+    "freq_label": {"zh": "频率(GHz)", "en": "Freq (GHz)", "ja": "周波数(GHz)"},
+    "margin_label": {"zh": "竞争峰裕量(dB)", "en": "Peak margin (dB)", "ja": "競合ピーク余裕(dB)"},
+    "auto_label": {"zh": "自动排阵", "en": "Auto Array", "ja": "自動配置"},
+    "auto_apply": {"zh": "应用阵列", "en": "Apply Array", "ja": "配置を適用"},
+    "physical_add_tx": {"zh": "+TX", "en": "+TX", "ja": "+TX"},
+    "physical_add_rx": {"zh": "+RX", "en": "+RX", "ja": "+RX"},
+    "physical_delete": {"zh": "删除", "en": "Delete", "ja": "削除"},
+    "physical_clear": {"zh": "清空", "en": "Clear", "ja": "クリア"},
+    "dbf_play_compact": {"zh": "播放", "en": "Play", "ja": "再生"},
+    "dbf_pause_compact": {"zh": "暂停", "en": "Pause", "ja": "一時停止"},
+    "dbf_resume_compact": {"zh": "继续", "en": "Resume", "ja": "再開"},
+    "dbf_stop_compact": {"zh": "停止", "en": "Stop", "ja": "停止"},
+    "pattern_ideal": {"zh": "方向图：理想", "en": "Patterns: ideal", "ja": "パターン：理想"},
+    "pattern_legacy": {
+        "zh": "方向图：旧版单元",
+        "en": "Patterns: legacy element",
+        "ja": "パターン：旧要素",
+    },
+    "pattern_summary": {
+        "zh": "方向图：{channels}通道 / {series}文件",
+        "en": "Patterns: {channels} ch / {series} files",
+        "ja": "パターン：{channels}ch / {series}ファイル",
+    },
+    "overview_title": {"zh": "  阵列概览  ", "en": "  Array Overview  ", "ja": "  アレイ概要  "},
+    "angle_eval_title": {"zh": "  测角评估  ", "en": "  Angle Evaluation  ", "ja": "  測角評価  "},
+    "physical_title": {"zh": "物理阵列布局", "en": "Physical Array", "ja": "物理アレイ配置"},
+    "virtual_title": {"zh": "虚拟阵列", "en": "Virtual Array", "ja": "仮想アレイ"},
+    "virtual_info": {
+        "zh": "虚拟 {unique}/{total} | 重复 {duplicate} | X {x} | Y {y}",
+        "en": "Virtual {unique}/{total} | Dup {duplicate} | X {x} | Y {y}",
+        "ja": "仮想 {unique}/{total} | 重複 {duplicate} | X {x} | Y {y}",
+    },
+    "virtual_pairs_more": {"zh": ", ...（共{count}组）", "en": ", ... ({count} pairs)", "ja": ", ...（計{count}組）"},
+    "virtual_hover": {
+        "zh": "({x:g} λ, {y:g} λ)\n重合数量：{count}\n{pairs}",
+        "en": "({x:g} λ, {y:g} λ)\nMultiplicity: {count}\n{pairs}",
+        "ja": "({x:g} λ, {y:g} λ)\n重複数：{count}\n{pairs}",
+    },
+    "unique_point": {"zh": "唯一点", "en": "unique point", "ja": "一意点"},
+    "duplicate_point": {"zh": "重复点", "en": "duplicate point", "ja": "重複点"},
+    "response_title": {"zh": "{mode}响应", "en": "{mode} Response", "ja": "{mode}応答"},
+    "pattern_cut_label": {"zh": "{mode}方向图", "en": "{mode} pattern", "ja": "{mode}パターン"},
+    "dbf_title": {
+        "zh": "{mode}DBF字典角谱",
+        "en": "{mode} DBF Dictionary Spectrum",
+        "ja": "{mode}DBF辞書角度スペクトル",
+    },
+    "axis_az_angle": {"zh": "方位角(°)", "en": "Azimuth angle (deg)", "ja": "方位角(°)"},
+    "axis_el_angle": {"zh": "俯仰角(°)", "en": "Elevation angle (deg)", "ja": "仰角(°)"},
+    "axis_gain": {"zh": "归一化增益(dB)", "en": "Normalized gain (dB)", "ja": "正規化利得(dB)"},
+    "max_sidelobe": {"zh": "最大旁瓣", "en": "Max sidelobe", "ja": "最大サイドローブ"},
+    "guard_edge_max": {"zh": "保护区边界最大值", "en": "Guard-edge max", "ja": "ガード端最大値"},
+    "grating_lobe": {"zh": "栅瓣", "en": "Grating lobe", "ja": "グレーティングローブ"},
+    "grating_lobe_max": {
+        "zh": "栅瓣=最大旁瓣",
+        "en": "Grating lobe = max sidelobe",
+        "ja": "グレーティングローブ=最大サイドローブ",
+    },
+    "gain_value": {"zh": "增益 = {value:.2f} dB", "en": "Gain = {value:.2f} dB", "ja": "利得 = {value:.2f} dB"},
+    "psl_label": {"zh": "{mode} PSL：{value:.2f} dB", "en": "{mode} PSL: {value:.2f} dB", "ja": "{mode} PSL：{value:.2f} dB"},
+    "az": {"zh": "方位", "en": "Azimuth", "ja": "方位"},
+    "el": {"zh": "俯仰", "en": "Elevation", "ja": "仰角"},
+    "az_short": {"zh": "方位", "en": "Az", "ja": "方位"},
+    "el_short": {"zh": "俯仰", "en": "El", "ja": "仰角"},
+    "legend_true_angle": {"zh": "真实角", "en": "true angle", "ja": "真角度"},
+    "legend_peak": {"zh": "峰值", "en": "peak", "ja": "ピーク"},
+    "dbf_info": {
+        "zh": "真实角：{true:+.1f}°\n峰值角：{peak:+.1f}°\n{frame}",
+        "en": "True angle: {true:+.1f} deg\nPeak angle: {peak:+.1f} deg\n{frame}",
+        "ja": "真角度：{true:+.1f}°\nピーク角：{peak:+.1f}°\n{frame}",
+    },
+    "reference_frame": {"zh": "参考：0°", "en": "Reference: 0 deg", "ja": "基準：0°"},
+    "frame_label": {"zh": "帧：{frame}/{total}", "en": "Frame: {frame}/{total}", "ja": "フレーム：{frame}/{total}"},
+    "dbf_play_status": {
+        "zh": "正在播放{mode}DBF角谱：-90°到+90°。",
+        "en": "Playing {mode} DBF spectra from -90 deg to +90 deg.",
+        "ja": "{mode}DBF角度スペクトルを再生中：-90°から+90°。",
+    },
+    "dbf_play_status_invalid": {
+        "zh": "频率输入已恢复，正在播放{mode}DBF角谱。",
+        "en": "Invalid frequency restored. Playing {mode} DBF spectra.",
+        "ja": "無効な周波数を復元し、{mode}DBF角度スペクトルを再生中。",
+    },
+    "dbf_pause_status": {
+        "zh": "{mode}DBF角谱已暂停在{angle:+.1f}°。",
+        "en": "Paused {mode} DBF spectrum at {angle:+.1f} deg.",
+        "ja": "{mode}DBF角度スペクトルを{angle:+.1f}°で一時停止。",
+    },
+    "dbf_resume_status": {
+        "zh": "继续播放{mode}DBF角谱动画。",
+        "en": "Resumed {mode} DBF spectrum animation.",
+        "ja": "{mode}DBF角度スペクトルアニメーションを再開。",
+    },
+    "dbf_complete_status": {
+        "zh": "{mode}DBF角谱动画播放完成。",
+        "en": "{mode} DBF spectrum animation complete.",
+        "ja": "{mode}DBF角度スペクトルアニメーションが完了。",
+    },
+    "dbf2d_title": {"zh": "  2D DBF热图  ", "en": "  2D DBF Heatmap  ", "ja": "  2D DBFヒートマップ  "},
+    "dbf2d_plot_title": {"zh": "2D DBF角谱", "en": "2D DBF Spectrum", "ja": "2D DBF角度スペクトル"},
+    "dbf2d_play_az": {"zh": "播放方位", "en": "Play Az", "ja": "方位再生"},
+    "dbf2d_pause_az": {"zh": "暂停方位", "en": "Pause Az", "ja": "方位一時停止"},
+    "dbf2d_play_el": {"zh": "播放俯仰", "en": "Play El", "ja": "仰角再生"},
+    "dbf2d_pause_el": {"zh": "暂停俯仰", "en": "Pause El", "ja": "仰角一時停止"},
+    "dbf2d_stop": {"zh": "停止2D", "en": "Stop 2D", "ja": "2D停止"},
+    "dbf2d_status": {
+        "zh": "方位{az:+.0f}°  俯仰{el:+.0f}°  {frame}/{total}",
+        "en": "Az {az:+.0f} deg  El {el:+.0f} deg  {frame}/{total}",
+        "ja": "方位{az:+.0f}°  仰角{el:+.0f}°  {frame}/{total}",
+    },
+    "dbf2d_heatmap_info": {
+        "zh": "真值：方位 {az:+.0f}°，俯仰 {el:+.0f}°\n峰值：方位 {peak_az:+.0f}°，俯仰 {peak_el:+.0f}°",
+        "en": "True: Az {az:+.0f} deg, El {el:+.0f} deg\nPeak: Az {peak_az:+.0f} deg, El {peak_el:+.0f} deg",
+        "ja": "真値：方位 {az:+.0f}°，仰角 {el:+.0f}°\nピーク：方位 {peak_az:+.0f}°，仰角 {peak_el:+.0f}°",
+    },
+    "dbf2d_running": {
+        "zh": "正在播放2D DBF：{axes}。",
+        "en": "Playing 2D DBF: {axes}.",
+        "ja": "2D DBF再生中：{axes}。",
+    },
+    "dbf2d_paused_axis": {
+        "zh": "已暂停2D DBF的{axis}扫描。",
+        "en": "Paused 2D DBF {axis} scan.",
+        "ja": "2D DBFの{axis}走査を一時停止。",
+    },
+    "dbf2d_stopped": {
+        "zh": "已停止2D DBF扫描。",
+        "en": "Stopped 2D DBF scan.",
+        "ja": "2D DBF走査を停止しました。",
+    },
+    "dbf_dictionary_title": {
+        "zh": "DBF字典配置",
+        "en": "DBF Dictionary",
+        "ja": "DBF辞書設定",
+    },
+    "dbf_dictionary_mode_title": {"zh": "  字典模式  ", "en": "  Dictionary Mode  ", "ja": "  辞書モード  "},
+    "dbf_dictionary_preview_title": {"zh": "  字典预览  ", "en": "  Dictionary Preview  ", "ja": "  辞書プレビュー  "},
+    "dbf_dict_ideal": {"zh": "理想几何字典", "en": "Ideal geometric", "ja": "理想幾何辞書"},
+    "dbf_dict_reversed": {"zh": "理想反向相位字典", "en": "Ideal reversed phase", "ja": "理想逆位相辞書"},
+    "dbf_dict_channel": {"zh": "通道幅相校准字典", "en": "Channel amp/phase dictionary", "ja": "チャネル振幅/位相辞書"},
+    "dbf_dict_channel_zero": {"zh": "0°参考校准字典", "en": "0 deg reference calibrated", "ja": "0°基準校正辞書"},
+    "dbf_dict_custom": {"zh": "导入CSV/XLSX字典", "en": "Imported CSV/XLSX", "ja": "CSV/XLSX辞書"},
+    "dbf_dict_axis": {"zh": "预览轴", "en": "Preview axis", "ja": "プレビュー軸"},
+    "dbf_dict_load": {"zh": "加载CSV/XLSX", "en": "Load CSV/XLSX", "ja": "CSV/XLSX読込"},
+    "dbf_dict_load_az": {"zh": "加载方位字典", "en": "Load Az Dictionary", "ja": "方位辞書読込"},
+    "dbf_dict_load_el": {"zh": "加载俯仰字典", "en": "Load El Dictionary", "ja": "仰角辞書読込"},
+    "dbf_dict_clear": {"zh": "清除导入字典", "en": "Clear imported", "ja": "読込辞書をクリア"},
+    "dbf_dict_clear_az": {"zh": "清除方位", "en": "Clear Az", "ja": "方位クリア"},
+    "dbf_dict_clear_el": {"zh": "清除俯仰", "en": "Clear El", "ja": "仰角クリア"},
+    "dbf_dict_apply": {"zh": "应用字典", "en": "Apply Dictionary", "ja": "辞書を適用"},
+    "dbf_dict_preview_phase": {"zh": "字典相位矩阵", "en": "Dictionary phase matrix", "ja": "辞書位相行列"},
+    "dbf_dict_preview_status": {
+        "zh": "{mode} | {rows}角度 × {cols}通道",
+        "en": "{mode} | {rows} angles × {cols} channels",
+        "ja": "{mode} | {rows}角度 × {cols}チャネル",
+    },
+    "dbf_dict_file_status": {
+        "zh": "{axis}：{file}",
+        "en": "{axis}: {file}",
+        "ja": "{axis}：{file}",
+    },
+    "dbf_dict_no_file": {"zh": "未加载", "en": "not loaded", "ja": "未読込"},
+    "dbf_dict_custom_loaded": {
+        "zh": "已加载{axis}DBF字典：{file}。",
+        "en": "Loaded {axis} DBF dictionary: {file}.",
+        "ja": "{axis}DBF辞書を読み込みました：{file}。",
+    },
+    "dbf_dict_custom_failed": {
+        "zh": "加载DBF字典失败",
+        "en": "Load DBF dictionary failed",
+        "ja": "DBF辞書の読み込みに失敗",
+    },
+    "dbf_dict_applied": {
+        "zh": "已应用DBF字典：{mode}。",
+        "en": "Applied DBF dictionary: {mode}.",
+        "ja": "DBF辞書を適用しました：{mode}。",
+    },
+    "dbf_dict_need_file": {
+        "zh": "请先加载当前预览轴的CSV/XLSX字典文件。",
+        "en": "Load the CSV/XLSX dictionary for the current preview axis first.",
+        "ja": "現在のプレビュー軸のCSV/XLSX辞書ファイルを先に読み込んでください。",
+    },
+    "dbf_dict_need_axis_files": {
+        "zh": "自定义DBF字典需要分别加载方位和俯仰两个文件。",
+        "en": "Custom DBF dictionary requires separate azimuth and elevation files.",
+        "ja": "カスタムDBF辞書には方位と仰角の2ファイルが必要です。",
+    },
+    "channel_dialog_title": {
+        "zh": "通道幅度/相位方向图设置",
+        "en": "Channel Amplitude/Phase Patterns",
+        "ja": "チャネル振幅/位相パターン設定",
+    },
+    "summary_csv_title": {"zh": "  汇总CSV  ", "en": "  Summary CSV  ", "ja": "  集約CSV  "},
+    "physical_channels_title": {
+        "zh": "  物理通道  ",
+        "en": "  Physical Channels  ",
+        "ja": "  物理チャネル  ",
+    },
+    "load_summary": {"zh": "加载{label}汇总", "en": "Load {label} Summary", "ja": "{label}集約を読み込み"},
+    "set_pattern": {"zh": "设置{label}", "en": "Set {label}", "ja": "{label}を設定"},
+    "clear_all": {"zh": "全部清空", "en": "Clear All", "ja": "すべてクリア"},
+    "clear_channel": {"zh": "清空通道", "en": "Clear Channel", "ja": "チャネルをクリア"},
+    "done": {"zh": "完成", "en": "Done", "ja": "完了"},
+    "column_channel": {"zh": "通道", "en": "Channel", "ja": "チャネル"},
+    "select_channel_first": {
+        "zh": "请先选择一个物理通道。",
+        "en": "Select one physical channel first.",
+        "ja": "先に物理チャネルを1つ選択してください。",
+    },
+    "channel_patterns_title": {"zh": "通道方向图", "en": "Channel patterns", "ja": "チャネルパターン"},
+    "channel_cleared": {
+        "zh": "已清空通道方向图：{channel}。",
+        "en": "Cleared channel patterns: {channel}.",
+        "ja": "チャネルパターンをクリア：{channel}。",
+    },
+    "channel_already_ideal": {
+        "zh": "通道方向图已经是理想状态。",
+        "en": "Channel patterns already ideal.",
+        "ja": "チャネルパターンは既に理想状態です。",
+    },
+    "channel_all_cleared": {
+        "zh": "已清空所有通道方向图。",
+        "en": "Cleared all channel patterns.",
+        "ja": "すべてのチャネルパターンをクリアしました。",
+    },
+    "load_summary_title": {
+        "zh": "加载{label}汇总CSV",
+        "en": "Load {label} summary CSV",
+        "ja": "{label}集約CSVを読み込み",
+    },
+    "load_channel_title": {
+        "zh": "加载{channel}的{label}",
+        "en": "Load {label} for {channel}",
+        "ja": "{channel}の{label}を読み込み",
+    },
+    "summary_loaded": {
+        "zh": "已加载{label}汇总：{file}。",
+        "en": "Loaded {label} summary: {file}.",
+        "ja": "{label}集約を読み込みました：{file}。",
+    },
+    "channel_loaded": {
+        "zh": "已加载{channel}的{label}：{file}。",
+        "en": "Loaded {label} for {channel}: {file}.",
+        "ja": "{channel}の{label}を読み込みました：{file}。",
+    },
+    "load_summary_failed": {
+        "zh": "加载通道汇总CSV失败",
+        "en": "Load channel pattern summary failed",
+        "ja": "チャネル集約CSVの読み込みに失敗",
+    },
+    "load_channel_failed": {
+        "zh": "加载通道CSV失败",
+        "en": "Load channel pattern failed",
+        "ja": "チャネルCSVの読み込みに失敗",
+    },
+    "ideal": {"zh": "理想", "en": "ideal", "ja": "理想"},
+    "amp": {"zh": "幅度", "en": "Amp", "ja": "振幅"},
+    "phase": {"zh": "相位", "en": "Phase", "ja": "位相"},
+    "row_channel_count": {"zh": "通道数量", "en": "Channels", "ja": "チャネル数"},
+    "row_virtual_channels": {"zh": "虚拟通道", "en": "Virtual Channels", "ja": "仮想チャネル"},
+    "row_az_aperture": {"zh": "方位口径", "en": "Az Aperture", "ja": "方位開口"},
+    "row_el_aperture": {"zh": "俯仰口径", "en": "El Aperture", "ja": "仰角開口"},
+    "row_az_resolution": {"zh": "方位分辨率", "en": "Az Resolution", "ja": "方位分解能"},
+    "row_el_resolution": {"zh": "俯仰分辨率", "en": "El Resolution", "ja": "仰角分解能"},
+    "row_az_no_fold": {"zh": "方位不模糊范围", "en": "Az No-Fold Range", "ja": "方位非曖昧範囲"},
+    "row_az_no_fold_error": {"zh": "方位范围内最大误差", "en": "Az Max Error in Range", "ja": "方位範囲内最大誤差"},
+    "row_az_margin": {"zh": "方位竞争峰裕量", "en": "Az Peak Margin", "ja": "方位競合ピーク余裕"},
+    "row_az_cut": {"zh": "方位截断原因", "en": "Az Cut Reason", "ja": "方位打切り理由"},
+    "row_el_no_fold": {"zh": "俯仰不模糊范围", "en": "El No-Fold Range", "ja": "仰角非曖昧範囲"},
+    "row_el_no_fold_error": {"zh": "俯仰范围内最大误差", "en": "El Max Error in Range", "ja": "仰角範囲内最大誤差"},
+    "row_el_margin": {"zh": "俯仰竞争峰裕量", "en": "El Peak Margin", "ja": "仰角競合ピーク余裕"},
+    "row_el_cut": {"zh": "俯仰截断原因", "en": "El Cut Reason", "ja": "仰角打切り理由"},
+    "undo_empty": {"zh": "没有可撤销的操作。", "en": "Nothing to undo.", "ja": "元に戻す操作はありません。"},
+    "undo_done": {"zh": "已撤销阵列编辑。", "en": "Undid layout edit.", "ja": "アレイ編集を元に戻しました。"},
+    "redo_empty": {"zh": "没有可重做的操作。", "en": "Nothing to redo.", "ja": "やり直す操作はありません。"},
+    "redo_done": {"zh": "已重做阵列编辑。", "en": "Redid layout edit.", "ja": "アレイ編集をやり直しました。"},
+    "limit_reached": {"zh": "{prefix}数量已达上限({max_count})。", "en": "{prefix} limit reached ({max_count}).", "ja": "{prefix}数が上限({max_count})に達しました。"},
+    "antenna_limit_title": {"zh": "天线数量限制", "en": "Antenna limit", "ja": "アンテナ数制限"},
+    "count_limit_detail": {"zh": "{prefix}数量最多为{max_count}。", "en": "{prefix} count is limited to {max_count}.", "ja": "{prefix}数は最大{max_count}です。"},
+    "added_element": {"zh": "已添加{element} | x={x:g} λ | y={y:g} λ", "en": "Added {element} | x={x:g} λ | y={y:g} λ", "ja": "{element}を追加 | x={x:g} λ | y={y:g} λ"},
+    "delete_mode_on": {"zh": "删除模式：点击TX/RX通道即可删除，按Esc退出。", "en": "Delete mode: click Tx/Rx elements to remove them. Press Esc to exit.", "ja": "削除モード：TX/RXチャネルをクリックして削除、Escで終了。"},
+    "delete_mode_off": {"zh": "已退出删除模式。", "en": "Delete mode off.", "ja": "削除モードを終了しました。"},
+    "layout_already_clear": {"zh": "阵列已经是初始布局。", "en": "Layout already clear.", "ja": "アレイは既に初期配置です。"},
+    "layout_cleared": {"zh": "已清空阵列，保留1T1R初始通道。", "en": "Cleared layout to 1T1R starter points.", "ja": "アレイをクリアし、1T1R初期チャネルを残しました。"},
+    "auto_layout_title": {"zh": "自动排阵", "en": "Auto array layout", "ja": "自動アレイ配置"},
+    "auto_layout_already": {"zh": "自动排阵已是{tx}T{rx}R。", "en": "Auto layout already applied: {tx}T{rx}R.", "ja": "自動配置は既に{tx}T{rx}Rです。"},
+    "auto_layout_done": {"zh": "已应用自动排阵：{tx}T{rx}R。", "en": "Auto layout applied: {tx}T{rx}R.", "ja": "自動配置を適用：{tx}T{rx}R。"},
+    "delete_last": {"zh": "不能删除最后一个{prefix}通道。", "en": "Cannot delete the last {prefix} element.", "ja": "最後の{prefix}チャネルは削除できません。"},
+    "delete_last_detail": {"zh": "测角分析至少需要一个{prefix}通道。", "en": "At least one {prefix} element is required for analysis.", "ja": "解析には少なくとも1つの{prefix}チャネルが必要です。"},
+    "deleted_element": {"zh": "已删除{element}，TX/RX编号已自动对齐。{suffix}", "en": "Deleted {element}. Tx/Rx numbering aligned.{suffix}", "ja": "{element}を削除し、TX/RX番号を整列しました。{suffix}"},
+    "delete_mode_suffix": {"zh": " 删除模式保持开启。", "en": " Delete mode remains on.", "ja": " 削除モードは継続中。"},
+    "frequency_set": {"zh": "频率已设置为{frequency} GHz。", "en": "Frequency set to {frequency} GHz.", "ja": "周波数を{frequency} GHzに設定しました。"},
+    "frequency_invalid": {"zh": "频率输入无效，已恢复为{frequency} GHz。", "en": "Invalid frequency. Restored {frequency} GHz.", "ja": "無効な周波数です。{frequency} GHzに戻しました。"},
+    "margin_set": {"zh": "竞争峰裕量阈值已设置为{value} dB。", "en": "Peak margin threshold set to {value} dB.", "ja": "競合ピーク余裕しきい値を{value} dBに設定しました。"},
+    "margin_invalid": {"zh": "竞争峰裕量输入无效，已恢复为{value} dB。", "en": "Invalid peak margin. Restored {value} dB.", "ja": "競合ピーク余裕の入力が無効です。{value} dBに戻しました。"},
+    "refreshed": {"zh": "已刷新。", "en": "Refreshed.", "ja": "更新しました。"},
+    "refresh_invalid": {"zh": "频率输入无效，已恢复并刷新。", "en": "Invalid frequency restored and refreshed.", "ja": "無効な周波数を復元して更新しました。"},
+    "drag_cancel": {"zh": "已取消拖动。", "en": "Drag canceled.", "ja": "ドラッグをキャンセルしました。"},
+    "no_selection": {"zh": "当前没有选中通道。", "en": "No selection.", "ja": "選択中のチャネルはありません。"},
+    "selection_cleared": {"zh": "已清除选择。", "en": "Selection cleared.", "ja": "選択を解除しました。"},
+    "select_element_hint": {"zh": "已清除选择。点击一个天线通道可重新选择。", "en": "Selection cleared. Click an antenna element to select.", "ja": "選択を解除しました。アンテナチャネルをクリックして再選択できます。"},
+    "delete_click_element": {"zh": "删除模式：请直接点击TX/RX通道。", "en": "Delete mode: click directly on a Tx/Rx element.", "ja": "削除モード：TX/RXチャネルを直接クリックしてください。"},
+    "selected_element": {"zh": "已选中{element} | x={x:g} λ | y={y:g} λ", "en": "Selected {element} | x={x:g} λ | y={y:g} λ", "ja": "{element}を選択 | x={x:g} λ | y={y:g} λ"},
+    "snap_element": {"zh": "吸附{element}：x={x:g} λ, y={y:g} λ", "en": "Snap {element}: x={x:g} λ, y={y:g} λ", "ja": "{element}をスナップ：x={x:g} λ, y={y:g} λ"},
+    "placed_element": {"zh": "{element}：x={x:g} λ, y={y:g} λ", "en": "{element}: x={x:g} λ, y={y:g} λ", "ja": "{element}：x={x:g} λ, y={y:g} λ"},
+    "export_layout_title": {"zh": "导出阵面布局", "en": "Export antenna layout", "ja": "アレイ配置を書き出し"},
+    "import_layout_title": {"zh": "导入阵面布局", "en": "Import antenna layout", "ja": "アレイ配置を読み込み"},
+    "layout_json_type": {"zh": "阵面布局JSON", "en": "Antenna layout JSON", "ja": "アレイ配置JSON"},
+    "all_files_type": {"zh": "所有文件", "en": "All files", "ja": "すべてのファイル"},
+    "hfss_csv_type": {"zh": "HFSS CSV/TSV", "en": "HFSS CSV/TSV", "ja": "HFSS CSV/TSV"},
+    "csv_type": {"zh": "CSV文件", "en": "CSV files", "ja": "CSVファイル"},
+    "tsv_type": {"zh": "TSV文件", "en": "TSV files", "ja": "TSVファイル"},
+    "exported_layout": {"zh": "已导出阵面布局：{file}", "en": "Exported layout: {file}", "ja": "アレイ配置を書き出しました：{file}"},
+    "import_layout_failed": {"zh": "导入阵面布局失败", "en": "Import layout failed", "ja": "アレイ配置の読み込みに失敗"},
+    "imported_layout": {
+        "zh": "已导入：{file} | {tx}=({tx_x:g},{tx_y:g}) λ | {rx}=({rx_x:g},{rx_y:g}) λ | x {x_min:g}..{x_max:g} λ, y {y_min:g}..{y_max:g} λ",
+        "en": "Imported: {file} | {tx}=({tx_x:g},{tx_y:g}) λ | {rx}=({rx_x:g},{rx_y:g}) λ | x {x_min:g}..{x_max:g} λ, y {y_min:g}..{y_max:g} λ",
+        "ja": "読み込み完了：{file} | {tx}=({tx_x:g},{tx_y:g}) λ | {rx}=({rx_x:g},{rx_y:g}) λ | x {x_min:g}..{x_max:g} λ, y {y_min:g}..{y_max:g} λ",
+    },
 }
+
+
+def _text_for_language(key: str, language: str = LANGUAGE_ZH, **kwargs) -> str:
+    language = language if language in SUPPORTED_LANGUAGES else LANGUAGE_ZH
+    translations = UI_TEXT.get(key, {})
+    template = translations.get(language) or translations.get(LANGUAGE_ZH) or key
+    return template.format(**kwargs) if kwargs else template
+
+
+def _pattern_slot_label_for_language(kind: str, plane: str, language: str) -> str:
+    kind_key = "amp" if kind == PATTERN_KIND_AMPLITUDE else "phase"
+    plane_text = "E" if plane == PATTERN_PLANE_ELEVATION else "H"
+    return f"{_text_for_language(kind_key, language)} {plane_text}"
+
+
+PRIMARY_EVAL_ROWS = (
+    "row_channel_count",
+    "row_virtual_channels",
+    "row_az_aperture",
+    "row_el_aperture",
+    "row_az_resolution",
+    "row_el_resolution",
+)
+SECONDARY_EVAL_ROWS = (
+    "row_az_no_fold",
+    "row_az_no_fold_error",
+    "row_az_margin",
+    "row_az_cut",
+    "row_el_no_fold",
+    "row_el_no_fold_error",
+    "row_el_margin",
+    "row_el_cut",
+)
 
 # ── Theme ─────────────────────────────────────────────────────────────
 THEME = {
     # Base
-    "bg": "#f5f3f0",
+    "bg": "#f6f7f8",
     "card_bg": "#ffffff",
-    "card_border": "#e2dfdb",
-    "status_bar_bg": "#eae8e4",
+    "panel_bg": "#ffffff",
+    "panel_alt_bg": "#f7f8fa",
+    "card_border": "#e2e5e9",
+    "status_bar_bg": "#f6f7f8",
+    "toolbar_group_bg": "#ffffff",
+    "input_bg": "#ffffff",
+    "disabled_bg": "#f0f2f4",
     # Accent
-    "accent": "#3b6e8f",
-    "accent_hover": "#2d5a78",
-    "accent_light": "#dce8f0",
+    "accent": "#111827",
+    "accent_hover": "#232a34",
+    "accent_pressed": "#050b16",
+    "accent_light": "#eef2f7",
+    "secondary_accent": "#0f766e",
+    "secondary_light": "#ccfbf1",
+    "danger": "#dc2626",
+    "danger_hover": "#ef4444",
+    "danger_pressed": "#b91c1c",
+    "warning": "#d97706",
     # Text
-    "text_primary": "#2c2c2c",
-    "text_secondary": "#6b6b6b",
-    "text_muted": "#999999",
+    "text_primary": "#171717",
+    "text_secondary": "#565f6b",
+    "text_muted": "#8b949e",
+    "text_inverse": "#ffffff",
     # Typography
     "font_family": "Segoe UI",
     "font_family_mono": "Cascadia Code",
@@ -139,13 +563,32 @@ THEME = {
     "font_size_base": 10,
     "font_size_lg": 13,
     # Matplotlib
-    "fig_facecolor": "#fafaf8",
-    "grid_color": "#c0bdb8",
-    "grid_alpha": 0.15,
+    "plot_bg": "#ffffff",
+    "grid_color": "#dde2e8",
+    "grid_major_color": "#b8c0ca",
+    "grid_minor_color": "#e5e9ef",
+    "grid_alpha": 0.28,
+    "axis_spine": "#d9dde3",
+    "tx_color": "#d95f5f",
+    "tx_edge": "#8f1d2c",
+    "rx_color": "#2563eb",
+    "rx_edge": "#1e3a8a",
+    "selection": "#f59e0b",
+    "response_line": "#2563eb",
+    "response_secondary_line": "#64748b",
+    "sidelobe": "#d97706",
     # MplButton
-    "mpl_btn_bg": "#f0eeeb",
-    "mpl_btn_hover": "#dce8f0",
-    "mpl_btn_text": "#3b6e8f",
+    "mpl_btn_bg": "#ffffff",
+    "mpl_btn_hover": "#f4f6f8",
+    "mpl_btn_text": "#171717",
+    "mpl_btn_border": "#d9dde3",
+    # ttk buttons
+    "button_bg": "#ffffff",
+    "button_hover": "#f4f6f8",
+    "button_pressed": "#eceff3",
+    "button_border": "#d9dde3",
+    "menu_hover": "#f4f6f8",
+    "focus": "#aab4c2",
 }
 
 
@@ -187,6 +630,8 @@ class ResponseChart:
     progress_var: tk.DoubleVar | None = None
     progress_scale: ttk.Scale | None = None
     progress_label: ttk.Label | None = None
+    play_button: ttk.Button | None = None
+    stop_button: ttk.Button | None = None
     hover_annotation: any = None  # matplotlib Annotation
     hover_db: np.ndarray = None
     hover_angles: np.ndarray = None
@@ -209,30 +654,35 @@ def _response_cut_for_mode(
     azimuths: np.ndarray,
     elevations: np.ndarray,
     mode: str,
+    language: str = LANGUAGE_ZH,
 ) -> ResponseCut:
     if mode == RESPONSE_MODE_ELEVATION:
         az0_index = int(np.argmin(np.abs(azimuths)))
         return ResponseCut(
             mode=RESPONSE_MODE_ELEVATION,
-            label="El",
+            label=_text_for_language("el_short", language),
             angles=elevations,
             gains_db=af_db[:, az0_index],
             fov=ELEVATION_FOV,
             mainlobe_guard=MAINLOBE_GUARD_EL,
-            x_label="Elevation angle (deg)",
-            pattern_label="Element pattern (V)",
+            x_label=_text_for_language("axis_el_angle", language),
+            pattern_label=_text_for_language(
+                "pattern_cut_label", language, mode=_text_for_language("el", language)
+            ),
         )
 
     el0_index = int(np.argmin(np.abs(elevations)))
     return ResponseCut(
         mode=RESPONSE_MODE_AZIMUTH,
-        label="Az",
+        label=_text_for_language("az_short", language),
         angles=azimuths,
         gains_db=af_db[el0_index, :],
         fov=AZIMUTH_FOV,
         mainlobe_guard=MAINLOBE_GUARD_AZ,
-        x_label="Azimuth angle (deg)",
-        pattern_label="Element pattern (H)",
+        x_label=_text_for_language("axis_az_angle", language),
+        pattern_label=_text_for_language(
+            "pattern_cut_label", language, mode=_text_for_language("az", language)
+        ),
     )
 
 
@@ -321,6 +771,68 @@ def _format_db_at_az(value: float | None, angle: float | None) -> str:
     return f"{value:.2f} dB @ Az {angle:.1f}°"
 
 
+def _format_signed_degree(value: float, digits: int = 0) -> str:
+    if abs(value) < 0.05:
+        return "0°"
+    text = f"{value:+.{digits}f}"
+    if digits == 0:
+        text = text.replace(".0", "")
+    return f"{text}°"
+
+
+def _format_angle_error(value: float | None) -> str:
+    if value is None or not np.isfinite(value):
+        return "N/A"
+    return f"{value:.1f}°"
+
+
+def _format_angle_range(metrics: DbfAngleMetrics | None) -> str:
+    if (
+        metrics is None
+        or metrics.no_fold_left is None
+        or metrics.no_fold_right is None
+        or not np.isfinite(metrics.no_fold_left)
+        or not np.isfinite(metrics.no_fold_right)
+    ):
+        return "N/A"
+    width = metrics.no_fold_width
+    width_text = "N/A" if width is None else f"{width:.0f}°"
+    return (
+        f"{_format_signed_degree(metrics.no_fold_left)}~"
+        f"{_format_signed_degree(metrics.no_fold_right)} / {width_text}"
+    )
+
+
+def _format_peak_margin(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    if np.isposinf(value):
+        return "无竞争峰"
+    if not np.isfinite(value):
+        return "N/A"
+    return f"{value:.1f} dB"
+
+
+def _format_axis_angle_metrics(metrics: DbfAngleMetrics | None, field: str) -> str:
+    if metrics is None:
+        return "N/A"
+    if field == "no_fold_error":
+        return _format_angle_error(metrics.no_fold_max_abs_error)
+    if field == "focus_error":
+        return _format_angle_error(metrics.focus_max_abs_error)
+    if field == "margin":
+        if (
+            (metrics.no_fold_width or 0.0) <= 0.0
+            and (
+                metrics.negative_cut_reason in {"边界受限", "谱不可靠"}
+                or metrics.positive_cut_reason in {"边界受限", "谱不可靠"}
+            )
+        ):
+            return "不可用"
+        return _format_peak_margin(metrics.min_peak_margin_db)
+    raise ValueError(f"Unknown DBF angle metric field: {field!r}")
+
+
 def _format_mm(value: float) -> str:
     return f"{value:.1f} mm"
 
@@ -351,6 +863,32 @@ def _format_frequency_ghz(frequency: float) -> str:
     if abs(frequency - round(frequency)) < 1e-9:
         return str(int(round(frequency)))
     return f"{frequency:.6f}".rstrip("0").rstrip(".")
+
+
+def _parse_margin_db(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        margin = float(value)
+    elif isinstance(value, str):
+        text = value.strip().lower().replace(",", ".")
+        if text.endswith("db"):
+            text = text[:-2].strip()
+        if not text:
+            return None
+        try:
+            margin = float(text)
+        except ValueError:
+            return None
+    else:
+        return None
+    return margin if math.isfinite(margin) and margin >= 0.0 else None
+
+
+def _format_margin_db(value: float) -> str:
+    if abs(value - round(value)) < 1e-9:
+        return str(int(round(value)))
+    return f"{value:.3f}".rstrip("0").rstrip(".")
 
 
 def _validated_window_geometry(value: object) -> str | None:
@@ -457,27 +995,98 @@ def _axes_boxes_overlap(
     )
 
 
-def _note_display(note: str) -> tuple[str, str]:
-    note_lower = note.lower()
-    if "duplicate" in note_lower:
-        icon, color = NOTE_STYLES["duplicate"]
-    elif "windowing" in note_lower:
-        icon, color = NOTE_STYLES["windowing"]
-    elif "ambiguity high" in note_lower:
-        icon, color = NOTE_STYLES["ambiguity high"]
-    elif "ambiguity medium" in note_lower:
-        icon, color = NOTE_STYLES["ambiguity medium"]
-    else:
-        icon, color = NOTE_STYLES["none"]
-    return f"{icon} {note}", color
+def _style_toplevel(window: tk.Toplevel) -> None:
+    window.configure(bg=THEME["bg"])
+
+
+def _build_popup_menu(parent: tk.Widget) -> tk.Menu:
+    menu = tk.Menu(parent, tearoff=False)
+    try:
+        menu.configure(
+            background=THEME["card_bg"],
+            foreground=THEME["text_primary"],
+            activebackground=THEME["menu_hover"],
+            activeforeground=THEME["text_primary"],
+            disabledforeground=THEME["text_muted"],
+            borderwidth=1,
+            activeborderwidth=0,
+            relief=tk.SOLID,
+            font=(THEME["font_family"], THEME["font_size_base"]),
+        )
+    except tk.TclError:
+        LOGGER.debug("Menu did not accept all themed options", exc_info=True)
+    return menu
+
+
+def _apply_interactive_cursors(widget: tk.Widget) -> None:
+    for child in widget.winfo_children():
+        if isinstance(child, (ttk.Button, ttk.Menubutton, ttk.Scale)):
+            try:
+                child.configure(cursor="hand2")
+            except tk.TclError:
+                LOGGER.debug("Interactive widget did not accept cursor option", exc_info=True)
+        _apply_interactive_cursors(child)
+
+
+def _style_canvas_widget(widget: tk.Widget) -> None:
+    try:
+        widget.configure(
+            background=THEME["card_bg"],
+            highlightthickness=1,
+            highlightbackground=THEME["card_border"],
+            highlightcolor=THEME["focus"],
+        )
+    except tk.TclError:
+        LOGGER.debug("Canvas widget did not accept themed border options", exc_info=True)
+
+
+def _configure_axis_chrome(ax) -> None:  # noqa: ANN001
+    ax.set_facecolor(THEME["plot_bg"])
+    for spine in ax.spines.values():
+        spine.set_color(THEME["axis_spine"])
+        spine.set_linewidth(0.8)
+    ax.tick_params(colors=THEME["text_secondary"], labelsize=8, width=0.8)
+
+
+def _style_legend(legend) -> None:  # noqa: ANN001
+    if legend is None:
+        return
+    frame = legend.get_frame()
+    frame.set_facecolor(THEME["card_bg"])
+    frame.set_edgecolor(THEME["card_border"])
+    frame.set_alpha(0.92)
+
+
+def _new_response_hover_annotation(ax):  # noqa: ANN001
+    annotation = ax.annotate(
+        "",
+        xy=(0, 0),
+        xytext=(12, 12),
+        textcoords="offset points",
+        bbox={
+            "boxstyle": "round,pad=0.35",
+            "facecolor": THEME["card_bg"],
+            "edgecolor": THEME["card_border"],
+            "alpha": 1.0,
+            "linewidth": 0.8,
+        },
+        fontsize=8,
+        color=THEME["text_primary"],
+        annotation_clip=False,
+        zorder=30,
+    )
+    annotation.set_clip_on(False)
+    annotation.set_visible(False)
+    return annotation
 
 
 def _configure_pattern_preview_axis(ax) -> None:  # noqa: ANN001
+    _configure_axis_chrome(ax)
     ax.set_xlim(-180.0, 180.0)
     ax.set_xticks(np.arange(-180.0, 181.0, 30.0))
     ax.set_xticks(np.arange(-180.0, 181.0, 10.0), minor=True)
-    ax.grid(True, which="major", alpha=0.32)
-    ax.grid(True, which="minor", alpha=0.12)
+    ax.grid(True, which="major", alpha=0.32, color=THEME["grid_major_color"], linewidth=0.6)
+    ax.grid(True, which="minor", alpha=0.18, color=THEME["grid_minor_color"], linewidth=0.45)
 
 
 def _element_prefix(kind: str) -> str:
@@ -593,6 +1202,36 @@ def _axis_limits(
     return low - padding, high + padding
 
 
+def _axis_ticks_within(limits: tuple[float, float], step: float) -> np.ndarray:
+    low, high = limits
+    start = np.ceil(low / step) * step
+    stop = np.floor(high / step) * step
+    return np.arange(start, stop + step / 2.0, step)
+
+
+def _square_axis_limits(
+    x_values: list[float] | np.ndarray,
+    y_values: list[float] | np.ndarray,
+    minimum_span: float,
+    padding: float,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    x_low, x_high = _axis_limits(x_values, minimum_span=minimum_span, padding=padding)
+    y_low, y_high = _axis_limits(y_values, minimum_span=minimum_span, padding=padding)
+    x_span = x_high - x_low
+    y_span = y_high - y_low
+    target_span = max(x_span, y_span)
+
+    if x_span < target_span:
+        x_center = (x_low + x_high) / 2.0
+        x_low = x_center - target_span / 2.0
+        x_high = x_center + target_span / 2.0
+    if y_span < target_span:
+        y_center = (y_low + y_high) / 2.0
+        y_low = y_center - target_span / 2.0
+        y_high = y_center + target_span / 2.0
+    return (x_low, x_high), (y_low, y_high)
+
+
 def _fixed_box_equal_limits(
     x_values: list[float] | np.ndarray,
     y_values: list[float] | np.ndarray,
@@ -625,37 +1264,90 @@ def _fixed_box_equal_limits(
 
 
 def _azimuth_status_label(metrics: ArrayMetrics) -> str:
-    if metrics.front_radar_status == "Acceptable":
-        return "Az Accept"
-    return f"Az {metrics.front_radar_status}"
+    labels = {
+        "Good": "方位良好",
+        "Acceptable": "方位可用",
+        "Risky": "方位风险",
+        "Bad": "方位较差",
+    }
+    return labels.get(metrics.front_radar_status, f"方位{metrics.front_radar_status}")
 
 
-def _dbf_mode_label(mode: str | None) -> str:
+def _ambiguity_level_label(value: str) -> str:
+    labels = {"High": "高", "Medium": "中", "Low": "低"}
+    return labels.get(value, value)
+
+
+def _angle_cut_reason_summary(metrics: DbfAngleMetrics | None) -> str:
+    if metrics is None:
+        return "N/A"
+    negative = metrics.negative_cut_reason or "N/A"
+    positive = metrics.positive_cut_reason or "N/A"
+    if negative == positive:
+        return negative
+    return f"负侧{negative}，正侧{positive}"
+
+
+def _legacy_note_key(note: str) -> str:
+    note_lower = note.lower()
+    if "duplicate" in note_lower or "重复" in note:
+        return "duplicate"
+    if "windowing" in note_lower or "加窗" in note or "旁瓣" in note:
+        return "windowing"
+    if "ambiguity high" in note_lower or "模糊风险高" in note:
+        return "ambiguity high"
+    if "ambiguity medium" in note_lower or "模糊风险中" in note:
+        return "ambiguity medium"
+    if "不可用" in note or "未覆盖" in note:
+        return "ambiguity high"
+    return "none"
+
+
+def _note_display(note: str) -> tuple[str, str]:
+    key = _legacy_note_key(note)
+    icon, color = NOTE_STYLES[key]
+    return f"{icon}  {note}", color
+
+
+def _dbf_mode_label(mode: str | None, language: str = LANGUAGE_ZH) -> str:
     if mode == "elevation":
-        return "Elevation"
-    return "Azimuth"
+        return _text_for_language("el", language)
+    return _text_for_language("az", language)
 
 
-def _dbf_short_label(mode: str | None) -> str:
+def _dbf_short_label(mode: str | None, language: str = LANGUAGE_ZH) -> str:
     if mode == "elevation":
-        return "El"
-    return "Az"
+        return _text_for_language("el_short", language)
+    return _text_for_language("az_short", language)
 
 
-def _format_dbf_angle_label(angle: float) -> str:
+def _dbf_dictionary_mode_label(mode: str, language: str = LANGUAGE_ZH) -> str:
+    labels = {
+        DBF_DICT_IDEAL: "dbf_dict_ideal",
+        DBF_DICT_IDEAL_REVERSED: "dbf_dict_reversed",
+        DBF_DICT_CHANNEL_PATTERN: "dbf_dict_channel",
+        DBF_DICT_CHANNEL_PATTERN_ZERO_REF: "dbf_dict_channel_zero",
+        DBF_DICT_CUSTOM: "dbf_dict_custom",
+    }
+    return _text_for_language(labels.get(mode, "dbf_dict_ideal"), language)
+
+
+def _format_dbf_angle_label(angle: float, language: str = LANGUAGE_ZH) -> str:
     if abs(angle) < 0.05:
-        return "0 deg"
-    return f"{angle:+.0f} deg"
+        return "0°" if language != LANGUAGE_EN else "0 deg"
+    return f"{angle:+.0f}°" if language != LANGUAGE_EN else f"{angle:+.0f} deg"
 
 
-def _series_table_label(series) -> str:  # noqa: ANN001
+def _series_table_label(series, language: str = LANGUAGE_ZH) -> str:  # noqa: ANN001
     if series is None:
-        return "ideal"
+        return _text_for_language("ideal", language)
     return series.short_label()
 
 
-def _pattern_slot_label(kind: str, plane: str) -> str:
-    kind_label = "Amp" if kind == PATTERN_KIND_AMPLITUDE else "Phase"
+def _pattern_slot_label(kind: str, plane: str, language: str = LANGUAGE_ZH) -> str:
+    kind_label = _text_for_language(
+        "amp" if kind == PATTERN_KIND_AMPLITUDE else "phase", language
+    )
     plane_label = "E" if plane == PATTERN_PLANE_ELEVATION else "H"
     return f"{kind_label} {plane_label}"
 
@@ -702,9 +1394,14 @@ class VirtualArrayGui:
       └─────────────────────────────────────────────┘
     """
 
+    def _t(self, key: str, **kwargs) -> str:
+        return _text_for_language(key, getattr(self, "language", LANGUAGE_ZH), **kwargs)
+
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title(f"MIMO Array Visualizer v{APP_VERSION}")
+        self.language = LANGUAGE_ZH
+        self.language_var = tk.StringVar(value=LANGUAGE_LABELS[self.language])
+        self.root.title(self._t("app_title", version=APP_VERSION))
         self.root.configure(bg=THEME["bg"])
 
         # Data state
@@ -734,12 +1431,29 @@ class VirtualArrayGui:
         self.dbf_spectra_db = np.empty((0, 0), dtype=float)
         self.dbf_scan_frame = 0
         self.dbf_progress_updating = False
-        self.dbf_az_toolbar_button: ttk.Button | None = None
-        self.dbf_el_toolbar_button: ttk.Button | None = None
-        self.dbf_stop_toolbar_button: ttk.Button | None = None
+        self.dbf2d_az_frame = _dbf_frame_index_for_angle(0.0)
+        self.dbf2d_el_frame = _dbf_frame_index_for_angle(0.0)
+        self.dbf2d_az_playing = False
+        self.dbf2d_el_playing = False
+        self.dbf2d_after_id: str | None = None
+        self.dbf2d_progress_updating = False
+        self.dbf2d_az_var: tk.DoubleVar | None = None
+        self.dbf2d_el_var: tk.DoubleVar | None = None
+        self.dbf2d_az_button: ttk.Button | None = None
+        self.dbf2d_el_button: ttk.Button | None = None
+        self.dbf2d_stop_button: ttk.Button | None = None
+        self.dbf2d_status_label: ttk.Label | None = None
+        self.dbf2d_fig: Figure | None = None
+        self.dbf2d_ax = None
+        self.dbf2d_canvas: FigureCanvasTkAgg | None = None
+        self.config_menu_button: ttk.Menubutton | None = None
+        self.language_menu_button: ttk.Menubutton | None = None
+        self.config_menu: tk.Menu | None = None
+        self.language_menu: tk.Menu | None = None
 
         self.element_pattern: ElementPattern | None = None
         self.channel_patterns = ChannelPatternSet()
+        self.dbf_dictionary = DbfDictionaryConfig()
         self.auto_tx_count = tk.StringVar(value="1")
         self.auto_rx_count = tk.StringVar(value="1")
         self.last_valid_frequency_ghz = DEFAULT_FREQUENCY_GHZ
@@ -747,12 +1461,15 @@ class VirtualArrayGui:
             value=_format_frequency_ghz(DEFAULT_FREQUENCY_GHZ)
         )
         self.frequency_entry: ttk.Entry | None = None
-        self.pattern_status = tk.StringVar(value="Patterns: ideal")
+        self.pattern_status = tk.StringVar(value=self._t("pattern_ideal"))
         self.status = tk.StringVar(
-            value="Drag Tx/Rx points in Physical Array. Release to refresh Virtual Array and Responses."
+            value=self._t("status_initial")
         )
         self.last_layout_dir = Path("outputs").resolve()
         self.last_pattern_dir = Path.home()
+        self.last_valid_margin_db = DBF_AMBIGUITY_MARGIN_DB
+        self.margin_db = tk.StringVar(value=_format_margin_db(DBF_AMBIGUITY_MARGIN_DB))
+        self.margin_entry: ttk.Entry | None = None
         self._load_local_state()
         self._sync_auto_count_inputs()
 
@@ -769,58 +1486,354 @@ class VirtualArrayGui:
         # ── Refined ttk styles ─────────────────────────────────────
         _f = THEME["font_family"]
         _fm = THEME["font_family_mono"]
+        root.option_add("*Font", f"{{{_f}}} {THEME['font_size_base']}")
+        root.option_add("*Menu.Font", f"{{{_f}}} {THEME['font_size_base']}")
+        root.option_add("*Menu.background", THEME["card_bg"])
+        root.option_add("*Menu.foreground", THEME["text_primary"])
+        root.option_add("*Menu.activeBackground", THEME["menu_hover"])
+        root.option_add("*Menu.activeForeground", THEME["text_primary"])
+        root.option_add("*Menu.borderWidth", 1)
 
         style.configure("TFrame", background=THEME["bg"])
+        style.configure("Panel.TFrame", background=THEME["panel_bg"], borderwidth=0)
         style.configure("Card.TFrame", background=THEME["card_bg"])
-        style.configure("TLabel", background=THEME["bg"], foreground=THEME["text_primary"],
-                         font=(_f, THEME["font_size_base"]))
-        style.configure("Status.TLabel", background=THEME["status_bar_bg"],
-                         foreground=THEME["text_secondary"], font=(_f, THEME["font_size_sm"]))
-        style.configure("Muted.TLabel", background=THEME["status_bar_bg"],
-                         foreground=THEME["text_muted"], font=(_f, THEME["font_size_sm"]))
-        style.configure("Card.TLabel", background=THEME["card_bg"],
-                         foreground=THEME["text_primary"], font=(_f, THEME["font_size_base"]))
-        style.configure("CardMono.TLabel", background=THEME["card_bg"],
-                         foreground=THEME["text_primary"], font=(_fm, THEME["font_size_base"]))
-        style.configure("CardHeader.TLabel", background=THEME["card_bg"],
-                         foreground=THEME["text_primary"], font=(_fm, THEME["font_size_base"]))
-        style.configure("SectionTitle.TLabel", background=THEME["card_bg"],
-                         foreground=THEME["text_secondary"], font=(_f, THEME["font_size_sm"]))
-        style.configure("Badge.TLabel", background=THEME["card_bg"],
-                         foreground=THEME["text_primary"], font=(_f, THEME["font_size_lg"], "bold"))
-
-        style.configure("Accent.TButton", font=(_f, THEME["font_size_base"], "bold"),
-                         padding=(12, 6), background=THEME["accent"], foreground="#ffffff")
-        style.map("Accent.TButton",
-                   background=[("active", THEME["accent_hover"]), ("pressed", THEME["accent_hover"])],
-                   foreground=[("active", "#ffffff"), ("pressed", "#ffffff")])
-        style.configure("Large.TButton", font=(_f, THEME["font_size_base"]),
-                         padding=(10, 5), background=THEME["card_bg"])
-        style.map("Large.TButton",
-                   background=[("active", THEME["accent_light"]), ("pressed", THEME["accent_light"])])
-
-        style.configure("TLabelframe", background=THEME["card_bg"],
-                         foreground=THEME["text_secondary"], font=(_f, THEME["font_size_sm"], "bold"))
-        style.configure("TLabelframe.Label", background=THEME["card_bg"],
-                         foreground=THEME["text_secondary"], font=(_f, THEME["font_size_sm"], "bold"))
-
-        style.configure("TCombobox", font=(_f, THEME["font_size_base"]))
+        style.configure("Dialog.TFrame", background=THEME["bg"])
+        style.configure("Toolbar.TFrame", background=THEME["status_bar_bg"])
+        style.configure(
+            "ToolbarGroup.TFrame",
+            background=THEME["toolbar_group_bg"],
+            bordercolor=THEME["card_border"],
+            lightcolor=THEME["toolbar_group_bg"],
+            darkcolor=THEME["card_border"],
+        )
+        style.configure("ChartFooter.TFrame", background=THEME["panel_alt_bg"])
         style.configure("Status.TFrame", background=THEME["status_bar_bg"])
         style.configure("StatusInner.TFrame", background=THEME["status_bar_bg"])
 
+        style.configure(
+            "TLabel",
+            background=THEME["bg"],
+            foreground=THEME["text_primary"],
+            font=(_f, THEME["font_size_base"]),
+        )
+        style.configure(
+            "Toolbar.TLabel",
+            background=THEME["toolbar_group_bg"],
+            foreground=THEME["text_secondary"],
+            font=(_f, THEME["font_size_sm"], "bold"),
+        )
+        style.configure(
+            "Status.TLabel",
+            background=THEME["status_bar_bg"],
+            foreground=THEME["text_secondary"],
+            font=(_f, THEME["font_size_sm"]),
+        )
+        style.configure(
+            "Muted.TLabel",
+            background=THEME["toolbar_group_bg"],
+            foreground=THEME["text_muted"],
+            font=(_f, THEME["font_size_sm"]),
+        )
+        style.configure(
+            "ChartFooter.TLabel",
+            background=THEME["panel_alt_bg"],
+            foreground=THEME["text_secondary"],
+            font=(_f, THEME["font_size_sm"]),
+        )
+        style.configure(
+            "Card.TLabel",
+            background=THEME["card_bg"],
+            foreground=THEME["text_primary"],
+            font=(_f, THEME["font_size_base"]),
+        )
+        style.configure(
+            "CardMono.TLabel",
+            background=THEME["card_bg"],
+            foreground=THEME["text_primary"],
+            font=(_fm, THEME["font_size_base"]),
+        )
+        style.configure(
+            "CardHeader.TLabel",
+            background=THEME["card_bg"],
+            foreground=THEME["text_primary"],
+            font=(_fm, THEME["font_size_base"], "bold"),
+        )
+        style.configure(
+            "SectionTitle.TLabel",
+            background=THEME["card_bg"],
+            foreground=THEME["text_secondary"],
+            font=(_f, THEME["font_size_sm"], "bold"),
+        )
+        style.configure(
+            "Badge.TLabel",
+            background=THEME["card_bg"],
+            foreground=THEME["text_primary"],
+            font=(_f, THEME["font_size_lg"], "bold"),
+        )
+
+        button_base = {
+            "padding": (12, 7),
+            "relief": "flat",
+            "borderwidth": 1,
+            "focuscolor": THEME["focus"],
+        }
+        button_font = (_f, THEME["font_size_base"])
+        style.configure(
+            "TButton",
+            **button_base,
+            font=button_font,
+            background=THEME["button_bg"],
+            foreground=THEME["text_primary"],
+            bordercolor=THEME["button_border"],
+            lightcolor=THEME["button_bg"],
+            darkcolor=THEME["button_border"],
+        )
+        style.map(
+            "TButton",
+            background=[
+                ("disabled", THEME["disabled_bg"]),
+                ("pressed", THEME["button_pressed"]),
+                ("active", THEME["button_hover"]),
+            ],
+            foreground=[
+                ("disabled", THEME["text_muted"]),
+                ("active", THEME["text_primary"]),
+            ],
+            bordercolor=[("pressed", THEME["focus"]), ("active", THEME["focus"])],
+            lightcolor=[("pressed", THEME["button_pressed"]), ("active", THEME["button_hover"])],
+            darkcolor=[("pressed", THEME["button_pressed"]), ("active", THEME["button_hover"])],
+        )
+        style.configure(
+            "Accent.TButton",
+            **button_base,
+            font=(_f, THEME["font_size_base"], "bold"),
+            background=THEME["accent"],
+            foreground=THEME["text_inverse"],
+            bordercolor=THEME["accent"],
+            lightcolor=THEME["accent"],
+            darkcolor=THEME["accent_pressed"],
+        )
+        style.map(
+            "Accent.TButton",
+            background=[
+                ("disabled", "#9ca3af"),
+                ("pressed", THEME["accent_pressed"]),
+                ("active", THEME["accent_hover"]),
+            ],
+            foreground=[("disabled", "#f8fafc"), ("active", THEME["text_inverse"])],
+            bordercolor=[("active", THEME["accent_hover"])],
+            lightcolor=[("pressed", THEME["accent_pressed"]), ("active", THEME["accent_hover"])],
+            darkcolor=[("pressed", THEME["accent_pressed"]), ("active", THEME["accent_hover"])],
+        )
+        large_button_map = {
+            "background": [
+                ("disabled", THEME["disabled_bg"]),
+                ("pressed", THEME["button_pressed"]),
+                ("active", THEME["button_hover"]),
+            ],
+            "foreground": [
+                ("disabled", THEME["text_muted"]),
+                ("active", THEME["text_primary"]),
+            ],
+            "bordercolor": [("pressed", THEME["focus"]), ("active", THEME["focus"])],
+            "lightcolor": [
+                ("pressed", THEME["button_pressed"]),
+                ("active", THEME["button_hover"]),
+            ],
+            "darkcolor": [
+                ("pressed", THEME["button_pressed"]),
+                ("active", THEME["button_hover"]),
+            ],
+        }
+        style.configure("Large.TButton", **button_base, font=button_font)
+        style.map("Large.TButton", **large_button_map)
+        compact_button_base = {
+            **button_base,
+            "padding": (8, 4),
+        }
+        style.configure(
+            "Compact.TButton",
+            **compact_button_base,
+            font=(_f, THEME["font_size_sm"], "bold"),
+        )
+        style.map("Compact.TButton", **large_button_map)
+        style.configure(
+            "CompactAccent.TButton",
+            **compact_button_base,
+            font=(_f, THEME["font_size_sm"], "bold"),
+            background=THEME["accent"],
+            foreground=THEME["text_inverse"],
+            bordercolor=THEME["accent"],
+            lightcolor=THEME["accent"],
+            darkcolor=THEME["accent_pressed"],
+        )
+        style.map(
+            "CompactAccent.TButton",
+            background=[
+                ("disabled", "#9ca3af"),
+                ("pressed", THEME["accent_pressed"]),
+                ("active", THEME["accent_hover"]),
+            ],
+            foreground=[("disabled", "#f8fafc"), ("active", THEME["text_inverse"])],
+            bordercolor=[("active", THEME["accent_hover"])],
+            lightcolor=[("pressed", THEME["accent_pressed"]), ("active", THEME["accent_hover"])],
+            darkcolor=[("pressed", THEME["accent_pressed"]), ("active", THEME["accent_hover"])],
+        )
+        style.configure(
+            "CompactDanger.TButton",
+            **compact_button_base,
+            font=(_f, THEME["font_size_sm"], "bold"),
+            background=THEME["danger"],
+            foreground=THEME["text_inverse"],
+            bordercolor=THEME["danger"],
+            lightcolor=THEME["danger"],
+            darkcolor=THEME["danger_pressed"],
+        )
+        style.map(
+            "CompactDanger.TButton",
+            background=[("pressed", THEME["danger_pressed"]), ("active", THEME["danger_hover"])],
+            foreground=[("active", THEME["text_inverse"])],
+            bordercolor=[("pressed", THEME["danger_pressed"]), ("active", THEME["danger_hover"])],
+            lightcolor=[("pressed", THEME["danger_pressed"]), ("active", THEME["danger_hover"])],
+            darkcolor=[("pressed", THEME["danger_pressed"]), ("active", THEME["danger_hover"])],
+        )
+        style.configure(
+            "Toolbar.TMenubutton",
+            **button_base,
+            font=(_f, THEME["font_size_base"], "bold"),
+            background=THEME["button_bg"],
+            foreground=THEME["text_primary"],
+            bordercolor=THEME["button_border"],
+            lightcolor=THEME["button_bg"],
+            darkcolor=THEME["button_border"],
+        )
+        style.map(
+            "Toolbar.TMenubutton",
+            background=[
+                ("pressed", THEME["button_pressed"]),
+                ("active", THEME["button_hover"]),
+            ],
+            foreground=[("active", THEME["text_primary"])],
+            bordercolor=[("pressed", THEME["focus"]), ("active", THEME["focus"])],
+            lightcolor=[("pressed", THEME["button_pressed"]), ("active", THEME["button_hover"])],
+            darkcolor=[("pressed", THEME["button_pressed"]), ("active", THEME["button_hover"])],
+        )
+        style.configure(
+            "Danger.TButton",
+            **button_base,
+            font=button_font,
+            background=THEME["danger"],
+            foreground=THEME["text_inverse"],
+            bordercolor=THEME["danger"],
+            lightcolor=THEME["danger"],
+            darkcolor=THEME["danger_pressed"],
+        )
+        style.map(
+            "Danger.TButton",
+            background=[("pressed", THEME["danger_pressed"]), ("active", THEME["danger_hover"])],
+            foreground=[("active", THEME["text_inverse"])],
+            bordercolor=[("pressed", THEME["danger_pressed"]), ("active", THEME["danger_hover"])],
+            lightcolor=[("pressed", THEME["danger_pressed"]), ("active", THEME["danger_hover"])],
+            darkcolor=[("pressed", THEME["danger_pressed"]), ("active", THEME["danger_hover"])],
+        )
+
+        style.configure(
+            "TLabelframe",
+            background=THEME["card_bg"],
+            foreground=THEME["text_secondary"],
+            bordercolor=THEME["card_border"],
+            lightcolor=THEME["card_bg"],
+            darkcolor=THEME["card_border"],
+            relief="solid",
+            borderwidth=1,
+            font=(_f, THEME["font_size_sm"], "bold"),
+        )
+        style.configure(
+            "TLabelframe.Label",
+            background=THEME["card_bg"],
+            foreground=THEME["text_secondary"],
+            font=(_f, THEME["font_size_sm"], "bold"),
+        )
+
+        style.configure(
+            "TEntry",
+            font=(_f, THEME["font_size_base"]),
+            padding=(6, 4),
+            fieldbackground=THEME["input_bg"],
+            background=THEME["input_bg"],
+            foreground=THEME["text_primary"],
+            bordercolor=THEME["button_border"],
+            lightcolor=THEME["input_bg"],
+            darkcolor=THEME["button_border"],
+            insertcolor=THEME["text_primary"],
+        )
+        style.map(
+            "TEntry",
+            bordercolor=[("focus", THEME["focus"]), ("active", THEME["focus"])],
+            fieldbackground=[("disabled", THEME["disabled_bg"])],
+        )
+        style.configure(
+            "TCombobox",
+            font=(_f, THEME["font_size_base"]),
+            fieldbackground=THEME["input_bg"],
+            background=THEME["button_bg"],
+            foreground=THEME["text_primary"],
+            bordercolor=THEME["button_border"],
+            arrowcolor=THEME["text_secondary"],
+        )
+        style.configure(
+            "Horizontal.TScale",
+            background=THEME["panel_alt_bg"],
+            troughcolor="#e2e6ec",
+            bordercolor=THEME["panel_alt_bg"],
+            lightcolor=THEME["accent"],
+            darkcolor=THEME["accent"],
+        )
+        style.configure(
+            "Vertical.TScale",
+            background=THEME["panel_alt_bg"],
+            troughcolor="#e2e6ec",
+            bordercolor=THEME["panel_alt_bg"],
+            lightcolor=THEME["accent"],
+            darkcolor=THEME["accent"],
+        )
+        style.configure(
+            "Treeview",
+            background=THEME["card_bg"],
+            fieldbackground=THEME["card_bg"],
+            foreground=THEME["text_primary"],
+            rowheight=27,
+            bordercolor=THEME["card_border"],
+            borderwidth=0,
+            font=(_f, THEME["font_size_base"]),
+        )
+        style.map(
+            "Treeview",
+            background=[("selected", THEME["accent"])],
+            foreground=[("selected", THEME["text_inverse"])],
+        )
+        style.configure(
+            "Treeview.Heading",
+            background=THEME["panel_alt_bg"],
+            foreground=THEME["text_secondary"],
+            font=(_f, THEME["font_size_sm"], "bold"),
+            relief="flat",
+            padding=(6, 5),
+        )
+
         # ── Row 0: Physical Array + Virtual Array ─────────────────
-        left_frame = ttk.Frame(root, padding=(6, 6, 3, 3))
+        left_frame = ttk.Frame(root, style="Panel.TFrame", padding=(10, 10, 5, 5))
         left_frame.grid(row=0, column=0, sticky="nsew")
         left_frame.grid_rowconfigure(0, weight=1)
         left_frame.grid_columnconfigure(0, weight=1)
 
-        right_frame = ttk.Frame(root, padding=(3, 6, 3, 3))
+        right_frame = ttk.Frame(root, style="Panel.TFrame", padding=(5, 10, 5, 5))
         right_frame.grid(row=0, column=1, sticky="nsew")
         right_frame.grid_rowconfigure(0, weight=1)
         right_frame.grid_columnconfigure(0, weight=1)
 
         # ── Column 2: Array Evaluation (narrow) ──────────────────
-        eval_info_frame = ttk.Frame(root, padding=(3, 6, 6, 3))
+        eval_info_frame = ttk.Frame(root, style="Panel.TFrame", padding=(5, 10, 10, 5))
         eval_info_frame.grid(row=0, column=2, rowspan=2, sticky="nsew")
         eval_info_frame.grid_rowconfigure(0, weight=1)
         eval_info_frame.grid_columnconfigure(0, weight=1)
@@ -828,22 +1841,24 @@ class VirtualArrayGui:
 
         # Physical Array figure
         self.phys_fig = Figure(figsize=(PHYS_FIG_W, PHYS_FIG_H), dpi=FIG_DPI)
-        self.phys_fig.set_facecolor(THEME["fig_facecolor"])
+        self.phys_fig.set_facecolor(THEME["panel_bg"])
         self.physical_ax = self.phys_fig.add_subplot(111)
-        self.physical_ax.set_facecolor(THEME["fig_facecolor"])
+        self.physical_ax.set_facecolor(THEME["plot_bg"])
         self.phys_fig.subplots_adjust(top=0.81, left=0.10, right=0.97, bottom=0.17)
         self._build_physical_figure_controls()
         self.phys_canvas = FigureCanvasTkAgg(self.phys_fig, master=left_frame)
         phys_widget = self.phys_canvas.get_tk_widget()
+        _style_canvas_widget(phys_widget)
         phys_widget.grid(row=0, column=0, sticky="nsew")
 
         # Virtual Array figure
         self.virt_fig = Figure(figsize=(VIRT_FIG_W, VIRT_FIG_H), dpi=FIG_DPI)
-        self.virt_fig.set_facecolor(THEME["fig_facecolor"])
+        self.virt_fig.set_facecolor(THEME["panel_bg"])
         self.virtual_ax = self.virt_fig.add_subplot(111)
-        self.virtual_ax.set_facecolor(THEME["fig_facecolor"])
+        self.virtual_ax.set_facecolor(THEME["plot_bg"])
         self.virt_canvas = FigureCanvasTkAgg(self.virt_fig, master=right_frame)
         virt_widget = self.virt_canvas.get_tk_widget()
+        _style_canvas_widget(virt_widget)
         virt_widget.grid(row=0, column=0, sticky="nsew")
 
         # ── Row 1: Azimuth Response + Elevation Response ──────────
@@ -857,31 +1872,75 @@ class VirtualArrayGui:
         # ── Row 2: Controls ───────────────────────────────────────
         controls_outer = ttk.Frame(root, style="Status.TFrame")
         controls_outer.grid(row=2, column=0, columnspan=3, sticky="ew")
-        controls = ttk.Frame(controls_outer, style="Status.TFrame", padding=(10, 6, 10, 3))
+        controls = ttk.Frame(controls_outer, style="Status.TFrame", padding=(12, 8, 12, 4))
         controls.pack(fill=tk.X)
-        status_row = ttk.Frame(controls_outer, style="Status.TFrame", padding=(10, 0, 10, 6))
+        status_row = ttk.Frame(controls_outer, style="Status.TFrame", padding=(12, 0, 12, 8))
         status_row.pack(fill=tk.X)
 
-        ttk.Button(
-            controls,
-            text="Import Layout",
+        def toolbar_group(padx: tuple[int, int] = (0, 8)) -> ttk.Frame:
+            group = ttk.Frame(
+                controls,
+                style="ToolbarGroup.TFrame",
+                padding=(8, 5),
+                borderwidth=1,
+                relief="solid",
+            )
+            group.pack(side=tk.LEFT, padx=padx, pady=0)
+            return group
+
+        config_group = toolbar_group()
+        self.config_menu_button = ttk.Menubutton(
+            config_group,
+            text=self._t("menu_config"),
+            style="Toolbar.TMenubutton",
+        )
+        self.config_menu_button.pack(side=tk.LEFT)
+        self.config_menu = _build_popup_menu(self.config_menu_button)
+        self.config_menu.add_command(
+            label=self._t("menu_import_layout"),
             command=self.import_layout_config,
-            style="Accent.TButton",
-        ).pack(side=tk.LEFT)
-        ttk.Button(
-            controls,
-            text="Export Layout",
+        )
+        self.config_menu.add_command(
+            label=self._t("menu_export_layout"),
             command=self.export_layout_config,
-            style="Large.TButton",
-        ).pack(side=tk.LEFT, padx=(6, 0))
+        )
+        self.config_menu.add_separator()
+        self.config_menu.add_command(
+            label=self._t("menu_channel_patterns"),
+            command=self.open_channel_patterns_dialog,
+        )
+        self.config_menu.add_command(
+            label=self._t("menu_dbf_dictionary"),
+            command=self.open_dbf_dictionary_dialog,
+        )
+        self.config_menu_button.configure(menu=self.config_menu)
 
-        ttk.Separator(controls, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=12)
+        language_group = toolbar_group()
+        self.language_menu_button = ttk.Menubutton(
+            language_group,
+            text=self._t("menu_language"),
+            style="Toolbar.TMenubutton",
+        )
+        self.language_menu_button.pack(side=tk.LEFT)
+        self.language_menu = _build_popup_menu(self.language_menu_button)
+        for language, label_key in (
+            (LANGUAGE_ZH, "language_zh"),
+            (LANGUAGE_EN, "language_en"),
+            (LANGUAGE_JA, "language_ja"),
+        ):
+            self.language_menu.add_command(
+                label=self._t(label_key),
+                command=lambda lang=language: self.set_language(lang),
+            )
+        self.language_menu_button.configure(menu=self.language_menu)
 
-        ttk.Label(
-            controls, text="Freq (GHz):", style="Status.TLabel"
-        ).pack(side=tk.LEFT, padx=(0, 4))
+        freq_group = toolbar_group()
+        self.freq_toolbar_label = ttk.Label(
+            freq_group, text=self._t("freq_label"), style="Toolbar.TLabel"
+        )
+        self.freq_toolbar_label.pack(side=tk.LEFT, padx=(0, 4))
         freq_entry = ttk.Entry(
-            controls,
+            freq_group,
             textvariable=self.frequency_ghz,
             width=8,
             justify="right",
@@ -891,13 +1950,29 @@ class VirtualArrayGui:
         freq_entry.bind("<Return>", self.on_frequency_changed)
         freq_entry.bind("<FocusOut>", self.on_frequency_changed)
 
-        ttk.Separator(controls, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=12)
+        margin_group = toolbar_group()
+        self.margin_toolbar_label = ttk.Label(
+            margin_group, text=self._t("margin_label"), style="Toolbar.TLabel"
+        )
+        self.margin_toolbar_label.pack(side=tk.LEFT, padx=(0, 4))
+        margin_entry = ttk.Entry(
+            margin_group,
+            textvariable=self.margin_db,
+            width=5,
+            justify="right",
+        )
+        self.margin_entry = margin_entry
+        margin_entry.pack(side=tk.LEFT)
+        margin_entry.bind("<Return>", self.on_margin_changed)
+        margin_entry.bind("<FocusOut>", self.on_margin_changed)
 
-        ttk.Label(
-            controls, text="Auto:", style="Status.TLabel"
-        ).pack(side=tk.LEFT, padx=(0, 4))
+        auto_group = toolbar_group()
+        self.auto_toolbar_label = ttk.Label(
+            auto_group, text=self._t("auto_label"), style="Toolbar.TLabel"
+        )
+        self.auto_toolbar_label.pack(side=tk.LEFT, padx=(0, 4))
         auto_tx_entry = ttk.Entry(
-            controls,
+            auto_group,
             textvariable=self.auto_tx_count,
             width=3,
             justify="right",
@@ -905,10 +1980,10 @@ class VirtualArrayGui:
         auto_tx_entry.pack(side=tk.LEFT)
         auto_tx_entry.bind("<Return>", self.apply_auto_array_layout)
         ttk.Label(
-            controls, text="T", style="Status.TLabel"
+            auto_group, text="T", style="Toolbar.TLabel"
         ).pack(side=tk.LEFT, padx=(2, 4))
         auto_rx_entry = ttk.Entry(
-            controls,
+            auto_group,
             textvariable=self.auto_rx_count,
             width=3,
             justify="right",
@@ -916,61 +1991,35 @@ class VirtualArrayGui:
         auto_rx_entry.pack(side=tk.LEFT)
         auto_rx_entry.bind("<Return>", self.apply_auto_array_layout)
         ttk.Label(
-            controls, text="R", style="Status.TLabel"
+            auto_group, text="R", style="Toolbar.TLabel"
         ).pack(side=tk.LEFT, padx=(2, 6))
-        ttk.Button(
-            controls,
-            text="Apply Array",
+        self.auto_apply_button = ttk.Button(
+            auto_group,
+            text=self._t("auto_apply"),
             command=self.apply_auto_array_layout,
             style="Large.TButton",
-        ).pack(side=tk.LEFT)
+        )
+        self.auto_apply_button.pack(side=tk.LEFT)
 
-        ttk.Separator(controls, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=12)
-
+        pattern_group = toolbar_group()
         # Pattern indicator and controls
         self.pattern_canvas = tk.Canvas(
-            controls, width=12, height=12, highlightthickness=0
+            pattern_group,
+            width=12,
+            height=12,
+            highlightthickness=0,
+            bg=THEME["toolbar_group_bg"],
         )
         self.pattern_canvas.pack(side=tk.LEFT, padx=(0, 4))
-        self.pattern_dot = self.pattern_canvas.create_oval(1, 1, 11, 11, fill="#999999", outline="")
+        self.pattern_dot = self.pattern_canvas.create_oval(
+            1, 1, 11, 11, fill=THEME["text_muted"], outline=""
+        )
 
         ttk.Label(
-            controls,
+            pattern_group,
             textvariable=self.pattern_status,
             style="Muted.TLabel",
         ).pack(side=tk.LEFT)
-
-        ttk.Button(
-            controls,
-            text="Channel Patterns...",
-            command=self.open_channel_patterns_dialog,
-            style="Large.TButton",
-        ).pack(side=tk.LEFT, padx=(8, 0))
-
-        ttk.Separator(controls, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=12)
-
-        self.dbf_az_toolbar_button = ttk.Button(
-            controls,
-            text="Play Az DBF",
-            command=self.toggle_az_dbf_animation,
-            style="Accent.TButton",
-        )
-        self.dbf_az_toolbar_button.pack(side=tk.LEFT)
-        self.dbf_el_toolbar_button = ttk.Button(
-            controls,
-            text="Play El DBF",
-            command=self.toggle_el_dbf_animation,
-            style="Large.TButton",
-        )
-        self.dbf_el_toolbar_button.pack(side=tk.LEFT, padx=(6, 0))
-        self.dbf_stop_toolbar_button = ttk.Button(
-            controls,
-            text="Stop DBF",
-            command=self.stop_dbf_scan_animation,
-            style="Large.TButton",
-        )
-        self.dbf_stop_toolbar_button.pack(side=tk.LEFT, padx=(6, 0))
-        self.dbf_stop_toolbar_button.configure(state=tk.DISABLED)
 
         ttk.Label(
             status_row,
@@ -988,6 +2037,12 @@ class VirtualArrayGui:
         # Az/El response: hover only
         for chart in (self.az_chart, self.el_chart):
             chart.canvas.mpl_connect("motion_notify_event", self.on_motion)
+            chart.canvas.mpl_connect(
+                "figure_leave_event",
+                lambda _event, response_chart=chart: self._hide_response_hover(
+                    response_chart
+                ),
+            )
 
         self.root.bind("<Left>", self.on_arrow_key)
         self.root.bind("<Right>", self.on_arrow_key)
@@ -996,6 +2051,8 @@ class VirtualArrayGui:
         self.root.bind("<Delete>", self.on_delete_key)
         self._bind_keyboard_shortcuts()
 
+        _apply_interactive_cursors(self.root)
+        self._refresh_language_texts()
         self.generate_virtual_array()
 
     # ── Response chart helpers ──────────────────────────────────────────
@@ -1017,27 +2074,123 @@ class VirtualArrayGui:
         self.root.bind("<Control-F>", self.on_focus_frequency_shortcut)
         self.root.bind("<Escape>", self.on_escape_key)
 
+    def set_language(self, language: str) -> None:
+        if language not in SUPPORTED_LANGUAGES:
+            return
+        self.language = language
+        self.language_var.set(LANGUAGE_LABELS[language])
+        self._refresh_language_texts()
+        if hasattr(self, "phys_canvas"):
+            self.generate_virtual_array()
+
+    def _refresh_language_texts(self) -> None:
+        self.root.title(self._t("app_title", version=APP_VERSION))
+        if self.config_menu_button is not None:
+            self.config_menu_button.configure(text=self._t("menu_config"))
+        if self.config_menu is not None:
+            self.config_menu.entryconfig(0, label=self._t("menu_import_layout"))
+            self.config_menu.entryconfig(1, label=self._t("menu_export_layout"))
+            self.config_menu.entryconfig(3, label=self._t("menu_channel_patterns"))
+            self.config_menu.entryconfig(4, label=self._t("menu_dbf_dictionary"))
+        if self.language_menu_button is not None:
+            self.language_menu_button.configure(text=self._t("menu_language"))
+        if self.language_menu is not None:
+            self.language_menu.delete(0, tk.END)
+            for language, label_key in (
+                (LANGUAGE_ZH, "language_zh"),
+                (LANGUAGE_EN, "language_en"),
+                (LANGUAGE_JA, "language_ja"),
+            ):
+                prefix = "✓ " if language == self.language else ""
+                self.language_menu.add_command(
+                    label=f"{prefix}{self._t(label_key)}",
+                    command=lambda lang=language: self.set_language(lang),
+                )
+        if getattr(self, "freq_toolbar_label", None) is not None:
+            self.freq_toolbar_label.configure(text=self._t("freq_label"))
+        if getattr(self, "margin_toolbar_label", None) is not None:
+            self.margin_toolbar_label.configure(text=self._t("margin_label"))
+        if getattr(self, "auto_toolbar_label", None) is not None:
+            self.auto_toolbar_label.configure(text=self._t("auto_label"))
+        if getattr(self, "auto_apply_button", None) is not None:
+            self.auto_apply_button.configure(text=self._t("auto_apply"))
+        for button, key in zip(
+            self.physical_buttons,
+            (
+                "physical_add_tx",
+                "physical_add_rx",
+                "physical_delete",
+                "physical_clear",
+            ),
+        ):
+            button.label.set_text(self._t(key))
+        if getattr(self, "eval_frame", None) is not None:
+            self.overview_frame.configure(text=self._t("overview_title"))
+            self.angle_eval_frame.configure(text=self._t("angle_eval_title"))
+            self.dbf2d_frame.configure(text=self._t("dbf2d_title"))
+            for key, label in self.primary_name_labels.items():
+                label.configure(text=self._t(key))
+            for key, label in self.secondary_name_labels.items():
+                label.configure(text=self._t(key))
+        self._update_dbf_scan_controls()
+        self._update_dbf2d_controls()
+        self._update_channel_pattern_status()
+
     def _build_response_chart(
         self, row: int, col: int, padding: tuple[int, int, int, int], mode: str
     ) -> ResponseChart:
         """Create a response chart (Az or El) and embed it in the grid."""
-        frame = ttk.Frame(self.root, padding=padding)
+        frame = ttk.Frame(self.root, style="Panel.TFrame", padding=padding)
         frame.grid(row=row, column=col, sticky="nsew")
         frame.grid_rowconfigure(0, weight=1)
         frame.grid_rowconfigure(1, weight=0)
         frame.grid_columnconfigure(0, weight=1)
 
         fig = Figure(figsize=(RESPONSE_FIG_W, RESPONSE_FIG_H), dpi=FIG_DPI)
-        fig.set_facecolor(THEME["fig_facecolor"])
+        fig.set_facecolor(THEME["panel_bg"])
         ax = fig.add_subplot(111)
-        ax.set_facecolor(THEME["fig_facecolor"])
+        ax.set_facecolor(THEME["plot_bg"])
         fig.subplots_adjust(top=0.82, left=0.13, right=0.97, bottom=0.18)
         canvas = FigureCanvasTkAgg(fig, master=frame)
-        canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        canvas_widget = canvas.get_tk_widget()
+        _style_canvas_widget(canvas_widget)
+        canvas_widget.grid(row=0, column=0, sticky="nsew")
 
-        progress_frame = ttk.Frame(frame)
-        progress_frame.grid(row=1, column=0, sticky="ew", pady=(2, 0))
+        progress_frame = ttk.Frame(frame, style="ChartFooter.TFrame", padding=(6, 5))
+        progress_frame.grid(row=1, column=0, sticky="ew", pady=(4, 0))
         progress_frame.grid_columnconfigure(0, weight=1)
+
+        control_row = ttk.Frame(progress_frame, style="ChartFooter.TFrame")
+        control_row.grid(row=0, column=0, sticky="ew")
+        control_row.grid_columnconfigure(0, weight=1)
+        progress_label = ttk.Label(
+            control_row,
+            text=f"{_dbf_short_label(mode, self.language)} {_format_dbf_angle_label(0.0, self.language)}",
+            style="ChartFooter.TLabel",
+            anchor="w",
+        )
+        progress_label.grid(row=0, column=0, sticky="ew")
+        play_button = ttk.Button(
+            control_row,
+            text=self._t("dbf_play_compact"),
+            command=(
+                self.toggle_az_dbf_animation
+                if mode == "azimuth"
+                else self.toggle_el_dbf_animation
+            ),
+            style="CompactAccent.TButton",
+            width=6,
+        )
+        play_button.grid(row=0, column=1, sticky="e", padx=(8, 5))
+        stop_button = ttk.Button(
+            control_row,
+            text=self._t("dbf_stop_compact"),
+            command=self.stop_dbf_scan_animation,
+            style="CompactDanger.TButton",
+            width=6,
+        )
+        stop_button.grid(row=0, column=2, sticky="e")
+        stop_button.configure(state=tk.DISABLED)
         progress_var = tk.DoubleVar(value=_dbf_frame_index_for_angle(0.0))
         progress_scale = ttk.Scale(
             progress_frame,
@@ -1048,16 +2201,9 @@ class VirtualArrayGui:
             command=lambda value, chart_mode=mode: self.on_dbf_progress_changed(
                 chart_mode, value
             ),
+            style="Horizontal.TScale",
         )
-        progress_scale.grid(row=0, column=0, sticky="ew")
-        progress_label = ttk.Label(
-            progress_frame,
-            text=f"{_dbf_short_label(mode)} 0 deg",
-            style="Status.TLabel",
-            width=16,
-            anchor="e",
-        )
-        progress_label.grid(row=0, column=1, sticky="e", padx=(8, 0))
+        progress_scale.grid(row=1, column=0, sticky="ew", pady=(4, 0))
 
         return ResponseChart(
             fig=fig,
@@ -1066,6 +2212,8 @@ class VirtualArrayGui:
             progress_var=progress_var,
             progress_scale=progress_scale,
             progress_label=progress_label,
+            play_button=play_button,
+            stop_button=stop_button,
         )
 
     def _build_figure_buttons(
@@ -1078,6 +2226,10 @@ class VirtualArrayGui:
         """Add MplButton widgets to *fig* from *button_specs*."""
         for label, rect, callback in button_specs:
             button_ax = fig.add_axes(rect)
+            button_ax.set_facecolor(THEME["mpl_btn_bg"])
+            for spine in button_ax.spines.values():
+                spine.set_edgecolor(THEME["mpl_btn_border"])
+                spine.set_linewidth(0.8)
             button = MplButton(
                 button_ax, label,
                 color=THEME["mpl_btn_bg"],
@@ -1099,149 +2251,173 @@ class VirtualArrayGui:
         _f = THEME["font_family"]
         _fm = THEME["font_family_mono"]
         _sm = THEME["font_size_sm"]
-        _base = THEME["font_size_base"]
 
-        self.eval_frame = ttk.LabelFrame(
-            parent, text="  ARRAY EVALUATION  ", padding=(8, 6)
-        )
-        self.eval_frame.configure(style="TLabelframe")
+        self.eval_frame = ttk.Frame(parent, style="Card.TFrame", padding=(8, 4))
         self.eval_frame.grid(row=0, column=0, sticky="nsew")
 
-        # Header row: application + frequency
-        header = ttk.Frame(self.eval_frame, style="Card.TFrame")
-        header.pack(fill=tk.X, pady=(0, 6))
-        self.eval_app_label = ttk.Label(
-            header, text="Front Radar", style="CardHeader.TLabel"
-        )
-        self.eval_app_label.pack(side=tk.LEFT)
-        self.eval_freq_label = ttk.Label(
-            header, text=f"{DEFAULT_FREQUENCY_GHZ} GHz", style="CardHeader.TLabel"
-        )
-        self.eval_freq_label.pack(side=tk.RIGHT)
-
-        # Status badge row
-        badge_row = ttk.Frame(self.eval_frame, style="Card.TFrame")
-        badge_row.pack(fill=tk.X, pady=(0, 6))
-        self.status_canvas = tk.Canvas(
-            badge_row, width=16, height=16, highlightthickness=0,
-            bg=THEME["card_bg"]
-        )
-        self.status_canvas.pack(side=tk.LEFT, padx=(0, 6))
-        self.status_dot = self.status_canvas.create_oval(
-            1, 1, 15, 15, fill="#2e7d32", outline=""
-        )
-        self.status_text = ttk.Label(
-            badge_row, text="Az Good", style="Badge.TLabel"
-        )
-        self.status_text.pack(side=tk.LEFT)
-
-        # Compact summary line
-        summary_frame = ttk.Frame(self.eval_frame, style="Card.TFrame")
-        summary_frame.pack(fill=tk.X, pady=(0, 6))
-        self.summary_label = ttk.Label(
-            summary_frame, text="", style="Card.TLabel",
-            font=(_fm, _sm), foreground=THEME["text_secondary"],
-        )
-        self.summary_label.pack(fill=tk.X)
-
         # PRIMARY section
-        primary_frame = ttk.LabelFrame(
-            self.eval_frame, text="  PRIMARY  ", padding=(6, 4), style="TLabelframe"
+        self.overview_frame = ttk.LabelFrame(
+            self.eval_frame, text=self._t("overview_title"), padding=(6, 4), style="TLabelframe"
         )
-        primary_frame.pack(fill=tk.X, pady=(0, 4))
-        primary_frame.grid_columnconfigure(0, weight=1)
+        self.overview_frame.pack(fill=tk.X, pady=(0, 4))
+        self.overview_frame.grid_columnconfigure(1, weight=1)
+        self.overview_frame.grid_columnconfigure(3, weight=1)
 
-        primary_labels = [
-            "Az aperture", "Az resolution", "Az -3dB BW", "Az null BW",
-            "Az PSL", "First sidelobe", "Az grating lobe", "Az ISLR",
-            "Virtual util.",
-        ]
-        secondary_labels = [
-            "El aperture", "El resolution", "El -3dB BW", "El PSL",
-            "2D worst PSL", "2D PSL loc", "El ambiguity",
-        ]
-
+        self.primary_name_labels: dict[str, ttk.Label] = {}
+        self.secondary_name_labels: dict[str, ttk.Label] = {}
         self.primary_value_labels: dict[str, ttk.Label] = {}
         self.secondary_value_labels: dict[str, ttk.Label] = {}
 
-        for i, key in enumerate(primary_labels):
-            row_bg = THEME["card_bg"] if i % 2 == 0 else "#f8f7f5"
-            row_frame = tk.Frame(primary_frame, bg=row_bg)
-            row_frame.grid(row=i, column=0, sticky="ew")
-            ttk.Label(
-                row_frame, text=key, font=(_fm, _sm), background=row_bg,
+        for i, key in enumerate(PRIMARY_EVAL_ROWS):
+            row = i // 2
+            column = (i % 2) * 2
+            name_label = ttk.Label(
+                self.overview_frame,
+                text=self._t(key),
+                font=(_f, _sm),
+                background=THEME["card_bg"],
                 foreground=THEME["text_secondary"],
-            ).pack(side=tk.LEFT, padx=(2, 8))
+            )
+            name_label.grid(row=row, column=column, sticky="w", padx=(2, 4), pady=1)
             val = ttk.Label(
-                row_frame, text="", font=(_fm, _sm), background=row_bg,
+                self.overview_frame, text="", font=(_fm, _sm), background=THEME["card_bg"],
                 foreground=THEME["text_primary"], anchor="e",
             )
-            val.pack(side=tk.RIGHT, padx=(8, 2))
+            val.grid(row=row, column=column + 1, sticky="e", padx=(4, 8), pady=1)
+            self.primary_name_labels[key] = name_label
             self.primary_value_labels[key] = val
 
         # SECONDARY section
-        secondary_frame = ttk.LabelFrame(
-            self.eval_frame, text="  SECONDARY  ", padding=(6, 4), style="TLabelframe"
+        self.angle_eval_frame = ttk.LabelFrame(
+            self.eval_frame, text=self._t("angle_eval_title"), padding=(6, 4), style="TLabelframe"
         )
-        secondary_frame.pack(fill=tk.X, pady=(0, 4))
-        secondary_frame.grid_columnconfigure(0, weight=1)
+        self.angle_eval_frame.pack(fill=tk.X, pady=(0, 4))
+        self.angle_eval_frame.grid_columnconfigure(1, weight=1)
+        self.angle_eval_frame.grid_columnconfigure(3, weight=1)
 
-        for i, key in enumerate(secondary_labels):
-            row_bg = THEME["card_bg"] if i % 2 == 0 else "#f8f7f5"
-            row_frame = tk.Frame(secondary_frame, bg=row_bg)
-            row_frame.grid(row=i, column=0, sticky="ew")
-            ttk.Label(
-                row_frame, text=key, font=(_fm, _sm), background=row_bg,
+        for i, key in enumerate(SECONDARY_EVAL_ROWS):
+            row = i // 2
+            column = (i % 2) * 2
+            name_label = ttk.Label(
+                self.angle_eval_frame,
+                text=self._t(key),
+                font=(_f, _sm),
+                background=THEME["card_bg"],
                 foreground=THEME["text_secondary"],
-            ).pack(side=tk.LEFT, padx=(2, 8))
+            )
+            name_label.grid(row=row, column=column, sticky="w", padx=(2, 4), pady=1)
             val = ttk.Label(
-                row_frame, text="", font=(_fm, _sm), background=row_bg,
+                self.angle_eval_frame, text="", font=(_fm, _sm), background=THEME["card_bg"],
                 foreground=THEME["text_primary"], anchor="e",
             )
-            val.pack(side=tk.RIGHT, padx=(8, 2))
+            val.grid(row=row, column=column + 1, sticky="e", padx=(4, 8), pady=1)
+            self.secondary_name_labels[key] = name_label
             self.secondary_value_labels[key] = val
 
-        # NOTES section
-        self.notes_frame = ttk.Frame(self.eval_frame, style="Card.TFrame")
-        self.notes_frame.pack(fill=tk.X, pady=(4, 0))
-        ttk.Label(
-            self.notes_frame, text="NOTES", style="SectionTitle.TLabel"
-        ).pack(anchor="w")
-        self.notes_items_frame = ttk.Frame(self.notes_frame, style="Card.TFrame")
-        self.notes_items_frame.pack(fill=tk.X, pady=(2, 0))
+        self._build_dbf2d_panel()
+
+    def _build_dbf2d_panel(self) -> None:
+        self.dbf2d_frame = ttk.LabelFrame(
+            self.eval_frame,
+            text=self._t("dbf2d_title"),
+            padding=(8, 6),
+            style="TLabelframe",
+        )
+        self.dbf2d_frame.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
+        self.dbf2d_frame.grid_columnconfigure(0, weight=1)
+        self.dbf2d_frame.grid_columnconfigure(1, weight=0)
+        self.dbf2d_frame.grid_rowconfigure(0, weight=1)
+
+        self.dbf2d_fig = Figure(figsize=(4.3, 4.3), dpi=FIG_DPI)
+        self.dbf2d_fig.set_facecolor(THEME["panel_bg"])
+        self.dbf2d_ax = self.dbf2d_fig.add_subplot(111)
+        self.dbf2d_ax.set_facecolor(THEME["plot_bg"])
+        self.dbf2d_fig.subplots_adjust(top=0.92, left=0.13, right=0.98, bottom=0.18)
+        self.dbf2d_canvas = FigureCanvasTkAgg(self.dbf2d_fig, master=self.dbf2d_frame)
+        dbf2d_widget = self.dbf2d_canvas.get_tk_widget()
+        _style_canvas_widget(dbf2d_widget)
+        dbf2d_widget.configure(width=430, height=430)
+        dbf2d_widget.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+
+        self.dbf2d_el_var = tk.DoubleVar(value=float(self.dbf2d_el_frame))
+        el_scale = ttk.Scale(
+            self.dbf2d_frame,
+            from_=DBF_SCAN_GRID_SIZE - 1,
+            to=0,
+            orient=tk.VERTICAL,
+            variable=self.dbf2d_el_var,
+            command=lambda value: self.on_dbf2d_progress_changed("elevation", value),
+            style="Vertical.TScale",
+        )
+        el_scale.grid(row=0, column=1, sticky="ns")
+
+        self.dbf2d_az_var = tk.DoubleVar(value=float(self.dbf2d_az_frame))
+        az_scale = ttk.Scale(
+            self.dbf2d_frame,
+            from_=0,
+            to=DBF_SCAN_GRID_SIZE - 1,
+            orient=tk.HORIZONTAL,
+            variable=self.dbf2d_az_var,
+            command=lambda value: self.on_dbf2d_progress_changed("azimuth", value),
+            style="Horizontal.TScale",
+        )
+        az_scale.grid(row=1, column=0, sticky="ew", pady=(6, 0), padx=(0, 6))
+
+        button_row = ttk.Frame(self.dbf2d_frame, style="Card.TFrame")
+        button_row.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(5, 0))
+        for column in range(3):
+            button_row.grid_columnconfigure(column, weight=1, uniform="dbf2d_buttons")
+        self.dbf2d_az_button = ttk.Button(
+            button_row,
+            text=self._t("dbf2d_play_az"),
+            command=lambda: self.toggle_dbf2d_animation("azimuth"),
+            style="CompactAccent.TButton",
+            width=8,
+        )
+        self.dbf2d_az_button.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        self.dbf2d_el_button = ttk.Button(
+            button_row,
+            text=self._t("dbf2d_play_el"),
+            command=lambda: self.toggle_dbf2d_animation("elevation"),
+            style="Compact.TButton",
+            width=8,
+        )
+        self.dbf2d_el_button.grid(row=0, column=1, sticky="ew", padx=4)
+        self.dbf2d_stop_button = ttk.Button(
+            button_row,
+            text=self._t("dbf2d_stop"),
+            command=self.stop_dbf2d_animation,
+            style="CompactDanger.TButton",
+            width=7,
+        )
+        self.dbf2d_stop_button.grid(row=0, column=2, sticky="ew", padx=(4, 0))
+        self.dbf2d_stop_button.configure(state=tk.DISABLED)
+
+        self.dbf2d_status_label = ttk.Label(
+            self.dbf2d_frame,
+            text="",
+            style="Card.TLabel",
+            font=(THEME["font_family_mono"], THEME["font_size_sm"]),
+            anchor="center",
+        )
+        self.dbf2d_status_label.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
     def _update_evaluation_panel(self, metrics: ArrayMetrics) -> None:
         """Update the Tkinter evaluation panel with current metrics."""
         utilization = (
             metrics.unique_count / metrics.virtual_count if metrics.virtual_count else 0.0
         )
-        grade_color = PSL_COLORS[metrics.front_radar_status]
-        status_text = _azimuth_status_label(metrics)
-
-        # Update status badge
-        self.status_canvas.itemconfig(self.status_dot, fill=grade_color)
-        self.status_text.configure(text=status_text, foreground=grade_color)
-
-        # Update header
-        freq_ghz = self.current_frequency_ghz()
-        freq_text = _format_frequency_ghz(freq_ghz)
-        self.eval_freq_label.configure(text=f"Frequency: {freq_text} GHz")
+        az_dbf_metrics = self._dbf_angle_metrics_for_mode("azimuth")
+        el_dbf_metrics = self._dbf_angle_metrics_for_mode("elevation")
 
         # PRIMARY values
         values = {
-            "Az aperture": _format_mm(self.aperture_mm(metrics.x_aperture)),
-            "Az resolution": _format_float(metrics.azimuth_resolution, "°"),
-            "Az -3dB BW": _format_float(metrics.azimuth_3db_beamwidth, "°"),
-            "Az null BW": _format_float(metrics.azimuth_null_beamwidth, "°"),
-            "Az PSL": f"{metrics.azimuth_psl_db:.2f} dB",
-            "First sidelobe": _format_db_at_az(
-                metrics.azimuth_first_sidelobe_db, metrics.azimuth_first_sidelobe_angle
-            ),
-            "Az grating lobe": _format_db_at_az(
-                metrics.azimuth_grating_lobe_db, metrics.azimuth_grating_lobe_angle
-            ),
-            "Az ISLR": _format_db(metrics.azimuth_islr_db),
-            "Virtual util.": f"{metrics.unique_count}/{metrics.virtual_count} ({utilization:.0%})",
+            "row_channel_count": f"{metrics.tx_count}T × {metrics.rx_count}R",
+            "row_virtual_channels": f"{metrics.unique_count}/{metrics.virtual_count} ({utilization:.0%})",
+            "row_az_aperture": _format_mm(self.aperture_mm(metrics.x_aperture)),
+            "row_el_aperture": _format_mm(self.aperture_mm(metrics.y_aperture)),
+            "row_az_resolution": _format_float(metrics.azimuth_resolution, "°"),
+            "row_el_resolution": _format_float(metrics.elevation_resolution, "°"),
         }
         for key, val in values.items():
             if key in self.primary_value_labels:
@@ -1249,32 +2425,18 @@ class VirtualArrayGui:
 
         # SECONDARY values
         sec_values = {
-            "El aperture": _format_mm(self.aperture_mm(metrics.y_aperture)),
-            "El resolution": _format_float(metrics.elevation_resolution, "°"),
-            "El -3dB BW": _format_float(metrics.elevation_3db_beamwidth, "°"),
-            "El PSL": f"{metrics.elevation_psl_db:.2f} dB",
-            "2D worst PSL": f"{metrics.psl_db:.2f} dB",
-            "2D PSL loc": f"{metrics.sidelobe_azimuth:.1f}°, {metrics.sidelobe_elevation:.1f}°",
-            "El ambiguity": metrics.elevation_ambiguity_level,
+            "row_az_no_fold": _format_angle_range(az_dbf_metrics),
+            "row_az_no_fold_error": _format_axis_angle_metrics(az_dbf_metrics, "no_fold_error"),
+            "row_az_margin": _format_axis_angle_metrics(az_dbf_metrics, "margin"),
+            "row_az_cut": _angle_cut_reason_summary(az_dbf_metrics),
+            "row_el_no_fold": _format_angle_range(el_dbf_metrics),
+            "row_el_no_fold_error": _format_axis_angle_metrics(el_dbf_metrics, "no_fold_error"),
+            "row_el_margin": _format_axis_angle_metrics(el_dbf_metrics, "margin"),
+            "row_el_cut": _angle_cut_reason_summary(el_dbf_metrics),
         }
         for key, val in sec_values.items():
             if key in self.secondary_value_labels:
                 self.secondary_value_labels[key].configure(text=val)
-
-        # NOTES
-        self._update_notes_panel(self._notes_parts(metrics))
-
-        # Compact summary: Tx/Rx | frequency | aperture
-        wavelength_mm = LIGHT_SPEED_MM_PER_NS / freq_ghz
-        x_mm = self.aperture_mm(metrics.x_aperture)
-        y_mm = self.aperture_mm(metrics.y_aperture)
-        self.summary_label.configure(
-            text=(
-                f"{metrics.tx_count}Tx × {metrics.rx_count}Rx  ·  "
-                f"{freq_text} GHz (λ={wavelength_mm:.3f} mm)  ·  "
-                f"{_format_mm(x_mm)} × {_format_mm(y_mm)}"
-            )
-        )
 
     # ── Array data ────────────────────────────────────────────────────
 
@@ -1294,6 +2456,23 @@ class VirtualArrayGui:
     def current_frequency_ghz(self) -> float:
         frequency = _parse_frequency_ghz(self.frequency_ghz.get())
         return frequency if frequency is not None else self.last_valid_frequency_ghz
+
+    def _set_margin_db(self, margin: float) -> None:
+        self.last_valid_margin_db = margin
+        self.margin_db.set(_format_margin_db(margin))
+
+    def _normalize_margin_input(self) -> tuple[float, bool]:
+        margin = _parse_margin_db(self.margin_db.get())
+        if margin is None:
+            fallback = self.last_valid_margin_db
+            self.margin_db.set(_format_margin_db(fallback))
+            return fallback, False
+        self._set_margin_db(margin)
+        return margin, True
+
+    def current_margin_db(self) -> float:
+        margin = _parse_margin_db(self.margin_db.get())
+        return margin if margin is not None else self.last_valid_margin_db
 
     def wavelength_mm(self) -> float:
         return LIGHT_SPEED_MM_PER_NS / self.current_frequency_ghz()
@@ -1418,14 +2597,14 @@ class VirtualArrayGui:
         while self.undo_stack and self.undo_stack[-1] == current_snapshot:
             self.undo_stack.pop()
         if not self.undo_stack:
-            self.status.set("Nothing to undo.")
+            self.status.set(self._t("undo_empty"))
             return "break"
 
         previous_snapshot = self.undo_stack.pop()
         self.redo_stack.append(current_snapshot)
         self._restore_layout_snapshot(previous_snapshot)
         self.generate_virtual_array()
-        self.status.set("Undid layout edit.")
+        self.status.set(self._t("undo_done"))
         return "break"
 
     def redo_layout_change(self, event=None) -> str | None:  # noqa: ANN001
@@ -1436,7 +2615,7 @@ class VirtualArrayGui:
         while self.redo_stack and self.redo_stack[-1] == current_snapshot:
             self.redo_stack.pop()
         if not self.redo_stack:
-            self.status.set("Nothing to redo.")
+            self.status.set(self._t("redo_empty"))
             return "break"
 
         next_snapshot = self.redo_stack.pop()
@@ -1444,7 +2623,7 @@ class VirtualArrayGui:
             self.undo_stack.append(current_snapshot)
         self._restore_layout_snapshot(next_snapshot)
         self.generate_virtual_array()
-        self.status.set("Redid layout edit.")
+        self.status.set(self._t("redo_done"))
         return "break"
 
     def _next_element_position(self, kind: str) -> tuple[float, float]:
@@ -1475,8 +2654,11 @@ class VirtualArrayGui:
         max_count = _max_elements_for_kind(kind)
         prefix = _element_prefix(kind)
         if current_count >= max_count:
-            self.status.set(f"{prefix} limit reached ({max_count}).")
-            messagebox.showinfo("Antenna limit", f"{prefix} count is limited to {max_count}.")
+            self.status.set(self._t("limit_reached", prefix=prefix, max_count=max_count))
+            messagebox.showinfo(
+                self._t("antenna_limit_title"),
+                self._t("count_limit_detail", prefix=prefix, max_count=max_count),
+            )
             return
 
         self._push_undo_snapshot()
@@ -1499,19 +2681,22 @@ class VirtualArrayGui:
         self._sync_auto_count_inputs()
         self.generate_virtual_array()
         self.status.set(
-            f"Added {element.name} | "
-            f"x={element.x * DISPLAY_SCALE_LAMBDA:g} λ | "
-            f"y={element.y * DISPLAY_SCALE_LAMBDA:g} λ"
+            self._t(
+                "added_element",
+                element=element.name,
+                x=element.x * DISPLAY_SCALE_LAMBDA,
+                y=element.y * DISPLAY_SCALE_LAMBDA,
+            )
         )
 
     def _build_physical_figure_controls(self) -> None:
         self._build_figure_buttons(
             self.phys_fig,
             (
-                ("+Tx", [0.55, 0.838, 0.07, 0.055], self.add_tx_element),
-                ("+Rx", [0.625, 0.838, 0.07, 0.055], self.add_rx_element),
-                ("Delete", [0.70, 0.838, 0.105, 0.055], self.toggle_delete_mode),
-                ("Clear", [0.81, 0.838, 0.105, 0.055], self.clear_array_layout),
+                (self._t("physical_add_tx"), [0.55, 0.91, 0.07, 0.055], self.add_tx_element),
+                (self._t("physical_add_rx"), [0.625, 0.91, 0.07, 0.055], self.add_rx_element),
+                (self._t("physical_delete"), [0.70, 0.91, 0.105, 0.055], self.toggle_delete_mode),
+                (self._t("physical_clear"), [0.81, 0.91, 0.105, 0.055], self.clear_array_layout),
             ),
             self.physical_buttons,
             self.physical_button_callbacks,
@@ -1524,21 +2709,21 @@ class VirtualArrayGui:
         self.drag_axis_limits = None
         self.drag_start_snapshot = None
         if self.delete_mode:
-            self.status.set("Delete mode: click Tx/Rx elements to remove them. Press Esc to exit.")
+            self.status.set(self._t("delete_mode_on"))
         else:
-            self.status.set("Delete mode off.")
+            self.status.set(self._t("delete_mode_off"))
 
     def clear_array_layout(self, _event=None) -> None:  # noqa: ANN001
         new_elements = _starter_layout_elements()
         if self._layout_snapshot_for(new_elements, None) == self._capture_layout_snapshot():
-            self.status.set("Layout already clear.")
+            self.status.set(self._t("layout_already_clear"))
             return
         self._push_undo_snapshot()
         self.elements = new_elements
         self._clear_interaction_state()
         self._sync_auto_count_inputs()
         self.generate_virtual_array()
-        self.status.set("Cleared layout to 1T1R starter points.")
+        self.status.set(self._t("layout_cleared"))
 
     def apply_auto_array_layout(self, _event=None) -> str:  # noqa: ANN001
         try:
@@ -1546,12 +2731,12 @@ class VirtualArrayGui:
             rx_count = _validate_element_count(self.auto_rx_count.get(), "rx")
         except ValueError as exc:
             self.status.set(str(exc))
-            messagebox.showinfo("Auto array layout", str(exc))
+            messagebox.showinfo(self._t("auto_layout_title"), str(exc))
             return "break"
 
         new_elements = _build_auto_layout_elements(tx_count, rx_count)
         if self._layout_snapshot_for(new_elements, None) == self._capture_layout_snapshot():
-            self.status.set(f"Auto layout already applied: {tx_count}T{rx_count}R.")
+            self.status.set(self._t("auto_layout_already", tx=tx_count, rx=rx_count))
             return "break"
 
         self._push_undo_snapshot()
@@ -1559,7 +2744,7 @@ class VirtualArrayGui:
         self._clear_interaction_state()
         self._sync_auto_count_inputs()
         self.generate_virtual_array()
-        self.status.set(f"Auto layout applied: {tx_count}T{rx_count}R.")
+        self.status.set(self._t("auto_layout_done", tx=tx_count, rx=rx_count))
         return "break"
 
     def delete_selected_element(self) -> None:
@@ -1573,10 +2758,10 @@ class VirtualArrayGui:
         same_kind_count = len(self._elements_of_kind(element.kind))
         if same_kind_count <= 1:
             prefix = _element_prefix(element.kind)
-            self.status.set(f"Cannot delete the last {prefix} element.")
+            self.status.set(self._t("delete_last", prefix=prefix))
             messagebox.showinfo(
-                "Antenna limit",
-                f"At least one {prefix} element is required for analysis.",
+                self._t("antenna_limit_title"),
+                self._t("delete_last_detail", prefix=prefix),
             )
             return False
 
@@ -1591,8 +2776,8 @@ class VirtualArrayGui:
         self._renumber_elements()
         self._sync_auto_count_inputs()
         self.generate_virtual_array()
-        mode_suffix = " Delete mode remains on." if self.delete_mode else ""
-        self.status.set(f"Deleted {deleted_name}. Tx/Rx numbering aligned.{mode_suffix}")
+        mode_suffix = self._t("delete_mode_suffix") if self.delete_mode else ""
+        self.status.set(self._t("deleted_element", element=deleted_name, suffix=mode_suffix))
         return True
 
     # ── Button handlers ───────────────────────────────────────────────
@@ -1601,11 +2786,22 @@ class VirtualArrayGui:
         frequency, is_valid = self._normalize_frequency_input()
         self.generate_virtual_array()
         if is_valid:
-            self.status.set(f"Frequency set to {_format_frequency_ghz(frequency)} GHz.")
+            self.status.set(
+                self._t("frequency_set", frequency=_format_frequency_ghz(frequency))
+            )
         else:
             self.status.set(
-                f"Invalid frequency. Restored {_format_frequency_ghz(frequency)} GHz."
+                self._t("frequency_invalid", frequency=_format_frequency_ghz(frequency))
             )
+        return "break"
+
+    def on_margin_changed(self, _event=None) -> str:  # noqa: ANN001
+        margin, is_valid = self._normalize_margin_input()
+        self.generate_virtual_array()
+        if is_valid:
+            self.status.set(self._t("margin_set", value=_format_margin_db(margin)))
+        else:
+            self.status.set(self._t("margin_invalid", value=_format_margin_db(margin)))
         return "break"
 
     def on_save_shortcut(self, _event=None) -> str:  # noqa: ANN001
@@ -1619,7 +2815,7 @@ class VirtualArrayGui:
     def on_refresh_shortcut(self, _event=None) -> str:  # noqa: ANN001
         _frequency, is_valid = self._normalize_frequency_input()
         self.generate_virtual_array()
-        self.status.set("Refreshed." if is_valid else "Invalid frequency restored and refreshed.")
+        self.status.set(self._t("refreshed") if is_valid else self._t("refresh_invalid"))
         return "break"
 
     def on_focus_frequency_shortcut(self, _event=None) -> str:  # noqa: ANN001
@@ -1631,13 +2827,13 @@ class VirtualArrayGui:
     def on_escape_key(self, _event=None) -> str:  # noqa: ANN001
         if self.delete_mode:
             self.delete_mode = False
-            self.status.set("Delete mode off.")
+            self.status.set(self._t("delete_mode_off"))
             return "break"
 
         if self.dragging is not None and self.drag_start_snapshot is not None:
             self._restore_layout_snapshot(self.drag_start_snapshot)
             self.generate_virtual_array()
-            self.status.set("Drag canceled.")
+            self.status.set(self._t("drag_cancel"))
             return "break"
 
         self.dragging = None
@@ -1645,12 +2841,12 @@ class VirtualArrayGui:
         self.drag_axis_limits = None
         self.drag_start_snapshot = None
         if self.selected_element is None:
-            self.status.set("No selection.")
+            self.status.set(self._t("no_selection"))
             return "break"
         self.selected_element = None
         self._draw_physical_array()
         self.phys_canvas.draw_idle()
-        self.status.set("Selection cleared.")
+        self.status.set(self._t("selection_cleared"))
         return "break"
 
     def toggle_az_dbf_animation(self, _event=None) -> None:  # noqa: ANN001
@@ -1678,11 +2874,12 @@ class VirtualArrayGui:
         self._update_dbf_scan_controls()
         self._draw_dbf_scan_frame()
         self._schedule_dbf_scan_frame()
-        label = _dbf_mode_label(mode)
+        language = getattr(self, "language", LANGUAGE_ZH)
+        label = _dbf_mode_label(mode, language)
         self.status.set(
-            f"Playing {label} DBF spectra from -90 deg to +90 deg."
+            self._t("dbf_play_status", mode=label)
             if is_valid
-            else f"Invalid frequency restored. Playing {label} DBF spectra."
+            else self._t("dbf_play_status_invalid", mode=label)
         )
 
     def _dbf_spectrum_bank_for_mode(self, mode: str):
@@ -1692,6 +2889,26 @@ class VirtualArrayGui:
             return dbf_elevation_spectrum_bank
         raise ValueError(f"Unknown DBF animation mode: {mode!r}")
 
+    def _dbf_angle_metrics_for_mode(self, mode: str) -> DbfAngleMetrics | None:
+        try:
+            spectrum_bank = self._dbf_spectrum_bank_for_mode(mode)
+            true_angles, scan_angles, spectra_db = spectrum_bank(
+                self.current_array(),
+                tx_pattern=self.element_pattern,
+                rx_pattern=self.element_pattern,
+                channel_patterns=self.channel_patterns,
+                dbf_dictionary=self.dbf_dictionary,
+            )
+            return dbf_angle_metrics_from_spectra(
+                true_angles,
+                scan_angles,
+                spectra_db,
+                ambiguity_margin_db=self.current_margin_db(),
+            )
+        except Exception:
+            LOGGER.exception("Failed to calculate %s DBF angle metrics", mode)
+            return None
+
     def _load_dbf_spectra(self, mode: str) -> None:
         spectrum_bank = self._dbf_spectrum_bank_for_mode(mode)
         self.dbf_true_angles, self.dbf_scan_angles, self.dbf_spectra_db = (
@@ -1700,6 +2917,7 @@ class VirtualArrayGui:
                 tx_pattern=self.element_pattern,
                 rx_pattern=self.element_pattern,
                 channel_patterns=self.channel_patterns,
+                dbf_dictionary=self.dbf_dictionary,
             )
         )
         self.dbf_scan_mode = mode
@@ -1715,9 +2933,10 @@ class VirtualArrayGui:
         self.dbf_scan_after_id = None
         self.dbf_scan_paused = True
         self._update_dbf_scan_controls()
-        label = _dbf_mode_label(self.dbf_scan_mode)
+        language = getattr(self, "language", LANGUAGE_ZH)
+        label = _dbf_mode_label(self.dbf_scan_mode, language)
         true_angle = self._current_dbf_true_angle()
-        self.status.set(f"Paused {label} DBF spectrum at {true_angle:+.1f} deg.")
+        self.status.set(self._t("dbf_pause_status", mode=label, angle=true_angle))
 
     def resume_dbf_scan_animation(self) -> None:
         if not self.dbf_scan_active or not self.dbf_scan_paused:
@@ -1725,8 +2944,9 @@ class VirtualArrayGui:
         self.dbf_scan_paused = False
         self._update_dbf_scan_controls()
         self._schedule_dbf_scan_frame()
-        label = _dbf_mode_label(self.dbf_scan_mode)
-        self.status.set(f"Resumed {label} DBF spectrum animation.")
+        language = getattr(self, "language", LANGUAGE_ZH)
+        label = _dbf_mode_label(self.dbf_scan_mode, language)
+        self.status.set(self._t("dbf_resume_status", mode=label))
 
     def stop_dbf_scan_animation(self, restore_response: bool = True) -> None:
         had_animation = self.dbf_scan_active or self.dbf_scan_mode is not None
@@ -1757,32 +2977,43 @@ class VirtualArrayGui:
             self.dbf_scan_after_id = None
             self.dbf_scan_active = False
             self.dbf_scan_paused = False
-            label = _dbf_mode_label(self.dbf_scan_mode)
+            language = getattr(self, "language", LANGUAGE_ZH)
+            label = _dbf_mode_label(self.dbf_scan_mode, language)
             self._update_dbf_scan_controls()
-            self.status.set(f"{label} DBF spectrum animation complete.")
+            self.status.set(self._t("dbf_complete_status", mode=label))
             return
         self._draw_dbf_scan_frame()
         self._schedule_dbf_scan_frame()
 
     def _update_dbf_scan_controls(self) -> None:
-        az_text = "Play Az DBF"
-        el_text = "Play El DBF"
-        if self.dbf_scan_active and self.dbf_scan_mode == "azimuth":
-            az_text = "Resume Az" if self.dbf_scan_paused else "Pause Az"
-        elif self.dbf_scan_active and self.dbf_scan_mode == "elevation":
-            el_text = "Resume El" if self.dbf_scan_paused else "Pause El"
-
-        if self.dbf_az_toolbar_button is not None:
-            self.dbf_az_toolbar_button.configure(text=az_text)
-        if self.dbf_el_toolbar_button is not None:
-            self.dbf_el_toolbar_button.configure(text=el_text)
-        if self.dbf_stop_toolbar_button is not None:
-            state = (
-                tk.NORMAL
-                if self.dbf_scan_active or self.dbf_scan_mode is not None
-                else tk.DISABLED
+        for mode, chart in (
+            ("azimuth", getattr(self, "az_chart", None)),
+            ("elevation", getattr(self, "el_chart", None)),
+        ):
+            if chart is None:
+                continue
+            is_active_mode = self.dbf_scan_active and self.dbf_scan_mode == mode
+            has_paused_mode = (
+                self.dbf_scan_paused
+                and self.dbf_scan_mode == mode
+                and self.dbf_true_angles.size > 0
             )
-            self.dbf_stop_toolbar_button.configure(state=state)
+            if chart.play_button is not None:
+                if is_active_mode:
+                    text = (
+                        self._t("dbf_resume_compact")
+                        if self.dbf_scan_paused
+                        else self._t("dbf_pause_compact")
+                    )
+                elif has_paused_mode:
+                    text = self._t("dbf_resume_compact")
+                else:
+                    text = self._t("dbf_play_compact")
+                chart.play_button.configure(text=text)
+            if chart.stop_button is not None:
+                chart.stop_button.configure(text=self._t("dbf_stop_compact"))
+                state = tk.NORMAL if self.dbf_scan_mode == mode else tk.DISABLED
+                chart.stop_button.configure(state=state)
 
     def on_dbf_progress_changed(self, mode: str, raw_value: str) -> None:
         if self.dbf_progress_updating:
@@ -1815,9 +3046,10 @@ class VirtualArrayGui:
         self.dbf_scan_paused = True
         self._draw_dbf_scan_frame()
         self._update_dbf_scan_controls()
-        label = _dbf_mode_label(mode)
+        language = getattr(self, "language", LANGUAGE_ZH)
+        label = _dbf_mode_label(mode, language)
         true_angle = self._current_dbf_true_angle()
-        self.status.set(f"Paused {label} DBF spectrum at {true_angle:+.1f} deg.")
+        self.status.set(self._t("dbf_pause_status", mode=label, angle=true_angle))
 
     def _chart_for_dbf_mode(self, mode: str) -> ResponseChart:
         return self.el_chart if mode == "elevation" else self.az_chart
@@ -1833,9 +3065,11 @@ class VirtualArrayGui:
             finally:
                 self.dbf_progress_updating = False
         if chart.progress_label is not None:
+            language = getattr(self, "language", LANGUAGE_ZH)
             chart.progress_label.configure(
                 text=(
-                    f"{_dbf_short_label(mode)} {_format_dbf_angle_label(true_angle)} "
+                    f"{_dbf_short_label(mode, language)} "
+                    f"{_format_dbf_angle_label(true_angle, language)} "
                     f"({frame_index + 1}/{DBF_SCAN_GRID_SIZE})"
                 )
             )
@@ -1854,13 +3088,14 @@ class VirtualArrayGui:
             tx_pattern=self.element_pattern,
             rx_pattern=self.element_pattern,
             channel_patterns=self.channel_patterns,
+            dbf_dictionary=self.dbf_dictionary,
         )
         self._draw_dbf_spectrum(
             mode=mode,
             true_angle=0.0,
             scan_angles=scan_angles,
             spectrum_db=spectra_db[0],
-            frame_label="Reference: 0 deg",
+            frame_label=self._t("reference_frame"),
             frame_index=_dbf_frame_index_for_angle(0.0),
         )
 
@@ -1880,7 +3115,9 @@ class VirtualArrayGui:
             true_angle=true_angle,
             scan_angles=self.dbf_scan_angles,
             spectrum_db=spectrum_db,
-            frame_label=f"Frame: {frame + 1}/{len(self.dbf_true_angles)}",
+            frame_label=self._t(
+                "frame_label", frame=frame + 1, total=len(self.dbf_true_angles)
+            ),
             frame_index=frame,
         )
 
@@ -1898,69 +3135,73 @@ class VirtualArrayGui:
         peak_gain = float(spectrum_db[peak_index])
         true_index = int(np.argmin(np.abs(scan_angles - true_angle)))
         true_gain = float(spectrum_db[true_index])
-        mode_label = _dbf_mode_label(mode)
+        language = getattr(self, "language", LANGUAGE_ZH)
+        mode_label = _dbf_mode_label(mode, language)
         chart = self._chart_for_dbf_mode(mode)
         ax = chart.ax
         ax.clear()
+        _configure_axis_chrome(ax)
         if frame_index is not None:
             self._set_dbf_progress(mode, frame_index, true_angle)
 
         ax.plot(
             scan_angles,
             np.clip(spectrum_db, -40.0, 0.0),
-            color="#2f6fbb",
-            linewidth=1.8,
+            color=THEME["response_line"],
+            linewidth=2.0,
         )
         ax.axvline(
             true_angle,
-            color="#d95f02",
-            linewidth=1.8,
+            color=THEME["sidelobe"],
+            linewidth=1.9,
             linestyle="-",
             zorder=4,
-            label="true angle",
+            label=self._t("legend_true_angle"),
         )
         ax.scatter(
             [true_angle],
             [max(true_gain, -40.0)],
             marker="o",
             s=58,
-            color="#d95f02",
+            color=THEME["sidelobe"],
             edgecolors="#ffffff",
             linewidths=0.9,
             zorder=5,
         )
-        if abs(peak_angle - true_angle) > 1e-9:
-            ax.scatter(
-                [peak_angle],
-                [max(peak_gain, -40.0)],
-                marker="x",
-                s=70,
-                color="#7b1fa2",
-                linewidths=1.8,
-                zorder=6,
-                label="peak",
-            )
+        ax.scatter(
+            [peak_angle],
+            [max(peak_gain, -40.0)],
+            marker="x",
+            s=70,
+            color=THEME["secondary_accent"],
+            linewidths=1.8,
+            zorder=6,
+            label=self._t("legend_peak"),
+        )
         ax.set_xlim(DBF_SCAN_FOV)
         ax.set_ylim(-40.0, 1.0)
         ax.set_title(
-            f"{mode_label} DBF Dictionary Spectrum",
+            self._t("dbf_title", mode=mode_label),
             pad=6,
             y=1.02,
             loc="left",
             color=THEME["text_primary"],
             fontweight="bold",
         )
-        ax.set_xlabel(f"{mode_label} angle (deg)", color=THEME["text_secondary"])
-        ax.set_ylabel("Normalized gain (dB)", labelpad=2, color=THEME["text_secondary"])
-        ax.tick_params(colors=THEME["text_secondary"], labelsize=8)
-        ax.grid(True, alpha=THEME["grid_alpha"], color=THEME["grid_color"], linewidth=0.5)
+        axis_key = "axis_el_angle" if mode == "elevation" else "axis_az_angle"
+        ax.set_xlabel(self._t(axis_key), color=THEME["text_secondary"])
+        ax.set_ylabel(self._t("axis_gain"), labelpad=2, color=THEME["text_secondary"])
+        ax.grid(True, alpha=THEME["grid_alpha"], color=THEME["grid_color"], linewidth=0.55)
         ax.text(
             0.02,
             0.08,
             (
-                f"True angle: {true_angle:+.1f} deg\n"
-                f"Peak angle: {peak_angle:+.1f} deg\n"
-                f"{frame_label}"
+                self._t(
+                    "dbf_info",
+                    true=true_angle,
+                    peak=peak_angle,
+                    frame=frame_label,
+                )
             ),
             transform=ax.transAxes,
             ha="left",
@@ -1969,65 +3210,571 @@ class VirtualArrayGui:
             color=THEME["text_primary"],
             bbox={
                 "boxstyle": "round,pad=0.25",
-                "facecolor": "#ffffff",
+                "facecolor": THEME["card_bg"],
                 "edgecolor": THEME["card_border"],
-                "alpha": 0.9,
+                "alpha": 0.93,
                 "linewidth": 0.7,
             },
         )
-        ax.legend(loc="lower right", fontsize=7, framealpha=0.72)
+        _style_legend(ax.legend(loc="lower right", fontsize=7, framealpha=0.92))
 
         chart.hover_db = spectrum_db
         chart.hover_angles = scan_angles
-        chart.hover_annotation = ax.annotate(
-            "",
-            xy=(0, 0),
-            xytext=(12, 12),
-            textcoords="offset points",
-            bbox={
-                "boxstyle": "round,pad=0.35",
-                "facecolor": "#ffffff",
-                "edgecolor": THEME["card_border"],
-                "alpha": 0.95,
-                "linewidth": 0.8,
-            },
-            arrowprops={"arrowstyle": "->", "color": "#888888", "linewidth": 0.8},
-            fontsize=8,
-            color=THEME["text_primary"],
-        )
-        chart.hover_annotation.set_visible(False)
+        chart.hover_annotation = _new_response_hover_annotation(ax)
         chart.canvas.draw_idle()
+
+    def toggle_dbf2d_animation(self, axis: str) -> None:
+        if axis == "azimuth":
+            self.dbf2d_az_playing = not self.dbf2d_az_playing
+        elif axis == "elevation":
+            self.dbf2d_el_playing = not self.dbf2d_el_playing
+        else:
+            raise ValueError(f"Unknown 2D DBF axis: {axis!r}")
+        self._update_dbf2d_controls()
+        if self.dbf2d_az_playing or self.dbf2d_el_playing:
+            self._schedule_dbf2d_frame()
+            axes = []
+            if self.dbf2d_az_playing:
+                axes.append(_dbf_mode_label("azimuth", self.language))
+            if self.dbf2d_el_playing:
+                axes.append(_dbf_mode_label("elevation", self.language))
+            self.status.set(self._t("dbf2d_running", axes=" + ".join(axes)))
+        else:
+            self._cancel_dbf2d_timer()
+
+    def stop_dbf2d_animation(self, update_status: bool = True) -> None:
+        self._cancel_dbf2d_timer()
+        self.dbf2d_az_playing = False
+        self.dbf2d_el_playing = False
+        self._update_dbf2d_controls()
+        if update_status:
+            self.status.set(self._t("dbf2d_stopped"))
+
+    def _cancel_dbf2d_timer(self) -> None:
+        if self.dbf2d_after_id is not None:
+            try:
+                self.root.after_cancel(self.dbf2d_after_id)
+            except tk.TclError:
+                pass
+        self.dbf2d_after_id = None
+
+    def _schedule_dbf2d_frame(self) -> None:
+        if self.dbf2d_after_id is None and (
+            self.dbf2d_az_playing or self.dbf2d_el_playing
+        ):
+            self.dbf2d_after_id = self.root.after(
+                DBF_SCAN_INTERVAL_MS,
+                self._advance_dbf2d_animation,
+            )
+
+    def _advance_dbf2d_animation(self) -> None:
+        self.dbf2d_after_id = None
+        if self.dbf2d_az_playing:
+            self.dbf2d_az_frame = (self.dbf2d_az_frame + 1) % DBF_SCAN_GRID_SIZE
+        if self.dbf2d_el_playing:
+            self.dbf2d_el_frame = (self.dbf2d_el_frame + 1) % DBF_SCAN_GRID_SIZE
+        if self.dbf2d_az_playing or self.dbf2d_el_playing:
+            self._draw_dbf2d_heatmap()
+            self._schedule_dbf2d_frame()
+        else:
+            self._update_dbf2d_controls()
+
+    def on_dbf2d_progress_changed(self, axis: str, raw_value: str) -> None:
+        if self.dbf2d_progress_updating:
+            return
+        try:
+            frame = int(round(float(raw_value)))
+        except (TypeError, ValueError):
+            return
+        frame = max(0, min(DBF_SCAN_GRID_SIZE - 1, frame))
+        if axis == "azimuth":
+            self.dbf2d_az_frame = frame
+            self.dbf2d_az_playing = False
+        elif axis == "elevation":
+            self.dbf2d_el_frame = frame
+            self.dbf2d_el_playing = False
+        else:
+            return
+        if not self.dbf2d_az_playing and not self.dbf2d_el_playing:
+            self._cancel_dbf2d_timer()
+        self._draw_dbf2d_heatmap()
+        self._update_dbf2d_controls()
+        self.status.set(
+            self._t("dbf2d_paused_axis", axis=_dbf_mode_label(axis, self.language))
+        )
+
+    def _current_dbf2d_angles(self) -> tuple[float, float]:
+        azimuth = DBF_SCAN_FOV[0] + self.dbf2d_az_frame * DBF_SCAN_STEP_DEG
+        elevation = DBF_SCAN_FOV[0] + self.dbf2d_el_frame * DBF_SCAN_STEP_DEG
+        return float(azimuth), float(elevation)
+
+    def _set_dbf2d_progress(self) -> None:
+        self.dbf2d_progress_updating = True
+        try:
+            if self.dbf2d_az_var is not None:
+                self.dbf2d_az_var.set(float(self.dbf2d_az_frame))
+            if self.dbf2d_el_var is not None:
+                self.dbf2d_el_var.set(float(self.dbf2d_el_frame))
+        finally:
+            self.dbf2d_progress_updating = False
+
+        if self.dbf2d_status_label is not None:
+            azimuth, elevation = self._current_dbf2d_angles()
+            frame_index = self.dbf2d_el_frame * DBF_SCAN_GRID_SIZE + self.dbf2d_az_frame + 1
+            total = DBF_SCAN_GRID_SIZE * DBF_SCAN_GRID_SIZE
+            self.dbf2d_status_label.configure(
+                text=self._t(
+                    "dbf2d_status",
+                    az=azimuth,
+                    el=elevation,
+                    frame=frame_index,
+                    total=total,
+                )
+            )
+
+    def _update_dbf2d_controls(self) -> None:
+        if self.dbf2d_az_button is not None:
+            self.dbf2d_az_button.configure(
+                text=self._t("dbf2d_pause_az")
+                if self.dbf2d_az_playing
+                else self._t("dbf2d_play_az")
+            )
+        if self.dbf2d_el_button is not None:
+            self.dbf2d_el_button.configure(
+                text=self._t("dbf2d_pause_el")
+                if self.dbf2d_el_playing
+                else self._t("dbf2d_play_el")
+            )
+        if self.dbf2d_stop_button is not None:
+            state = tk.NORMAL if self.dbf2d_az_playing or self.dbf2d_el_playing else tk.DISABLED
+            self.dbf2d_stop_button.configure(text=self._t("dbf2d_stop"), state=state)
+        self._set_dbf2d_progress()
+
+    def _draw_dbf2d_heatmap(self) -> None:
+        if self.dbf2d_ax is None or self.dbf2d_canvas is None:
+            return
+        azimuth, elevation = self._current_dbf2d_angles()
+        scan_azimuths, scan_elevations, spectrum_db = dbf_2d_spectrum(
+            self.current_array(),
+            true_azimuth_deg=azimuth,
+            true_elevation_deg=elevation,
+            tx_pattern=self.element_pattern,
+            rx_pattern=self.element_pattern,
+            channel_patterns=self.channel_patterns,
+            dbf_dictionary=self.dbf_dictionary,
+        )
+        peak_el_index, peak_az_index = np.unravel_index(
+            int(np.argmax(spectrum_db)), spectrum_db.shape
+        )
+        peak_az = float(scan_azimuths[peak_az_index])
+        peak_el = float(scan_elevations[peak_el_index])
+
+        ax = self.dbf2d_ax
+        ax.clear()
+        _configure_axis_chrome(ax)
+        ax.imshow(
+            np.clip(spectrum_db, -40.0, 0.0),
+            origin="lower",
+            extent=(
+                float(scan_azimuths[0]),
+                float(scan_azimuths[-1]),
+                float(scan_elevations[0]),
+                float(scan_elevations[-1]),
+            ),
+            aspect="equal",
+            cmap="magma",
+            vmin=-40.0,
+            vmax=0.0,
+            interpolation="nearest",
+        )
+        ax.set_aspect("equal", adjustable="box")
+        ax.axvline(azimuth, color="#ffffff", linewidth=1.0, alpha=0.82)
+        ax.axhline(elevation, color="#ffffff", linewidth=1.0, alpha=0.82)
+        ax.scatter(
+            [peak_az],
+            [peak_el],
+            marker="x",
+            s=48,
+            color=THEME["secondary_light"],
+            linewidths=1.5,
+            zorder=5,
+        )
+        ax.set_title(
+            self._t("dbf2d_plot_title"),
+            loc="left",
+            pad=5,
+            color=THEME["text_primary"],
+            fontweight="bold",
+        )
+        ax.set_xlabel(self._t("axis_az_angle"), color=THEME["text_secondary"])
+        ax.set_ylabel(self._t("axis_el_angle"), color=THEME["text_secondary"])
+        ax.text(
+            0.02,
+            0.96,
+            self._t(
+                "dbf2d_heatmap_info",
+                az=azimuth,
+                el=elevation,
+                peak_az=peak_az,
+                peak_el=peak_el,
+            ),
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=7.5,
+            color=THEME["text_inverse"],
+            bbox={
+                "boxstyle": "round,pad=0.25",
+                "facecolor": "#111827",
+                "edgecolor": "#111827",
+                "alpha": 0.74,
+                "linewidth": 0.0,
+            },
+        )
+        self._set_dbf2d_progress()
+        self.dbf2d_canvas.draw_idle()
+
+    def open_dbf_dictionary_dialog(self) -> None:
+        dialog = tk.Toplevel(self.root)
+        _style_toplevel(dialog)
+        dialog.title(self._t("dbf_dictionary_title"))
+        dialog.transient(self.root)
+        dialog.geometry("980x620")
+        dialog.minsize(820, 520)
+
+        root_frame = ttk.Frame(dialog, style="Dialog.TFrame", padding=12)
+        root_frame.pack(fill=tk.BOTH, expand=True)
+        root_frame.grid_columnconfigure(1, weight=1)
+        root_frame.grid_rowconfigure(0, weight=1)
+
+        mode_var = tk.StringVar(value=self.dbf_dictionary.mode)
+        axis_var = tk.StringVar(value="azimuth")
+        custom_holder: dict[str, DbfDictionaryTable | None] = {
+            "azimuth": self.dbf_dictionary.custom_azimuth_table,
+            "elevation": self.dbf_dictionary.custom_elevation_table,
+        }
+        az_file_var = tk.StringVar()
+        el_file_var = tk.StringVar()
+
+        mode_frame = ttk.LabelFrame(
+            root_frame,
+            text=self._t("dbf_dictionary_mode_title"),
+            padding=(8, 6),
+        )
+        mode_frame.grid(row=0, column=0, sticky="ns", padx=(0, 10))
+        mode_frame.grid_columnconfigure(1, weight=1)
+        for row, mode in enumerate(
+            (
+                DBF_DICT_IDEAL,
+                DBF_DICT_IDEAL_REVERSED,
+                DBF_DICT_CHANNEL_PATTERN,
+                DBF_DICT_CHANNEL_PATTERN_ZERO_REF,
+                DBF_DICT_CUSTOM,
+            )
+        ):
+            ttk.Radiobutton(
+                mode_frame,
+                text=_dbf_dictionary_mode_label(mode, self.language),
+                variable=mode_var,
+                value=mode,
+                command=lambda: redraw_preview(),
+            ).grid(row=row, column=0, sticky="w", pady=(0, 5))
+
+        ttk.Separator(mode_frame).grid(row=5, column=0, sticky="ew", pady=6)
+        ttk.Label(
+            mode_frame,
+            text=self._t("dbf_dict_axis"),
+            style="Muted.TLabel",
+        ).grid(row=6, column=0, sticky="w")
+        ttk.Radiobutton(
+            mode_frame,
+            text=self._t("az_short"),
+            variable=axis_var,
+            value="azimuth",
+            command=lambda: redraw_preview(),
+        ).grid(row=7, column=0, sticky="w", pady=(4, 0))
+        ttk.Radiobutton(
+            mode_frame,
+            text=self._t("el_short"),
+            variable=axis_var,
+            value="elevation",
+            command=lambda: redraw_preview(),
+        ).grid(row=8, column=0, sticky="w", pady=(2, 0))
+
+        ttk.Separator(mode_frame).grid(row=9, column=0, columnspan=2, sticky="ew", pady=8)
+        ttk.Label(mode_frame, textvariable=az_file_var, style="Muted.TLabel").grid(
+            row=10, column=0, columnspan=2, sticky="ew", pady=(0, 3)
+        )
+        ttk.Button(
+            mode_frame,
+            text=self._t("dbf_dict_load_az"),
+            command=lambda: load_custom_dictionary("azimuth"),
+            style="Large.TButton",
+        ).grid(row=11, column=0, sticky="ew", pady=(0, 4))
+        ttk.Button(
+            mode_frame,
+            text=self._t("dbf_dict_clear_az"),
+            command=lambda: clear_custom_dictionary("azimuth"),
+            style="Large.TButton",
+        ).grid(row=11, column=1, sticky="ew", padx=(6, 0), pady=(0, 4))
+        ttk.Label(mode_frame, textvariable=el_file_var, style="Muted.TLabel").grid(
+            row=12, column=0, columnspan=2, sticky="ew", pady=(3, 3)
+        )
+        ttk.Button(
+            mode_frame,
+            text=self._t("dbf_dict_load_el"),
+            command=lambda: load_custom_dictionary("elevation"),
+            style="Large.TButton",
+        ).grid(row=13, column=0, sticky="ew")
+        ttk.Button(
+            mode_frame,
+            text=self._t("dbf_dict_clear_el"),
+            command=lambda: clear_custom_dictionary("elevation"),
+            style="Large.TButton",
+        ).grid(row=13, column=1, sticky="ew", padx=(6, 0))
+
+        preview_frame = ttk.LabelFrame(
+            root_frame,
+            text=self._t("dbf_dictionary_preview_title"),
+            padding=(8, 6),
+        )
+        preview_frame.grid(row=0, column=1, sticky="nsew")
+        preview_frame.grid_rowconfigure(0, weight=1)
+        preview_frame.grid_columnconfigure(0, weight=1)
+
+        matrix_area = ttk.Frame(preview_frame, style="Card.TFrame")
+        matrix_area.grid(row=0, column=0, sticky="nsew")
+        matrix_area.grid_rowconfigure(0, weight=1)
+        matrix_area.grid_columnconfigure(0, weight=1)
+        matrix_tree = ttk.Treeview(matrix_area, show="headings", height=18)
+        matrix_tree.grid(row=0, column=0, sticky="nsew")
+        matrix_y_scroll = ttk.Scrollbar(
+            matrix_area, orient=tk.VERTICAL, command=matrix_tree.yview
+        )
+        matrix_y_scroll.grid(row=0, column=1, sticky="ns")
+        matrix_x_scroll = ttk.Scrollbar(
+            matrix_area, orient=tk.HORIZONTAL, command=matrix_tree.xview
+        )
+        matrix_x_scroll.grid(row=1, column=0, sticky="ew")
+        matrix_tree.configure(
+            yscrollcommand=matrix_y_scroll.set,
+            xscrollcommand=matrix_x_scroll.set,
+        )
+
+        preview_status = ttk.Label(
+            preview_frame,
+            text="",
+            style="Card.TLabel",
+            font=(THEME["font_family_mono"], THEME["font_size_sm"]),
+        )
+        preview_status.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+
+        button_row = ttk.Frame(root_frame, style="Dialog.TFrame")
+        button_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        button_row.grid_columnconfigure(0, weight=1)
+
+        def refresh_file_labels() -> None:
+            az_file = (
+                custom_holder["azimuth"].display_name
+                if custom_holder["azimuth"] is not None
+                else self._t("dbf_dict_no_file")
+            )
+            el_file = (
+                custom_holder["elevation"].display_name
+                if custom_holder["elevation"] is not None
+                else self._t("dbf_dict_no_file")
+            )
+            az_file_var.set(
+                self._t(
+                    "dbf_dict_file_status",
+                    axis=_dbf_short_label("azimuth", self.language),
+                    file=az_file,
+                )
+            )
+            el_file_var.set(
+                self._t(
+                    "dbf_dict_file_status",
+                    axis=_dbf_short_label("elevation", self.language),
+                    file=el_file,
+                )
+            )
+
+        def current_config(require_complete: bool = False) -> DbfDictionaryConfig:
+            mode = mode_var.get()
+            if mode == DBF_DICT_CUSTOM:
+                if require_complete and (
+                    custom_holder["azimuth"] is None
+                    or custom_holder["elevation"] is None
+                ):
+                    raise ValueError(self._t("dbf_dict_need_axis_files"))
+                if not require_complete and custom_holder[axis_var.get()] is None:
+                    raise ValueError(self._t("dbf_dict_need_file"))
+            return DbfDictionaryConfig(
+                mode=mode,
+                custom_azimuth_table=custom_holder["azimuth"],
+                custom_elevation_table=custom_holder["elevation"],
+            )
+
+        def show_matrix_message(message: str) -> None:
+            matrix_tree.delete(*matrix_tree.get_children())
+            matrix_tree.configure(columns=("message",), displaycolumns=("message",))
+            matrix_tree.heading("message", text=self._t("dbf_dictionary_preview_title").strip())
+            matrix_tree.column("message", width=520, anchor="center", stretch=True)
+            matrix_tree.insert("", tk.END, values=(message,))
+            preview_status.configure(text=message)
+
+        def redraw_preview() -> None:
+            try:
+                config = current_config()
+                angles = np.linspace(DBF_SCAN_FOV[0], DBF_SCAN_FOV[1], DBF_SCAN_GRID_SIZE)
+                matrix = config.scan_matrix(
+                    self.current_array(),
+                    angles,
+                    axis=axis_var.get(),
+                    channel_patterns=self.channel_patterns,
+                )
+                phase = dictionary_phase_preview(matrix)
+                columns = ("angle",) + tuple(
+                    f"CH{index + 1}" for index in range(phase.shape[1])
+                )
+                matrix_tree.delete(*matrix_tree.get_children())
+                matrix_tree.configure(columns=columns, displaycolumns=columns)
+                matrix_tree.heading("angle", text="Angle")
+                matrix_tree.column("angle", width=74, anchor="e", stretch=False)
+                for column in columns[1:]:
+                    matrix_tree.heading(column, text=column)
+                    matrix_tree.column(column, width=72, anchor="e", stretch=False)
+                for angle, row_values in zip(angles, phase):
+                    matrix_tree.insert(
+                        "",
+                        tk.END,
+                        values=(f"{angle:+.0f}", *[f"{value:+.1f}" for value in row_values]),
+                    )
+                axis_label = _dbf_short_label(axis_var.get(), self.language)
+                title = f"{self._t('dbf_dict_preview_phase')} - {axis_label}"
+                preview_status.configure(
+                    text=f"{title} | "
+                    + self._t(
+                        "dbf_dict_preview_status",
+                        mode=_dbf_dictionary_mode_label(config.mode, self.language),
+                        rows=matrix.shape[0],
+                        cols=matrix.shape[1],
+                    )
+                )
+            except Exception as exc:
+                show_matrix_message(str(exc))
+
+        def load_custom_dictionary(axis: str) -> None:
+            filename = filedialog.askopenfilename(
+                title=(
+                    self._t("dbf_dict_load_el")
+                    if axis == "elevation"
+                    else self._t("dbf_dict_load_az")
+                ),
+                initialdir=str(self.last_pattern_dir),
+                filetypes=[
+                    ("DBF Dictionary", "*.csv *.tsv *.xlsx *.xlsm"),
+                    (self._t("csv_type"), "*.csv"),
+                    ("Excel", "*.xlsx *.xlsm"),
+                    (self._t("all_files_type"), "*.*"),
+                ],
+            )
+            if not filename:
+                return
+            try:
+                table = load_dbf_dictionary_table(filename, self.current_array())
+            except Exception as exc:
+                LOGGER.exception("Failed to load DBF dictionary from %s", filename)
+                messagebox.showerror(self._t("dbf_dict_custom_failed"), str(exc))
+                return
+            self.last_pattern_dir = Path(filename).parent
+            custom_holder[axis] = table
+            mode_var.set(DBF_DICT_CUSTOM)
+            axis_var.set(axis)
+            refresh_file_labels()
+            self.status.set(
+                self._t(
+                    "dbf_dict_custom_loaded",
+                    axis=_dbf_short_label(axis, self.language),
+                    file=Path(filename).name,
+                )
+            )
+            redraw_preview()
+
+        def clear_custom_dictionary(axis: str) -> None:
+            custom_holder[axis] = None
+            if (
+                mode_var.get() == DBF_DICT_CUSTOM
+                and custom_holder["azimuth"] is None
+                and custom_holder["elevation"] is None
+            ):
+                mode_var.set(DBF_DICT_IDEAL)
+            refresh_file_labels()
+            redraw_preview()
+
+        def apply_dictionary() -> None:
+            try:
+                config = current_config(require_complete=True)
+            except Exception as exc:
+                messagebox.showinfo(self._t("dbf_dictionary_title"), str(exc))
+                return
+            self.dbf_dictionary = config
+            self.generate_virtual_array()
+            self.status.set(
+                self._t(
+                    "dbf_dict_applied",
+                    mode=_dbf_dictionary_mode_label(config.mode, self.language),
+                )
+            )
+            dialog.destroy()
+
+        ttk.Button(
+            button_row,
+            text=self._t("dbf_dict_apply"),
+            command=apply_dictionary,
+            style="Accent.TButton",
+        ).grid(row=0, column=1, sticky="e", padx=(8, 0))
+        ttk.Button(
+            button_row,
+            text=self._t("done"),
+            command=dialog.destroy,
+            style="Large.TButton",
+        ).grid(row=0, column=2, sticky="e", padx=(8, 0))
+
+        refresh_file_labels()
+        redraw_preview()
 
     def open_channel_patterns_dialog(self) -> None:
         dialog = tk.Toplevel(self.root)
-        dialog.title("Channel Amplitude/Phase Patterns")
+        _style_toplevel(dialog)
+        dialog.title(self._t("channel_dialog_title"))
         dialog.transient(self.root)
         dialog.geometry("900x560")
         dialog.minsize(760, 460)
 
-        root_frame = ttk.Frame(dialog, padding=10)
+        root_frame = ttk.Frame(dialog, style="Dialog.TFrame", padding=12)
         root_frame.pack(fill=tk.BOTH, expand=True)
         root_frame.grid_columnconfigure(0, weight=1)
         root_frame.grid_rowconfigure(1, weight=1)
 
         summary_frame = ttk.LabelFrame(
             root_frame,
-            text="  SUMMARY CSV  ",
+            text=self._t("summary_csv_title"),
             padding=(8, 6),
         )
         summary_frame.grid(row=0, column=0, sticky="ew")
         summary_frame.grid_columnconfigure(4, weight=1)
 
         summary_specs = (
-            ("Amp H", PATTERN_KIND_AMPLITUDE, PATTERN_PLANE_HORIZONTAL),
-            ("Amp E", PATTERN_KIND_AMPLITUDE, PATTERN_PLANE_ELEVATION),
-            ("Phase H", PATTERN_KIND_PHASE, PATTERN_PLANE_HORIZONTAL),
-            ("Phase E", PATTERN_KIND_PHASE, PATTERN_PLANE_ELEVATION),
+            (_pattern_slot_label(PATTERN_KIND_AMPLITUDE, PATTERN_PLANE_HORIZONTAL, self.language), PATTERN_KIND_AMPLITUDE, PATTERN_PLANE_HORIZONTAL),
+            (_pattern_slot_label(PATTERN_KIND_AMPLITUDE, PATTERN_PLANE_ELEVATION, self.language), PATTERN_KIND_AMPLITUDE, PATTERN_PLANE_ELEVATION),
+            (_pattern_slot_label(PATTERN_KIND_PHASE, PATTERN_PLANE_HORIZONTAL, self.language), PATTERN_KIND_PHASE, PATTERN_PLANE_HORIZONTAL),
+            (_pattern_slot_label(PATTERN_KIND_PHASE, PATTERN_PLANE_ELEVATION, self.language), PATTERN_KIND_PHASE, PATTERN_PLANE_ELEVATION),
         )
         for column, (label, kind, plane) in enumerate(summary_specs):
             ttk.Button(
                 summary_frame,
-                text=f"Load {label} Summary",
+                text=self._t("load_summary", label=label),
                 command=lambda k=kind, p=plane: self._load_summary_channel_pattern(
                     k, p, dialog, refresh_tree
                 ),
@@ -2036,14 +3783,14 @@ class VirtualArrayGui:
 
         ttk.Button(
             summary_frame,
-            text="Clear All",
+            text=self._t("clear_all"),
             command=lambda: clear_all_patterns(),
-            style="Large.TButton",
+            style="Danger.TButton",
         ).grid(row=0, column=5, sticky="e", padx=(8, 0))
 
         table_frame = ttk.LabelFrame(
             root_frame,
-            text="  PHYSICAL CHANNELS  ",
+            text=self._t("physical_channels_title"),
             padding=(8, 6),
         )
         table_frame.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
@@ -2052,12 +3799,14 @@ class VirtualArrayGui:
 
         columns = ("channel", "amp_h", "amp_e", "phase_h", "phase_e")
         tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=10)
+        tree.tag_configure("odd", background=THEME["panel_alt_bg"])
+        tree.tag_configure("even", background=THEME["card_bg"])
         headings = {
-            "channel": "Channel",
-            "amp_h": "Amp H",
-            "amp_e": "Amp E",
-            "phase_h": "Phase H",
-            "phase_e": "Phase E",
+            "channel": self._t("column_channel"),
+            "amp_h": summary_specs[0][0],
+            "amp_e": summary_specs[1][0],
+            "phase_h": summary_specs[2][0],
+            "phase_e": summary_specs[3][0],
         }
         widths = {
             "channel": 90,
@@ -2075,12 +3824,12 @@ class VirtualArrayGui:
         scrollbar.grid(row=0, column=1, sticky="ns")
         tree.configure(yscrollcommand=scrollbar.set)
 
-        button_row = ttk.Frame(root_frame)
+        button_row = ttk.Frame(root_frame, style="Dialog.TFrame")
         button_row.grid(row=2, column=0, sticky="ew", pady=(10, 0))
         for label, kind, plane in summary_specs:
             ttk.Button(
                 button_row,
-                text=f"Set {label}",
+                text=self._t("set_pattern", label=label),
                 command=lambda k=kind, p=plane: self._load_single_channel_pattern(
                     tree, k, p, dialog, refresh_tree
                 ),
@@ -2088,13 +3837,13 @@ class VirtualArrayGui:
             ).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(
             button_row,
-            text="Clear Channel",
+            text=self._t("clear_channel"),
             command=lambda: clear_selected_channel(),
-            style="Large.TButton",
+            style="Danger.TButton",
         ).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(
             button_row,
-            text="Done",
+            text=self._t("done"),
             command=dialog.destroy,
             style="Accent.TButton",
         ).pack(side=tk.RIGHT)
@@ -2104,18 +3853,19 @@ class VirtualArrayGui:
             selected_channel = selected[0] if selected else None
             for item in tree.get_children():
                 tree.delete(item)
-            for channel_name in self._physical_channel_names():
+            for row_index, channel_name in enumerate(self._physical_channel_names()):
                 pattern = self.channel_patterns.pattern_for(channel_name)
                 tree.insert(
                     "",
                     tk.END,
                     iid=channel_name,
+                    tags=("odd" if row_index % 2 else "even",),
                     values=(
                         channel_name,
-                        _series_table_label(pattern.amplitude_horizontal),
-                        _series_table_label(pattern.amplitude_elevation),
-                        _series_table_label(pattern.phase_horizontal),
-                        _series_table_label(pattern.phase_elevation),
+                        _series_table_label(pattern.amplitude_horizontal, self.language),
+                        _series_table_label(pattern.amplitude_elevation, self.language),
+                        _series_table_label(pattern.phase_horizontal, self.language),
+                        _series_table_label(pattern.phase_elevation, self.language),
                     ),
                 )
             if selected_channel in tree.get_children():
@@ -2128,17 +3878,17 @@ class VirtualArrayGui:
                 return
             self.channel_patterns.clear_channel(channel_name)
             self._after_channel_patterns_changed(
-                f"Cleared channel patterns: {channel_name}."
+                self._t("channel_cleared", channel=channel_name)
             )
             refresh_tree()
 
         def clear_all_patterns() -> None:
             if self.channel_patterns.is_empty() and self.element_pattern is None:
-                self.status.set("Channel patterns already ideal.")
+                self.status.set(self._t("channel_already_ideal"))
                 return
             self.channel_patterns.clear()
             self.element_pattern = None
-            self._after_channel_patterns_changed("Cleared all channel patterns.")
+            self._after_channel_patterns_changed(self._t("channel_all_cleared"))
             refresh_tree()
 
         refresh_tree()
@@ -2146,6 +3896,7 @@ class VirtualArrayGui:
             first = tree.get_children()[0]
             tree.selection_set(first)
             tree.focus(first)
+        _apply_interactive_cursors(dialog)
 
     def _physical_channel_names(self) -> list[str]:
         array = self.current_array()
@@ -2155,8 +3906,8 @@ class VirtualArrayGui:
         selected = tree.selection()
         if not selected:
             messagebox.showinfo(
-                "Channel patterns",
-                "Select one physical channel first.",
+                self._t("channel_patterns_title"),
+                self._t("select_channel_first"),
             )
             return None
         return str(selected[0])
@@ -2169,7 +3920,10 @@ class VirtualArrayGui:
         refresh_callback: callable,
     ) -> None:
         filename = self._ask_channel_pattern_file(
-            title=f"Load {_pattern_slot_label(kind, plane)} summary CSV",
+            title=self._t(
+                "load_summary_title",
+                label=_pattern_slot_label(kind, plane, self.language),
+            ),
             parent=parent,
         )
         if not filename:
@@ -2182,12 +3936,16 @@ class VirtualArrayGui:
             )
         except Exception as exc:
             LOGGER.exception("Load channel pattern summary failed: %s", filename)
-            messagebox.showerror("Load channel pattern summary failed", str(exc))
+            messagebox.showerror(self._t("load_summary_failed"), str(exc))
             return
 
         self.channel_patterns.update_many(series_by_channel, kind, plane)
         self._after_channel_patterns_changed(
-            f"Loaded {_pattern_slot_label(kind, plane)} summary: {Path(filename).name}."
+            self._t(
+                "summary_loaded",
+                label=_pattern_slot_label(kind, plane, self.language),
+                file=Path(filename).name,
+            )
         )
         refresh_callback()
 
@@ -2203,7 +3961,11 @@ class VirtualArrayGui:
         if channel_name is None:
             return
         filename = self._ask_channel_pattern_file(
-            title=f"Load {_pattern_slot_label(kind, plane)} for {channel_name}",
+            title=self._t(
+                "load_channel_title",
+                label=_pattern_slot_label(kind, plane, self.language),
+                channel=channel_name,
+            ),
             parent=parent,
         )
         if not filename:
@@ -2212,12 +3974,17 @@ class VirtualArrayGui:
             series = load_hfss_pattern_series(filename, value_kind=kind)
         except Exception as exc:
             LOGGER.exception("Load channel pattern failed: %s", filename)
-            messagebox.showerror("Load channel pattern failed", str(exc))
+            messagebox.showerror(self._t("load_channel_failed"), str(exc))
             return
 
         self.channel_patterns.set_series(channel_name, kind, plane, series)
         self._after_channel_patterns_changed(
-            f"Loaded {_pattern_slot_label(kind, plane)} for {channel_name}: {Path(filename).name}."
+            self._t(
+                "channel_loaded",
+                label=_pattern_slot_label(kind, plane, self.language),
+                channel=channel_name,
+                file=Path(filename).name,
+            )
         )
         refresh_callback()
 
@@ -2231,10 +3998,10 @@ class VirtualArrayGui:
             title=title,
             initialdir=str(self.last_pattern_dir),
             filetypes=[
-                ("HFSS CSV/TSV", "*.csv *.tsv"),
-                ("CSV files", "*.csv"),
-                ("TSV files", "*.tsv"),
-                ("All files", "*.*"),
+                (self._t("hfss_csv_type"), "*.csv *.tsv"),
+                (self._t("csv_type"), "*.csv"),
+                (self._t("tsv_type"), "*.tsv"),
+                (self._t("all_files_type"), "*.*"),
             ],
         )
         if filename:
@@ -2255,14 +4022,16 @@ class VirtualArrayGui:
         series = sum(pattern.series_count() for pattern in current_patterns)
         if channels == 0:
             if self.element_pattern is not None:
-                self.pattern_status.set("Patterns: legacy element")
-                self.pattern_canvas.itemconfig(self.pattern_dot, fill="#b58900")
+                self.pattern_status.set(self._t("pattern_legacy"))
+                self.pattern_canvas.itemconfig(self.pattern_dot, fill=THEME["warning"])
                 return
-            self.pattern_status.set("Patterns: ideal")
-            self.pattern_canvas.itemconfig(self.pattern_dot, fill="#999999")
+            self.pattern_status.set(self._t("pattern_ideal"))
+            self.pattern_canvas.itemconfig(self.pattern_dot, fill=THEME["text_muted"])
             return
-        self.pattern_status.set(f"Patterns: {channels} ch / {series} files")
-        self.pattern_canvas.itemconfig(self.pattern_dot, fill="#2e7d32")
+        self.pattern_status.set(
+            self._t("pattern_summary", channels=channels, series=series)
+        )
+        self.pattern_canvas.itemconfig(self.pattern_dot, fill=THEME["secondary_accent"])
 
     def import_element_pattern(self) -> None:
         filename = filedialog.askopenfilename(
@@ -2294,7 +4063,7 @@ class VirtualArrayGui:
         pattern = confirmed_pattern
         self.element_pattern = pattern
         self.pattern_status.set(f"Pattern: {pattern.name}")
-        self.pattern_canvas.itemconfig(self.pattern_dot, fill="#2e7d32")
+        self.pattern_canvas.itemconfig(self.pattern_dot, fill=THEME["secondary_accent"])
         LOGGER.info("Imported element pattern from %s", filename)
         self.generate_virtual_array()
         self.status.set(f"Element pattern loaded: {pattern.name}")
@@ -2306,7 +4075,7 @@ class VirtualArrayGui:
         LOGGER.info("Cleared element pattern: %s", self.element_pattern.source_path)
         self.element_pattern = None
         self.pattern_status.set("Pattern: isotropic")
-        self.pattern_canvas.itemconfig(self.pattern_dot, fill="#999999")
+        self.pattern_canvas.itemconfig(self.pattern_dot, fill=THEME["text_muted"])
         self.generate_virtual_array()
         self.status.set("Element pattern cleared. Using isotropic elements.")
 
@@ -2314,6 +4083,7 @@ class VirtualArrayGui:
         self, pattern: ElementPattern
     ) -> ElementPattern | None:
         dialog = tk.Toplevel(self.root)
+        _style_toplevel(dialog)
         dialog.title("Confirm Element Pattern")
         dialog.transient(self.root)
         dialog.grab_set()
@@ -2321,13 +4091,17 @@ class VirtualArrayGui:
         title = ttk.Label(
             dialog,
             text=f"{pattern.name}",
-            font=("Segoe UI", 10, "bold"),
+            font=(THEME["font_family"], 10, "bold"),
+            foreground=THEME["text_primary"],
+            background=THEME["bg"],
         )
         title.pack(fill=tk.X, padx=10, pady=(8, 2))
         subtitle = ttk.Label(
             dialog,
             text="",
-            font=("Segoe UI", 9),
+            font=(THEME["font_family"], 9),
+            foreground=THEME["text_secondary"],
+            background=THEME["bg"],
         )
         subtitle.pack(fill=tk.X, padx=10, pady=(0, 6))
         metrics_frame = ttk.Frame(dialog)
@@ -2335,24 +4109,27 @@ class VirtualArrayGui:
         horizontal_metrics_label = ttk.Label(
             metrics_frame,
             text="",
-            font=("Consolas", 9),
-            foreground="#2f6fbb",
+            font=(THEME["font_family_mono"], 9),
+            foreground=THEME["response_line"],
         )
         horizontal_metrics_label.pack(anchor="w")
         elevation_metrics_label = ttk.Label(
             metrics_frame,
             text="",
-            font=("Consolas", 9),
-            foreground="#7b1fa2",
+            font=(THEME["font_family_mono"], 9),
+            foreground=THEME["secondary_accent"],
         )
         elevation_metrics_label.pack(anchor="w")
 
         fig = Figure(figsize=(7.8, 5.0), dpi=FIG_DPI)
+        fig.set_facecolor(THEME["panel_bg"])
         horizontal_ax = fig.add_subplot(211)
         elevation_ax = fig.add_subplot(212)
 
         canvas = FigureCanvasTkAgg(fig, master=dialog)
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
+        canvas_widget = canvas.get_tk_widget()
+        _style_canvas_widget(canvas_widget)
+        canvas_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
 
         state: dict[str, ElementPattern | None] = {"pattern": pattern, "confirmed": None}
 
@@ -2370,8 +4147,8 @@ class VirtualArrayGui:
             horizontal_ax.plot(
                 current.angles_deg,
                 current.horizontal_gain_db,
-                color="#2f6fbb",
-                linewidth=1.6,
+                color=THEME["response_line"],
+                linewidth=1.8,
             )
             horizontal_metrics = format_pattern_cut_metrics(
                 pattern_cut_metrics(current.angles_deg, current.horizontal_gain_db)
@@ -2380,14 +4157,14 @@ class VirtualArrayGui:
             horizontal_ax.set_title("Horizontal pattern", loc="left")
             horizontal_ax.set_ylabel("Gain (dB)")
             _configure_pattern_preview_axis(horizontal_ax)
-            horizontal_ax.grid(True, alpha=0.3)
+            horizontal_ax.grid(True, alpha=0.3, color=THEME["grid_major_color"], linewidth=0.55)
 
             if current.elevation_gain_db is not None:
                 elevation_ax.plot(
                     current.angles_deg,
                     current.elevation_gain_db,
-                    color="#7b1fa2",
-                    linewidth=1.6,
+                    color=THEME["secondary_accent"],
+                    linewidth=1.8,
                 )
                 elevation_metrics = format_pattern_cut_metrics(
                     pattern_cut_metrics(current.angles_deg, current.elevation_gain_db)
@@ -2410,7 +4187,7 @@ class VirtualArrayGui:
             elevation_ax.set_xlabel("Angle (deg)")
             elevation_ax.set_ylabel("Gain (dB)")
             _configure_pattern_preview_axis(elevation_ax)
-            elevation_ax.grid(True, alpha=0.3)
+            elevation_ax.grid(True, alpha=0.3, color=THEME["grid_major_color"], linewidth=0.55)
             fig.tight_layout()
             canvas.draw_idle()
 
@@ -2433,11 +4210,11 @@ class VirtualArrayGui:
 
         button_row = ttk.Frame(dialog)
         button_row.pack(fill=tk.X, padx=10, pady=(0, 10))
-        ttk.Button(button_row, text="Import", command=confirm).pack(side=tk.RIGHT)
-        ttk.Button(button_row, text="Cancel", command=cancel).pack(
+        ttk.Button(button_row, text="Import", command=confirm, style="Accent.TButton").pack(side=tk.RIGHT)
+        ttk.Button(button_row, text="Cancel", command=cancel, style="Large.TButton").pack(
             side=tk.RIGHT, padx=(0, 8)
         )
-        swap_button = ttk.Button(button_row, text="Swap H/V", command=swap_axes)
+        swap_button = ttk.Button(button_row, text="Swap H/V", command=swap_axes, style="Large.TButton")
         swap_button.pack(side=tk.LEFT)
         if pattern.elevation_gain_db is None:
             swap_button.configure(state=tk.DISABLED)
@@ -2449,11 +4226,11 @@ class VirtualArrayGui:
         default_path = Path("outputs") / "antenna_layout.json"
         default_path.parent.mkdir(exist_ok=True)
         filename = filedialog.asksaveasfilename(
-            title="Export antenna layout",
+            title=self._t("export_layout_title"),
             initialdir=str(self.last_layout_dir),
             initialfile=default_path.name,
             defaultextension=".json",
-            filetypes=[("Antenna layout JSON", "*.json")],
+            filetypes=[(self._t("layout_json_type"), "*.json")],
         )
         if not filename:
             return
@@ -2462,13 +4239,16 @@ class VirtualArrayGui:
         with open(filename, "w", encoding="utf-8") as file:
             file.write(_layout_config_to_json(config))
         LOGGER.info("Exported layout config to %s", filename)
-        self.status.set(f"Exported layout: {filename}")
+        self.status.set(self._t("exported_layout", file=filename))
 
     def import_layout_config(self) -> None:
         filename = filedialog.askopenfilename(
-            title="Import antenna layout",
+            title=self._t("import_layout_title"),
             initialdir=str(self.last_layout_dir),
-            filetypes=[("Antenna layout JSON", "*.json"), ("All files", "*.*")],
+            filetypes=[
+                (self._t("layout_json_type"), "*.json"),
+                (self._t("all_files_type"), "*.*"),
+            ],
         )
         if not filename:
             return
@@ -2480,7 +4260,7 @@ class VirtualArrayGui:
             imported_elements = self._elements_from_layout_config(config)
         except Exception as exc:
             LOGGER.exception("Import layout failed: %s", filename)
-            messagebox.showerror("Import layout failed", str(exc))
+            messagebox.showerror(self._t("import_layout_failed"), str(exc))
             return
 
         imported_snapshot = self._layout_snapshot_for(imported_elements, None)
@@ -2499,10 +4279,20 @@ class VirtualArrayGui:
         x_values = [element.x * DISPLAY_SCALE_LAMBDA for element in self.elements]
         y_values = [element.y * DISPLAY_SCALE_LAMBDA for element in self.elements]
         self.status.set(
-            f"Imported: {Path(filename).name} | "
-            f"{tx[0].name}=({tx[0].x * DISPLAY_SCALE_LAMBDA:g},{tx[0].y * DISPLAY_SCALE_LAMBDA:g}) λ | "
-            f"{rx[0].name}=({rx[0].x * DISPLAY_SCALE_LAMBDA:g},{rx[0].y * DISPLAY_SCALE_LAMBDA:g}) λ | "
-            f"x {min(x_values):g}..{max(x_values):g} λ, y {min(y_values):g}..{max(y_values):g} λ"
+            self._t(
+                "imported_layout",
+                file=Path(filename).name,
+                tx=tx[0].name,
+                tx_x=tx[0].x * DISPLAY_SCALE_LAMBDA,
+                tx_y=tx[0].y * DISPLAY_SCALE_LAMBDA,
+                rx=rx[0].name,
+                rx_x=rx[0].x * DISPLAY_SCALE_LAMBDA,
+                rx_y=rx[0].y * DISPLAY_SCALE_LAMBDA,
+                x_min=min(x_values),
+                x_max=max(x_values),
+                y_min=min(y_values),
+                y_max=max(y_values),
+            )
         )
         LOGGER.info("Imported layout config from %s", filename)
 
@@ -2593,6 +4383,22 @@ class VirtualArrayGui:
         utilization = metrics.unique_count / metrics.virtual_count if metrics.virtual_count else 0.0
         return {
             "frequency_ghz": _format_frequency_ghz(self.current_frequency_ghz()),
+            "ambiguity_margin_db": _json_number(self.current_margin_db(), digits=3),
+            "dbf_dictionary": {
+                "mode": self.dbf_dictionary.mode,
+                "custom_sources": {
+                    "azimuth": (
+                        self.dbf_dictionary.custom_azimuth_table.source_path
+                        if self.dbf_dictionary.custom_azimuth_table is not None
+                        else None
+                    ),
+                    "elevation": (
+                        self.dbf_dictionary.custom_elevation_table.source_path
+                        if self.dbf_dictionary.custom_elevation_table is not None
+                        else None
+                    ),
+                },
+            },
             "virtual_utilization": {
                 "unique_points": metrics.unique_count,
                 "virtual_channels": metrics.virtual_count,
@@ -2629,6 +4435,7 @@ class VirtualArrayGui:
 
     def generate_virtual_array(self) -> None:
         self.stop_dbf_scan_animation(restore_response=False)
+        self.stop_dbf2d_animation(update_status=False)
         array = self.current_array()
         unique, counts = array.unique_virtual_xy(decimals=ROUND_DECIMALS)
         pair_map = self._build_virtual_pair_map(array)
@@ -2647,8 +4454,9 @@ class VirtualArrayGui:
         self._update_channel_pattern_status()
         self._draw_dbf_reference_spectrum("azimuth")
         self._draw_dbf_reference_spectrum("elevation")
+        self._draw_dbf2d_heatmap()
 
-        self.status.set("Ready")
+        self.status.set(self._t("status_ready"))
         self.phys_canvas.draw_idle()
         self.virt_canvas.draw_idle()
         self.az_chart.canvas.draw_idle()
@@ -2667,6 +4475,7 @@ class VirtualArrayGui:
 
     def _draw_physical_array(self) -> None:
         self.physical_ax.clear()
+        _configure_axis_chrome(self.physical_ax)
         tx = [element for element in self.elements if element.kind == "tx"]
         rx = [element for element in self.elements if element.kind == "rx"]
 
@@ -2676,8 +4485,8 @@ class VirtualArrayGui:
             marker="D",
             s=62,
             facecolors="none",
-            edgecolors="#b04f48",
-            linewidths=1.7,
+            edgecolors=THEME["tx_color"],
+            linewidths=1.8,
             label="Tx",
         )
         self.physical_ax.scatter(
@@ -2685,7 +4494,9 @@ class VirtualArrayGui:
             _to_display_lambda([element.y for element in rx]),
             marker="*",
             s=112,
-            color="#335c9e",
+            color=THEME["rx_color"],
+            edgecolors=THEME["rx_edge"],
+            linewidths=0.55,
             label="Rx",
         )
         if self.selected_element is not None:
@@ -2695,7 +4506,7 @@ class VirtualArrayGui:
                 marker="o",
                 s=280,
                 facecolors="none",
-                edgecolors="#ffcc00",
+                edgecolors=THEME["selection"],
                 linewidths=2.4,
                 zorder=5,
                 label="_nolegend_",
@@ -2713,6 +4524,14 @@ class VirtualArrayGui:
                     fontsize=8.8,
                     ha="left",
                     va="bottom",
+                    color=THEME["text_primary"],
+                    bbox={
+                        "boxstyle": "round,pad=0.18",
+                        "facecolor": THEME["accent_light"],
+                        "edgecolor": THEME["focus"],
+                        "alpha": 0.95,
+                        "linewidth": 0.6,
+                    },
                 )
             else:
                 dy = 1.0 if element.kind == "tx" else -1.15
@@ -2723,66 +4542,54 @@ class VirtualArrayGui:
                     fontsize=8.8,
                     ha="center",
                     va="center",
+                    color=THEME["text_secondary"],
                 )
 
         self.physical_ax.set_title(
-            "Physical Array", fontsize=TITLE_SIZE, pad=6, y=1.02, loc="left",
+            self._t("physical_title"), fontsize=TITLE_SIZE, pad=6, y=1.02, loc="left",
             color=THEME["text_primary"], fontweight="bold",
         )
         self.physical_ax.set_xlabel("x (λ)", color=THEME["text_secondary"])
         self.physical_ax.set_ylabel("y (λ)", color=THEME["text_secondary"])
-        self.physical_ax.tick_params(colors=THEME["text_secondary"], labelsize=8)
         if self.drag_axis_limits is not None:
             x_limits, y_limits = self.drag_axis_limits
         else:
             physical_x = _to_display_lambda([element.x for element in self.elements])
             physical_y = _to_display_lambda([element.y for element in self.elements])
-            x_limits = _axis_limits(physical_x, minimum_span=5.0, padding=3.0)
-            y_limits = _axis_limits(physical_y, minimum_span=5.0, padding=3.0)
+            x_limits, y_limits = _square_axis_limits(
+                physical_x,
+                physical_y,
+                minimum_span=PHYSICAL_AXIS_MIN_SPAN_LAMBDA,
+                padding=PHYSICAL_AXIS_PADDING_LAMBDA,
+            )
         self.physical_ax.set_xlim(*x_limits)
         self.physical_ax.set_ylim(*y_limits)
         self.physical_ax.set_xticks(
-            np.arange(
-                np.floor(x_limits[0] / 5) * 5,
-                np.ceil(x_limits[1] / 5) * 5 + 1,
-                5,
-            )
+            _axis_ticks_within(x_limits, PHYSICAL_MAJOR_GRID_STEP_LAMBDA)
         )
         self.physical_ax.set_yticks(
-            np.arange(
-                np.floor(y_limits[0] / 5) * 5,
-                np.ceil(y_limits[1] / 5) * 5 + 1,
-                5,
-            )
+            _axis_ticks_within(y_limits, PHYSICAL_MAJOR_GRID_STEP_LAMBDA)
         )
         self.physical_ax.set_xticks(
-            np.arange(
-                np.floor(x_limits[0] / DISPLAY_GRID_STEP_LAMBDA) * DISPLAY_GRID_STEP_LAMBDA,
-                x_limits[1] + DISPLAY_GRID_STEP_LAMBDA,
-                DISPLAY_GRID_STEP_LAMBDA,
-            ),
+            _axis_ticks_within(x_limits, DISPLAY_GRID_STEP_LAMBDA),
             minor=True,
         )
         self.physical_ax.set_yticks(
-            np.arange(
-                np.floor(y_limits[0] / DISPLAY_GRID_STEP_LAMBDA) * DISPLAY_GRID_STEP_LAMBDA,
-                y_limits[1] + DISPLAY_GRID_STEP_LAMBDA,
-                DISPLAY_GRID_STEP_LAMBDA,
-            ),
+            _axis_ticks_within(y_limits, DISPLAY_GRID_STEP_LAMBDA),
             minor=True,
         )
         self.physical_ax.grid(
-            True, which="major", color="#8f989f", linewidth=0.82, alpha=0.54
+            True, which="major", color=THEME["grid_major_color"], linewidth=0.95, alpha=0.66
         )
         self.physical_ax.grid(
-            True, which="minor", color="#aeb6bc", linewidth=0.48, alpha=0.32
+            True, which="minor", color=THEME["grid_minor_color"], linewidth=0.42, alpha=0.24
         )
         if self.dragging is not None:
             snap_x = self.dragging.x * DISPLAY_SCALE_LAMBDA
             snap_y = self.dragging.y * DISPLAY_SCALE_LAMBDA
             self.physical_ax.axvline(
                 snap_x,
-                color="#f0b429",
+                color=THEME["selection"],
                 linestyle="--",
                 linewidth=1.35,
                 alpha=0.86,
@@ -2790,7 +4597,7 @@ class VirtualArrayGui:
             )
             self.physical_ax.axhline(
                 snap_y,
-                color="#f0b429",
+                color=THEME["selection"],
                 linestyle="--",
                 linewidth=1.35,
                 alpha=0.86,
@@ -2802,13 +4609,13 @@ class VirtualArrayGui:
                 marker="o",
                 s=430,
                 facecolors="none",
-                edgecolors="#f0b429",
+                edgecolors=THEME["selection"],
                 linewidths=2.8,
                 zorder=6,
                 label="_nolegend_",
             )
-        self.physical_ax.legend(loc="upper right", framealpha=0.72)
-        self.physical_ax.set_aspect("auto")
+        _style_legend(self.physical_ax.legend(loc="upper right", framealpha=0.92))
+        self.physical_ax.set_aspect("equal", adjustable="box", anchor="C")
         self.physical_hover_annotation = self.physical_ax.annotate(
             "",
             xy=(0, 0),
@@ -2816,12 +4623,12 @@ class VirtualArrayGui:
             textcoords="offset points",
             bbox={
                 "boxstyle": "round,pad=0.35",
-                "facecolor": "#ffffff",
+                "facecolor": THEME["card_bg"],
                 "edgecolor": THEME["card_border"],
                 "alpha": 0.95,
                 "linewidth": 0.8,
             },
-            arrowprops={"arrowstyle": "->", "color": "#888888", "linewidth": 0.8},
+            arrowprops={"arrowstyle": "->", "color": THEME["text_muted"], "linewidth": 0.8},
             fontsize=8,
             color=THEME["text_primary"],
         )
@@ -2835,6 +4642,7 @@ class VirtualArrayGui:
         metrics: ArrayMetrics,
     ) -> None:
         self.virtual_ax.clear()
+        _configure_axis_chrome(self.virtual_ax)
         unique_display = _to_display_lambda(unique)
         x_min, x_max = float(unique_display[:, 0].min()), float(unique_display[:, 0].max())
         y_min, y_max = float(unique_display[:, 1].min()), float(unique_display[:, 1].max())
@@ -2846,8 +4654,8 @@ class VirtualArrayGui:
                 fill=False,
                 linestyle="--",
                 linewidth=1.2,
-                edgecolor="#6f6f6f",
-                alpha=0.55,
+                edgecolor=THEME["text_secondary"],
+                alpha=0.5,
             )
         )
         sizes = 80 + 54 * np.clip(counts - 2, 0, 6)
@@ -2859,21 +4667,21 @@ class VirtualArrayGui:
                 unique_display[single_mask, 1],
                 s=34,
                 marker="o",
-                color="#4f86c6",
-                edgecolors="#1f2933",
-                linewidths=0.45,
-                label="unique point",
+                color=THEME["rx_color"],
+                edgecolors=THEME["rx_edge"],
+                linewidths=0.55,
+                label=self._t("unique_point"),
             )
         if np.any(duplicate_mask):
             self.virtual_ax.scatter(
                 unique_display[duplicate_mask, 0],
                 unique_display[duplicate_mask, 1],
                 s=sizes[duplicate_mask],
-                color="#f28e2b",
+                color=THEME["warning"],
                 marker="o",
-                edgecolors="#7a2e00",
-                linewidths=1.4,
-                label="duplicate point",
+                edgecolors="#92400e",
+                linewidths=1.35,
+                label=self._t("duplicate_point"),
             )
         for (x, y), count in zip(unique_display, counts):
             if count > 1:
@@ -2883,7 +4691,7 @@ class VirtualArrayGui:
                     xytext=(5, 5),
                     textcoords="offset points",
                     fontsize=12,
-                    color="#8a1c1c",
+                    color=THEME["danger"],
                     weight="bold",
                 )
 
@@ -2895,10 +4703,15 @@ class VirtualArrayGui:
             pairs = pair_map.get(key, [])
             pair_text = ", ".join(pairs[:10])
             if len(pairs) > 10:
-                pair_text += f", ... ({len(pairs)} pairs)"
+                pair_text += self._t("virtual_pairs_more", count=len(pairs))
             self.virtual_hover_text.append(
-                f"({x * DISPLAY_SCALE_LAMBDA:g} λ, {y * DISPLAY_SCALE_LAMBDA:g} λ)\n"
-                f"Multiplicity: {len(pairs)}\n{pair_text}"
+                self._t(
+                    "virtual_hover",
+                    x=x * DISPLAY_SCALE_LAMBDA,
+                    y=y * DISPLAY_SCALE_LAMBDA,
+                    count=len(pairs),
+                    pairs=pair_text,
+                )
             )
 
         self.virtual_hover_annotation = self.virtual_ax.annotate(
@@ -2908,22 +4721,21 @@ class VirtualArrayGui:
             textcoords="offset points",
             bbox={
                 "boxstyle": "round,pad=0.35",
-                "facecolor": "#ffffff",
+                "facecolor": THEME["card_bg"],
                 "edgecolor": THEME["card_border"],
                 "alpha": 0.95,
                 "linewidth": 0.8,
             },
-            arrowprops={"arrowstyle": "->", "color": "#888888", "linewidth": 0.8},
+            arrowprops={"arrowstyle": "->", "color": THEME["text_muted"], "linewidth": 0.8},
             fontsize=8,
         )
         self.virtual_hover_annotation.set_visible(False)
 
-        self.virtual_ax.set_title("Virtual Array", fontsize=TITLE_SIZE, pad=8, loc="left",
+        self.virtual_ax.set_title(self._t("virtual_title"), fontsize=TITLE_SIZE, pad=8, loc="left",
                                     color=THEME["text_primary"], fontweight="bold")
         self.virtual_ax.set_xlabel("x (λ)", color=THEME["text_secondary"])
         self.virtual_ax.set_ylabel("y (λ)", color=THEME["text_secondary"])
-        self.virtual_ax.tick_params(colors=THEME["text_secondary"], labelsize=8)
-        self.virtual_ax.grid(True, alpha=THEME["grid_alpha"], color=THEME["grid_color"], linewidth=0.5)
+        self.virtual_ax.grid(True, alpha=THEME["grid_alpha"], color=THEME["grid_color"], linewidth=0.55)
 
         # Simple padded limits — let set_aspect("equal") handle the rest
         x_limits = _axis_limits(unique_display[:, 0], minimum_span=6.0, padding=2.0)
@@ -2966,24 +4778,28 @@ class VirtualArrayGui:
         self.virtual_ax.text(
             0.01,
             0.98,
-            f"Virtual {metrics.unique_count}/{metrics.virtual_count} | "
-            f"Dup {metrics.duplicate_excess} | "
-            f"X {_format_mm(self.aperture_mm(metrics.x_aperture))} | "
-            f"Y {_format_mm(self.aperture_mm(metrics.y_aperture))}",
+            self._t(
+                "virtual_info",
+                unique=metrics.unique_count,
+                total=metrics.virtual_count,
+                duplicate=metrics.duplicate_excess,
+                x=_format_mm(self.aperture_mm(metrics.x_aperture)),
+                y=_format_mm(self.aperture_mm(metrics.y_aperture)),
+            ),
             transform=self.virtual_ax.transAxes,
             ha="left",
             va="top",
             fontsize=8.5,
-            color="#111111",
+            color=THEME["text_primary"],
             bbox={
                 "boxstyle": "round,pad=0.22",
-                "facecolor": "#ffffff",
-                "edgecolor": "#cfcfcf",
-                "alpha": 0.80,
+                "facecolor": THEME["card_bg"],
+                "edgecolor": THEME["card_border"],
+                "alpha": 0.9,
             },
         )
         if counts.max() > 1:
-            self.virtual_ax.legend(loc="best", fontsize=8)
+            _style_legend(self.virtual_ax.legend(loc="best", fontsize=8))
 
     def _draw_response_common(
         self,
@@ -2993,6 +4809,7 @@ class VirtualArrayGui:
     ) -> None:
         """Shared drawing logic for both Az and El response figures."""
         ax.clear()
+        _configure_axis_chrome(ax)
         response_db = response_cut.gains_db
         response_angles = response_cut.angles
         sidelobe_index, sidelobe_is_peak = _response_sidelobe_marker(
@@ -3000,10 +4817,12 @@ class VirtualArrayGui:
         )
         sidelobe_angle = float(response_angles[sidelobe_index])
         sidelobe_gain = float(response_db[sidelobe_index])
-        sidelobe_label = "Max sidelobe" if sidelobe_is_peak else "Guard-edge max"
+        sidelobe_label = (
+            self._t("max_sidelobe") if sidelobe_is_peak else self._t("guard_edge_max")
+        )
         response_ylim = (-40.0, 0.0)
 
-        ax.plot(response_angles, response_db, color="#2f6fbb", linewidth=1.8)
+        ax.plot(response_angles, response_db, color=THEME["response_line"], linewidth=2.0)
         show_legend = False
         if self.element_pattern is not None:
             if response_cut.mode == RESPONSE_MODE_ELEVATION:
@@ -3022,7 +4841,7 @@ class VirtualArrayGui:
             ax.plot(
                 response_angles,
                 pattern_cut,
-                color="#607d8b",
+                color=THEME["response_secondary_line"],
                 linestyle="--",
                 linewidth=1.3,
                 alpha=0.72,
@@ -3034,11 +4853,17 @@ class VirtualArrayGui:
         ax.axvspan(
             -response_cut.mainlobe_guard,
             response_cut.mainlobe_guard,
-            color="#bbbbbb",
-            alpha=0.38,
+            color=THEME["accent_light"],
+            alpha=0.7,
         )
         ax.scatter(
-            [0.0], [0.0], marker="+", s=80, color="#111111", linewidths=2.0, zorder=4
+            [0.0],
+            [0.0],
+            marker="+",
+            s=80,
+            color=THEME["text_primary"],
+            linewidths=2.0,
+            zorder=4,
         )
         # Max sidelobe marker
         ax.scatter(
@@ -3046,7 +4871,7 @@ class VirtualArrayGui:
             [sidelobe_gain],
             marker="x",
             s=70,
-            color="#d95f02",
+            color=THEME["sidelobe"],
             linewidths=2.0,
             zorder=5,
             clip_on=True,
@@ -3097,7 +4922,7 @@ class VirtualArrayGui:
         ax.annotate(
             (
                 f"{sidelobe_label}\n{response_cut.label} = {sidelobe_angle:.1f}°\n"
-                f"Gain = {sidelobe_gain:.2f} dB"
+                f"{self._t('gain_value', value=sidelobe_gain)}"
             ),
             xy=(sidelobe_angle, sidelobe_gain),
             xytext=(annotation_x, annotation_y),
@@ -3105,15 +4930,15 @@ class VirtualArrayGui:
             ha=annotation_ha,
             va="center",
             fontsize=7.5,
-            color="#6b4226",
+            color="#7c2d12",
             bbox={
                 "boxstyle": "round,pad=0.25",
-                "facecolor": "#fff8f0",
-                "edgecolor": "#d4a574",
+                "facecolor": "#fff7ed",
+                "edgecolor": "#fed7aa",
                 "alpha": 0.92,
                 "linewidth": 0.7,
             },
-            arrowprops={"arrowstyle": "->", "color": "#b8875a", "linewidth": 0.7},
+            arrowprops={"arrowstyle": "->", "color": THEME["sidelobe"], "linewidth": 0.7},
             annotation_clip=True,
         )
 
@@ -3136,14 +4961,14 @@ class VirtualArrayGui:
                 marker="^",
                 s=82,
                 facecolors="none",
-                edgecolors="#7b1fa2",
+                edgecolors=THEME["secondary_accent"],
                 linewidths=1.8,
                 zorder=6,
                 clip_on=True,
                 label=(
-                    "Grating lobe = max sidelobe"
+                    self._t("grating_lobe_max")
                     if grating_same_as_max
-                    else "Grating lobe"
+                    else self._t("grating_lobe")
                 ),
             )
             show_legend = True
@@ -3152,36 +4977,39 @@ class VirtualArrayGui:
                     grating_angle, grating_gain
                 )
                 ax.annotate(
-                    f"Grating lobe\nAz = {grating_angle:.1f}°\nGain = {grating_gain:.2f} dB",
+                    (
+                        f"{self._t('grating_lobe')}\n"
+                        f"{_dbf_short_label('azimuth', self.language)} = {grating_angle:.1f}°\n"
+                        f"{self._t('gain_value', value=grating_gain)}"
+                    ),
                     xy=(grating_angle, grating_gain),
                     xytext=(grating_x, grating_y),
                     textcoords=ax.transAxes,
                     ha=grating_ha,
                     va="center",
                     fontsize=7.5,
-                    color="#4a235a",
+                    color="#134e4a",
                     bbox={
                         "boxstyle": "round,pad=0.25",
-                        "facecolor": "#f5eef8",
-                        "edgecolor": "#9b72b0",
+                        "facecolor": THEME["secondary_light"],
+                        "edgecolor": "#5eead4",
                         "alpha": 0.92,
                         "linewidth": 0.7,
                     },
-                    arrowprops={"arrowstyle": "->", "color": "#9b72b0", "linewidth": 0.7},
+                    arrowprops={"arrowstyle": "->", "color": THEME["secondary_accent"], "linewidth": 0.7},
                     annotation_clip=True,
                 )
             else:
-                ax.legend(loc="lower right", fontsize=7, framealpha=0.72)
+                _style_legend(ax.legend(loc="lower right", fontsize=7, framealpha=0.92))
                 show_legend = False
 
-        ax.set_title(f"Front Radar Response ({response_cut.label})", pad=6, y=1.02, loc="left",
+        ax.set_title(self._t("response_title", mode=response_cut.label), pad=6, y=1.02, loc="left",
                       color=THEME["text_primary"], fontweight="bold")
         ax.set_xlabel(response_cut.x_label, color=THEME["text_secondary"])
-        ax.set_ylabel("Normalized gain (dB)", labelpad=2, color=THEME["text_secondary"])
-        ax.tick_params(colors=THEME["text_secondary"], labelsize=8)
-        ax.grid(True, alpha=THEME["grid_alpha"], color=THEME["grid_color"], linewidth=0.5)
+        ax.set_ylabel(self._t("axis_gain"), labelpad=2, color=THEME["text_secondary"])
+        ax.grid(True, alpha=THEME["grid_alpha"], color=THEME["grid_color"], linewidth=0.55)
         if show_legend:
-            ax.legend(loc="lower right", fontsize=7, framealpha=0.72)
+            _style_legend(ax.legend(loc="lower right", fontsize=7, framealpha=0.92))
 
         response_psl_db = (
             metrics.elevation_psl_db
@@ -3192,7 +5020,7 @@ class VirtualArrayGui:
         ax.text(
             0.02,
             0.08,
-            f"{response_cut.label} PSL: {response_psl_db:.2f} dB",
+            self._t("psl_label", mode=response_cut.label, value=response_psl_db),
             transform=ax.transAxes,
             ha="left",
             va="bottom",
@@ -3200,9 +5028,9 @@ class VirtualArrayGui:
             color=THEME["text_primary"],
             bbox={
                 "boxstyle": "round,pad=0.25",
-                "facecolor": "#ffffff",
+                "facecolor": THEME["card_bg"],
                 "edgecolor": THEME["card_border"],
-                "alpha": 0.9,
+                "alpha": 0.93,
                 "linewidth": 0.7,
             },
         )
@@ -3219,61 +5047,28 @@ class VirtualArrayGui:
         metrics: ArrayMetrics,
     ) -> None:
         """Draw a response chart (Az or El) and set up hover data."""
-        response_cut = _response_cut_for_mode(af_db, azimuths, elevations, mode)
+        response_cut = _response_cut_for_mode(
+            af_db, azimuths, elevations, mode, self.language
+        )
         response_db, response_angles = self._draw_response_common(chart.ax, response_cut, metrics)
 
         chart.hover_db = response_db
         chart.hover_angles = response_angles
-        chart.hover_annotation = chart.ax.annotate(
-            "",
-            xy=(0, 0),
-            xytext=(12, 12),
-            textcoords="offset points",
-            bbox={
-                "boxstyle": "round,pad=0.35",
-                "facecolor": "#ffffff",
-                "edgecolor": THEME["card_border"],
-                "alpha": 0.95,
-                "linewidth": 0.8,
-            },
-            arrowprops={"arrowstyle": "->", "color": "#888888", "linewidth": 0.8},
-            fontsize=8,
-            color=THEME["text_primary"],
-        )
-        chart.hover_annotation.set_visible(False)
+        chart.hover_annotation = _new_response_hover_annotation(chart.ax)
 
     # ── Notes helpers ─────────────────────────────────────────────────
 
     def _notes_parts(self, metrics: ArrayMetrics) -> list[str]:
         notes = []
         if metrics.duplicate_excess > 0:
-            notes.append("Duplicate virtual points detected")
+            notes.append("存在重复虚拟通道")
         if metrics.azimuth_psl_db > -10.0:
-            notes.append("Windowing recommended")
+            notes.append("建议加窗降低旁瓣")
         if metrics.elevation_ambiguity_level == "High":
-            notes.append("elevation ambiguity high")
+            notes.append("俯仰模糊风险高")
         elif metrics.elevation_ambiguity_level == "Medium":
-            notes.append("elevation ambiguity medium")
+            notes.append("俯仰模糊风险中")
         return notes
-
-    def _update_notes_panel(self, notes_parts: list[str]) -> None:
-        for child in self.notes_items_frame.winfo_children():
-            child.destroy()
-
-        if not notes_parts:
-            notes_parts = ["None"]
-
-        for index, note in enumerate(notes_parts):
-            text, color = _note_display(note)
-            pill = tk.Frame(self.notes_items_frame, bg=color, padx=6, pady=2)
-            pill.pack(anchor="w", pady=(1 if index else 0, 1))
-            ttk.Label(
-                pill,
-                text=text,
-                font=(THEME["font_family"], THEME["font_size_sm"]),
-                foreground="#ffffff",
-                background=color,
-            ).pack()
 
     def _element_pattern_export_info(self) -> dict[str, object]:
         if self.element_pattern is None:
@@ -3321,6 +5116,11 @@ class VirtualArrayGui:
                 LOGGER.info("Ignoring unsupported local state version: %r", state.get("version"))
                 return
 
+            language = state.get("language")
+            if language in SUPPORTED_LANGUAGES:
+                self.language = str(language)
+                self.language_var.set(LANGUAGE_LABELS[self.language])
+
             layout_dir = state.get("last_layout_dir")
             if isinstance(layout_dir, str) and layout_dir:
                 self.last_layout_dir = Path(layout_dir)
@@ -3333,6 +5133,11 @@ class VirtualArrayGui:
             parsed_frequency = _parse_frequency_ghz(frequency)
             if parsed_frequency is not None:
                 self._set_frequency_ghz(parsed_frequency)
+
+            margin = state.get("ambiguity_margin_db")
+            parsed_margin = _parse_margin_db(margin)
+            if parsed_margin is not None:
+                self._set_margin_db(parsed_margin)
 
             window = state.get("window")
             if isinstance(window, dict):
@@ -3350,13 +5155,66 @@ class VirtualArrayGui:
             if layout is not None:
                 self.elements = self._elements_from_layout_config(layout)
 
+            dictionary_state = state.get("dbf_dictionary")
+            if isinstance(dictionary_state, dict):
+                mode = str(dictionary_state.get("mode", DBF_DICT_IDEAL))
+                if mode not in {
+                    DBF_DICT_IDEAL,
+                    DBF_DICT_IDEAL_REVERSED,
+                    DBF_DICT_CHANNEL_PATTERN,
+                    DBF_DICT_CHANNEL_PATTERN_ZERO_REF,
+                    DBF_DICT_CUSTOM,
+                }:
+                    mode = DBF_DICT_IDEAL
+                custom_azimuth_table = None
+                custom_elevation_table = None
+                legacy_custom_path = dictionary_state.get("custom_path")
+                custom_azimuth_path = dictionary_state.get("custom_azimuth_path")
+                custom_elevation_path = dictionary_state.get("custom_elevation_path")
+                if not isinstance(custom_azimuth_path, str) or not custom_azimuth_path:
+                    custom_azimuth_path = legacy_custom_path
+                if not isinstance(custom_elevation_path, str) or not custom_elevation_path:
+                    custom_elevation_path = legacy_custom_path
+                if mode == DBF_DICT_CUSTOM:
+                    for axis_name, custom_path in (
+                        ("azimuth", custom_azimuth_path),
+                        ("elevation", custom_elevation_path),
+                    ):
+                        if not isinstance(custom_path, str) or not custom_path:
+                            mode = DBF_DICT_IDEAL
+                            continue
+                        try:
+                            table = load_dbf_dictionary_table(
+                                custom_path, self.current_array()
+                            )
+                        except Exception:
+                            LOGGER.warning(
+                                "Failed to restore %s DBF dictionary from %s",
+                                axis_name,
+                                custom_path,
+                            )
+                            mode = DBF_DICT_IDEAL
+                            continue
+                        if axis_name == "azimuth":
+                            custom_azimuth_table = table
+                        else:
+                            custom_elevation_table = table
+                self.dbf_dictionary = DbfDictionaryConfig(
+                    mode=mode,
+                    custom_azimuth_table=custom_azimuth_table,
+                    custom_elevation_table=custom_elevation_table,
+                )
+
             pattern_path = state.get("element_pattern_path")
             if isinstance(pattern_path, str) and pattern_path:
                 try:
                     pattern = load_element_pattern(pattern_path)
                     self.element_pattern = pattern
-                    self.pattern_status.set(f"Pattern: {pattern.name}")
-                    self.pattern_canvas.itemconfig(self.pattern_dot, fill="#2e7d32")
+                    self.pattern_status.set(f"方向图：{pattern.name}")
+                    if getattr(self, "pattern_canvas", None) is not None:
+                        self.pattern_canvas.itemconfig(
+                            self.pattern_dot, fill=THEME["secondary_accent"]
+                        )
                     LOGGER.info("Restored element pattern from %s", pattern_path)
                 except Exception:
                     LOGGER.warning("Failed to restore element pattern from %s", pattern_path)
@@ -3384,9 +5242,24 @@ class VirtualArrayGui:
     def _save_local_state(self) -> None:
         state = {
             "version": LOCAL_STATE_VERSION,
+            "language": self.language,
             "last_layout_dir": str(self.last_layout_dir),
             "last_pattern_dir": str(self.last_pattern_dir),
             "frequency_ghz": _format_frequency_ghz(self.current_frequency_ghz()),
+            "ambiguity_margin_db": _format_margin_db(self.current_margin_db()),
+            "dbf_dictionary": {
+                "mode": self.dbf_dictionary.mode,
+                "custom_azimuth_path": (
+                    self.dbf_dictionary.custom_azimuth_table.source_path
+                    if self.dbf_dictionary.custom_azimuth_table is not None
+                    else ""
+                ),
+                "custom_elevation_path": (
+                    self.dbf_dictionary.custom_elevation_table.source_path
+                    if self.dbf_dictionary.custom_elevation_table is not None
+                    else ""
+                ),
+            },
             "layout": self._layout_coordinates_config(),
             "window": self._window_state_config(),
         }
@@ -3398,6 +5271,7 @@ class VirtualArrayGui:
     def on_close(self) -> None:
         try:
             self.stop_dbf_scan_animation(restore_response=False)
+            self.stop_dbf2d_animation(update_status=False)
             self._save_local_state()
         except Exception:
             LOGGER.exception("Failed to save local state")
@@ -3414,7 +5288,7 @@ class VirtualArrayGui:
         if self.delete_mode:
             element = self._nearest_element(internal_x, internal_y)
             if element is None:
-                self.status.set("Delete mode: click directly on a Tx/Rx element.")
+                self.status.set(self._t("delete_click_element"))
                 return
             self._delete_element(element)
             return
@@ -3433,18 +5307,19 @@ class VirtualArrayGui:
             )
             self.selected_element = self.dragging
             self.status.set(
-                f"Selected {self.dragging.name} | "
-                f"x={self.dragging.x * DISPLAY_SCALE_LAMBDA:g} λ | "
-                f"y={self.dragging.y * DISPLAY_SCALE_LAMBDA:g} λ"
+                self._t(
+                    "selected_element",
+                    element=self.dragging.name,
+                    x=self.dragging.x * DISPLAY_SCALE_LAMBDA,
+                    y=self.dragging.y * DISPLAY_SCALE_LAMBDA,
+                )
             )
             self._draw_physical_array()
             self.phys_canvas.draw()
         elif self.selected_element is not None:
             self.drag_start_snapshot = None
             self.selected_element = None
-            self.status.set(
-                "Selection cleared. Click an antenna element to select."
-            )
+            self.status.set(self._t("select_element_hint"))
             self._draw_physical_array()
             self.phys_canvas.draw()
         else:
@@ -3471,9 +5346,12 @@ class VirtualArrayGui:
             self.dragging.x = internal_x
             self.dragging.y = internal_y
             self.status.set(
-                f"Snap {self.dragging.name}: "
-                f"x={self.dragging.x * DISPLAY_SCALE_LAMBDA:g} λ, "
-                f"y={self.dragging.y * DISPLAY_SCALE_LAMBDA:g} λ"
+                self._t(
+                    "snap_element",
+                    element=self.dragging.name,
+                    x=self.dragging.x * DISPLAY_SCALE_LAMBDA,
+                    y=self.dragging.y * DISPLAY_SCALE_LAMBDA,
+                )
             )
             self._draw_physical_array()
             self.phys_canvas.draw()
@@ -3481,8 +5359,12 @@ class VirtualArrayGui:
 
         self._update_physical_hover(event)
         self._update_virtual_hover(event)
-        self._update_response_hover(event, self.az_chart, "Az")
-        self._update_response_hover(event, self.el_chart, "El")
+        self._update_response_hover(
+            event, self.az_chart, _dbf_short_label("azimuth", self.language)
+        )
+        self._update_response_hover(
+            event, self.el_chart, _dbf_short_label("elevation", self.language)
+        )
 
     def on_release(self, event) -> None:  # noqa: ANN001
         if self.dragging is not None:
@@ -3498,9 +5380,12 @@ class VirtualArrayGui:
                 self.dragging.x = snap_to_grid(self.dragging.x)
                 self.dragging.y = snap_to_grid(self.dragging.y)
             self.status.set(
-                f"{self.dragging.name}: "
-                f"x={self.dragging.x * DISPLAY_SCALE_LAMBDA:g} λ, "
-                f"y={self.dragging.y * DISPLAY_SCALE_LAMBDA:g} λ"
+                self._t(
+                    "placed_element",
+                    element=self.dragging.name,
+                    x=self.dragging.x * DISPLAY_SCALE_LAMBDA,
+                    y=self.dragging.y * DISPLAY_SCALE_LAMBDA,
+                )
             )
             current_snapshot = self._capture_layout_snapshot()
             if (
@@ -3543,9 +5428,12 @@ class VirtualArrayGui:
         self.selected_element.y = new_y
         self.generate_virtual_array()
         self.status.set(
-            f"Selected {self.selected_element.name} | "
-            f"x={self.selected_element.x * DISPLAY_SCALE_LAMBDA:g} λ | "
-            f"y={self.selected_element.y * DISPLAY_SCALE_LAMBDA:g} λ"
+            self._t(
+                "selected_element",
+                element=self.selected_element.name,
+                x=self.selected_element.x * DISPLAY_SCALE_LAMBDA,
+                y=self.selected_element.y * DISPLAY_SCALE_LAMBDA,
+            )
         )
         return "break"
 
@@ -3645,12 +5533,28 @@ class VirtualArrayGui:
         angle_index = int(np.argmin(np.abs(chart.hover_angles - event.xdata)))
         angle = float(chart.hover_angles[angle_index])
         gain = float(chart.hover_db[angle_index])
-        chart.hover_annotation.xy = (angle, gain)
+        chart.hover_annotation.xy = (float(event.xdata), float(event.ydata))
+        x_low, x_high = chart.ax.get_xlim()
+        y_low, y_high = chart.ax.get_ylim()
+        x_frac = (float(event.xdata) - x_low) / (x_high - x_low) if x_high != x_low else 0.5
+        y_frac = (float(event.ydata) - y_low) / (y_high - y_low) if y_high != y_low else 0.5
+        x_offset = -12 if x_frac > 0.72 else 12
+        y_offset = -28 if y_frac > 0.60 else 14
+        chart.hover_annotation.set_position((x_offset, y_offset))
+        chart.hover_annotation.set_ha("right" if x_offset < 0 else "left")
+        chart.hover_annotation.set_va("top" if y_offset < 0 else "bottom")
         chart.hover_annotation.set_text(
-            f"{label} = {angle:.1f}°\nGain = {gain:.2f} dB"
+            f"{label} = {angle:.1f}°\n{self._t('gain_value', value=gain)}"
         )
         chart.hover_annotation.set_visible(True)
         chart.canvas.draw_idle()
+
+    def _hide_response_hover(self, chart: ResponseChart) -> None:
+        if chart.hover_annotation is None:
+            return
+        if chart.hover_annotation.get_visible():
+            chart.hover_annotation.set_visible(False)
+            chart.canvas.draw_idle()
 
     def _nearest_element(self, x: float, y: float) -> EditableElement | None:
         distances = [

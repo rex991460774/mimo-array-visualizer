@@ -5,15 +5,22 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from matplotlib.figure import Figure
 
+from virtual_array.analysis import DBF_SCAN_GRID_SIZE
 from virtual_array.gui import (
     EditableElement,
     MAX_HISTORY_STATES,
+    ResponseChart,
     VirtualArrayGui,
     _build_auto_layout_elements,
     _dbf_peak_index,
     _format_frequency_ghz,
+    _format_margin_db,
+    _new_response_hover_annotation,
     _parse_frequency_ghz,
+    _parse_margin_db,
+    _square_axis_limits,
     _validate_element_count,
     _validated_window_geometry,
 )
@@ -94,6 +101,70 @@ def test_frequency_formatter_keeps_compact_display() -> None:
     assert _format_frequency_ghz(77.125000) == "77.125"
 
 
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [
+        ("0.5", 0.5),
+        ("1.25 dB", 1.25),
+        ("2db", 2.0),
+        (0, 0.0),
+    ],
+)
+def test_margin_parser_accepts_non_negative_db_values(raw_value, expected) -> None:
+    assert _parse_margin_db(raw_value) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("raw_value", ["", "abc", -0.1, True, float("inf")])
+def test_margin_parser_rejects_invalid_values(raw_value) -> None:
+    assert _parse_margin_db(raw_value) is None
+
+
+def test_margin_formatter_keeps_compact_display() -> None:
+    assert _format_margin_db(1.0) == "1"
+    assert _format_margin_db(0.125) == "0.125"
+
+
+def test_response_hover_tooltip_follows_cursor_without_arrow() -> None:
+    class DummyCanvas:
+        def __init__(self) -> None:
+            self.draw_count = 0
+
+        def draw_idle(self) -> None:
+            self.draw_count += 1
+
+    fig = Figure()
+    ax = fig.add_subplot(111)
+    ax.set_xlim(-90, 90)
+    ax.set_ylim(-40, 0)
+    annotation = _new_response_hover_annotation(ax)
+    canvas = DummyCanvas()
+    chart = ResponseChart(fig=fig, ax=ax, canvas=canvas, hover_annotation=annotation)
+    chart.hover_angles = np.array([-10.0, 0.0, 10.0])
+    chart.hover_db = np.array([-12.0, -6.0, -18.0])
+    app = VirtualArrayGui.__new__(VirtualArrayGui)
+
+    app._update_response_hover(
+        SimpleNamespace(inaxes=ax, xdata=1.25, ydata=-8.5),
+        chart,
+        "Az",
+    )
+
+    assert annotation.arrow_patch is None
+    assert annotation.get_visible()
+    assert annotation.xy == pytest.approx((1.25, -8.5))
+    assert "Az = 0.0" in annotation.get_text()
+    assert canvas.draw_count == 1
+
+    app._update_response_hover(
+        SimpleNamespace(inaxes=None, xdata=None, ydata=None),
+        chart,
+        "Az",
+    )
+
+    assert not annotation.get_visible()
+    assert canvas.draw_count == 2
+
+
 def test_window_geometry_validation_accepts_tk_geometry_strings() -> None:
     assert _validated_window_geometry("1440x900+20-10") == "1440x900+20-10"
     assert _validated_window_geometry("1200x800") == "1200x800"
@@ -151,6 +222,19 @@ def test_auto_layout_builds_centered_tx_rx_rows() -> None:
     ]
 
 
+def test_square_axis_limits_keep_physical_grid_square() -> None:
+    x_limits, y_limits = _square_axis_limits(
+        [-1.0, 1.0],
+        [-4.0, 4.0],
+        minimum_span=4.0,
+        padding=2.0,
+    )
+
+    assert x_limits[1] - x_limits[0] == pytest.approx(y_limits[1] - y_limits[0])
+    assert x_limits[0] < -1.0 < x_limits[1]
+    assert y_limits[0] < -4.0 < y_limits[1]
+
+
 @pytest.mark.parametrize(
     ("raw_value", "kind", "expected"),
     [
@@ -202,7 +286,7 @@ def test_delete_element_renumbers_by_position_without_gaps() -> None:
         ("Tx1", 2),
         ("Tx2", 4),
     ]
-    assert "numbering aligned" in app.status.value
+    assert "编号已自动对齐" in app.status.value
 
 
 class _FakeRoot:
@@ -238,9 +322,11 @@ def test_dbf_progress_scrub_pauses_animation_at_selected_frame() -> None:
     app.dbf_scan_paused = False
     app.dbf_scan_mode = "azimuth"
     app.dbf_scan_after_id = "pending"
-    app.dbf_true_angles = np.linspace(-90.0, 90.0, 91)
-    app.dbf_scan_angles = np.linspace(-90.0, 90.0, 91)
-    app.dbf_spectra_db = np.zeros((91, 91), dtype=float)
+    app.dbf_true_angles = np.linspace(-90.0, 90.0, DBF_SCAN_GRID_SIZE)
+    app.dbf_scan_angles = np.linspace(-90.0, 90.0, DBF_SCAN_GRID_SIZE)
+    app.dbf_spectra_db = np.zeros(
+        (DBF_SCAN_GRID_SIZE, DBF_SCAN_GRID_SIZE), dtype=float
+    )
     drawn_frames: list[int] = []
     app._draw_dbf_scan_frame = lambda: drawn_frames.append(app.dbf_scan_frame)
     app._update_dbf_scan_controls = lambda: None
@@ -253,7 +339,7 @@ def test_dbf_progress_scrub_pauses_animation_at_selected_frame() -> None:
     assert app.dbf_scan_after_id is None
     assert app.root.cancelled == ["pending"]
     assert drawn_frames == [20]
-    assert "Paused Azimuth DBF spectrum at -50.0 deg" in app.status.value
+    assert "方位DBF角谱已暂停在-70.0°" in app.status.value
 
 
 def test_dbf_progress_label_tracks_chart_mode_and_frame() -> None:
@@ -270,7 +356,7 @@ def test_dbf_progress_label_tracks_chart_mode_and_frame() -> None:
     app._set_dbf_progress("elevation", 45, 0.0)
 
     assert progress_var.value == 45.0
-    assert progress_label.text == "El 0 deg (46/91)"
+    assert progress_label.text == "俯仰 0° (46/181)"
     assert not app.dbf_progress_updating
 
 

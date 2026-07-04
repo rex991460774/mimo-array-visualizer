@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from openpyxl import Workbook
 
 from virtual_array.analysis import calculate_metrics_and_psf, dbf_azimuth_spectrum
 from virtual_array.element_pattern import (
@@ -11,6 +12,7 @@ from virtual_array.element_pattern import (
     ElementPattern,
     PatternSeries,
     format_pattern_cut_metrics,
+    load_hfss_pattern_series,
     load_hfss_summary_pattern,
     load_element_pattern,
     pattern_cut_metrics,
@@ -68,6 +70,61 @@ def test_loads_hfss_summary_columns_in_tx_rx_order_with_zero_phase_calibration(
         assert series.values_at(np.array([0.0]))[0] == pytest.approx(0.0)
 
 
+def test_loads_hfss_phase_summary_from_complex_values(tmp_path) -> None:
+    csv_path = tmp_path / "complex-phase-summary.csv"
+    csv_path.write_text(
+        '"Freq [GHz]","Phi [deg]","Theta [deg]","E0","E1"\n'
+        "24.125,90,-1,1+0j,0+1j\n"
+        "24.125,90,0,0+1j,-1+0j\n",
+        encoding="utf-8",
+    )
+
+    series_by_channel = load_hfss_summary_pattern(
+        csv_path,
+        ["Tx1", "Rx1"],
+        value_kind=PATTERN_KIND_PHASE,
+    )
+
+    assert np.allclose(series_by_channel["Tx1"].values, np.array([-90.0, 0.0]))
+    assert np.allclose(series_by_channel["Rx1"].values, np.array([-90.0, 0.0]))
+
+
+def test_loads_hfss_phase_series_from_polar_complex_values(tmp_path) -> None:
+    csv_path = tmp_path / "polar-phase.csv"
+    csv_path.write_text(
+        "Theta [deg],Phase\n"
+        "-1,1∠10\n"
+        "0,2∠40\n",
+        encoding="utf-8",
+    )
+
+    series = load_hfss_pattern_series(
+        csv_path,
+        value_kind=PATTERN_KIND_PHASE,
+    )
+
+    assert np.allclose(series.values, np.array([-30.0, 0.0]))
+
+
+def test_loads_hfss_phase_summary_from_xlsx_complex_values(tmp_path) -> None:
+    path = tmp_path / "complex-phase-summary.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Freq [GHz]", "Phi [deg]", "Theta [deg]", "E0", "E1"])
+    sheet.append([24.125, 90, -1, "1+0j", "0+1j"])
+    sheet.append([24.125, 90, 0, "0+1j", "-1+0j"])
+    workbook.save(path)
+
+    series_by_channel = load_hfss_summary_pattern(
+        path,
+        ["Tx1", "Rx1"],
+        value_kind=PATTERN_KIND_PHASE,
+    )
+
+    assert np.allclose(series_by_channel["Tx1"].values, np.array([-90.0, 0.0]))
+    assert np.allclose(series_by_channel["Rx1"].values, np.array([-90.0, 0.0]))
+
+
 def test_phase_series_unwraps_when_interpolating_across_wrap() -> None:
     phase_series = PatternSeries(
         name="phase",
@@ -82,19 +139,51 @@ def test_phase_series_unwraps_when_interpolating_across_wrap() -> None:
     assert phase_series.values_at(np.array([0.0]))[0] == pytest.approx(180.0)
 
 
-def test_pattern_series_rejects_angles_outside_csv_range() -> None:
+def test_pattern_series_clamps_angles_outside_csv_range() -> None:
     phase_series = PatternSeries(
         name="phase",
         source_path="phase.csv",
         angle_column="Theta",
         value_column="phase",
         value_kind=PATTERN_KIND_PHASE,
-        angles_deg=np.array([-30.0, 30.0]),
-        values=np.array([0.0, 0.0]),
+        angles_deg=np.array([-80.0, 0.0, 80.0]),
+        values=np.array([-20.0, 0.0, 40.0]),
     )
 
-    with pytest.raises(ValueError, match="covers -30..30 deg"):
-        phase_series.values_at(np.array([-90.0, 0.0, 90.0]))
+    assert np.allclose(
+        phase_series.values_at(np.array([-90.0, -40.0, 0.0, 40.0, 90.0])),
+        np.array([-20.0, -10.0, 0.0, 20.0, 40.0]),
+    )
+
+
+def test_channel_pattern_weights_allow_partial_angle_coverage() -> None:
+    phase_series = PatternSeries(
+        name="phase",
+        source_path="phase.xlsx",
+        angle_column="Theta",
+        value_column="RawData_Tx0_Rx0",
+        value_kind=PATTERN_KIND_PHASE,
+        angles_deg=np.array([-80.0, 0.0, 80.0]),
+        values=np.array([-30.0, 0.0, 30.0]),
+    )
+    channel_patterns = ChannelPatternSet()
+    channel_patterns.set_series(
+        "Rx1",
+        PATTERN_KIND_PHASE,
+        PATTERN_PLANE_HORIZONTAL,
+        phase_series,
+    )
+
+    weights = channel_patterns.complex_weights(
+        ["Rx1"],
+        np.array([-90.0, 0.0, 90.0]),
+        np.array([0.0, 0.0, 0.0]),
+    )
+
+    assert weights.shape == (1, 3)
+    assert weights[0, 0] == pytest.approx(np.exp(-1j * np.radians(30.0)))
+    assert weights[0, 1] == pytest.approx(1.0 + 0.0j)
+    assert weights[0, 2] == pytest.approx(np.exp(1j * np.radians(30.0)))
 
 
 def test_element_pattern_axes_can_be_swapped(tmp_path) -> None:

@@ -105,15 +105,6 @@ class PatternSeries:
 
     def values_at(self, angles_deg: np.ndarray) -> np.ndarray:
         query_angles = np.asarray(angles_deg, dtype=float)
-        low = float(self.angles_deg[0])
-        high = float(self.angles_deg[-1])
-        tolerance = 1e-9
-        if np.any(query_angles < low - tolerance) or np.any(query_angles > high + tolerance):
-            raise ValueError(
-                f"{self.name}:{self.value_column} covers {low:g}..{high:g} deg, "
-                f"but the requested angle range is "
-                f"{float(np.min(query_angles)):g}..{float(np.max(query_angles)):g} deg."
-            )
         values = self.values
         if self.value_kind == PATTERN_KIND_PHASE:
             unwrapped_rad = np.unwrap(np.radians(values))
@@ -121,12 +112,16 @@ class PatternSeries:
                 query_angles,
                 self.angles_deg,
                 unwrapped_rad,
+                left=float(unwrapped_rad[0]),
+                right=float(unwrapped_rad[-1]),
             )
             return np.degrees(interpolated_rad)
         return np.interp(
             query_angles,
             self.angles_deg,
             values,
+            left=float(values[0]),
+            right=float(values[-1]),
         )
 
     def short_label(self) -> str:
@@ -268,13 +263,7 @@ class PatternCutMetrics:
 
 def load_element_pattern(path: str | Path) -> ElementPattern:
     source_path = Path(path)
-    delimiter = _detect_delimiter(source_path)
-    with source_path.open("r", encoding="utf-8-sig", newline="") as file:
-        rows = [
-            row
-            for row in csv.reader(file, delimiter=delimiter)
-            if row and not _is_comment_or_blank(row)
-        ]
+    rows = _read_table_rows(source_path)
 
     if len(rows) < 2:
         raise ValueError("Pattern file must contain a header and at least one data row.")
@@ -380,13 +369,7 @@ def load_hfss_pattern_series_columns(
         raise ValueError(f"Unknown pattern value kind: {value_kind!r}")
 
     source_path = Path(path)
-    delimiter = _detect_delimiter(source_path)
-    with source_path.open("r", encoding="utf-8-sig", newline="") as file:
-        rows = [
-            row
-            for row in csv.reader(file, delimiter=delimiter)
-            if row and not _is_comment_or_blank(row)
-        ]
+    rows = _read_table_rows(source_path)
 
     if len(rows) < 2:
         raise ValueError("Pattern file must contain a header and at least one data row.")
@@ -406,7 +389,10 @@ def load_hfss_pattern_series_columns(
             continue
         try:
             angle = _parse_float(row[angle_index])
-            data_values = [_parse_float(row[index]) for index in data_indices]
+            data_values = [
+                _parse_hfss_pattern_value(row[index], value_kind)
+                for index in data_indices
+            ]
         except ValueError as exc:
             raise ValueError(f"Invalid numeric value on row {row_index}.") from exc
         if np.isfinite(angle) and all(np.isfinite(value) for value in data_values):
@@ -443,13 +429,7 @@ def load_hfss_pattern_series_columns(
 
 def available_gain_columns(path: str | Path) -> list[str]:
     source_path = Path(path)
-    delimiter = _detect_delimiter(source_path)
-    with source_path.open("r", encoding="utf-8-sig", newline="") as file:
-        rows = [
-            row
-            for row in csv.reader(file, delimiter=delimiter)
-            if row and not _is_comment_or_blank(row)
-        ]
+    rows = _read_table_rows(source_path)
     if not rows:
         return []
     header = [cell.strip() for cell in rows[0]]
@@ -494,6 +474,29 @@ def _detect_delimiter(path: Path) -> str:
     except csv.Error:
         return ","
     return dialect.delimiter
+
+
+def _read_table_rows(path: Path) -> list[list[str]]:
+    if path.suffix.lower() in {".xlsx", ".xlsm"}:
+        try:
+            from openpyxl import load_workbook
+        except ImportError as exc:
+            raise ValueError("Reading XLSX pattern files requires openpyxl.") from exc
+        workbook = load_workbook(path, data_only=True, read_only=True)
+        sheet = workbook.active
+        return [
+            ["" if cell is None else str(cell).strip() for cell in row]
+            for row in sheet.iter_rows(values_only=True)
+            if row and not _is_comment_or_blank(["" if cell is None else str(cell) for cell in row])
+        ]
+
+    delimiter = _detect_delimiter(path)
+    with path.open("r", encoding="utf-8-sig", newline="") as file:
+        return [
+            row
+            for row in csv.reader(file, delimiter=delimiter)
+            if row and not _is_comment_or_blank(row)
+        ]
 
 
 def _beamwidth_at_drop(
@@ -603,6 +606,39 @@ def _parse_float(value: str) -> float:
     if not cleaned:
         raise ValueError("empty numeric value")
     return float(cleaned)
+
+
+def _parse_hfss_pattern_value(value: str, value_kind: str) -> float:
+    if value_kind == PATTERN_KIND_PHASE and _looks_like_complex(value):
+        return _complex_phase_degrees(value)
+    return _parse_float(value)
+
+
+def _complex_phase_degrees(value: str) -> float:
+    return float(np.degrees(np.angle(_parse_complex_value(value))))
+
+
+def _parse_complex_value(value: str) -> complex:
+    text = value.strip()
+    if not text:
+        raise ValueError("empty complex value")
+    normalized = (
+        text.replace("i", "j")
+        .replace("I", "j")
+        .replace("−", "-")
+        .replace("，", ",")
+        .strip()
+    )
+    normalized = normalized.replace(" ", "")
+    if "∠" in normalized:
+        magnitude_text, phase_text = normalized.split("∠", 1)
+        return float(magnitude_text) * np.exp(1j * np.radians(float(phase_text)))
+    return complex(normalized)
+
+
+def _looks_like_complex(value: str) -> bool:
+    text = value.strip().lower()
+    return "j" in text or "i" in text or "∠" in text
 
 
 def _is_comment_or_blank(row: Iterable[str]) -> bool:

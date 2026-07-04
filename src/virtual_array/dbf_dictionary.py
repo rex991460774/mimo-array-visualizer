@@ -14,6 +14,7 @@ from .geometry import AntennaArray
 DBF_DICT_IDEAL = "ideal"
 DBF_DICT_IDEAL_REVERSED = "ideal_reversed"
 DBF_DICT_CHANNEL_PATTERN = "channel_pattern"
+# Legacy state value. The UI now folds this behavior into DBF_DICT_CHANNEL_PATTERN.
 DBF_DICT_CHANNEL_PATTERN_ZERO_REF = "channel_pattern_zero_ref"
 DBF_DICT_CUSTOM = "custom"
 
@@ -21,7 +22,6 @@ DBF_DICTIONARY_MODES = (
     DBF_DICT_IDEAL,
     DBF_DICT_IDEAL_REVERSED,
     DBF_DICT_CHANNEL_PATTERN,
-    DBF_DICT_CHANNEL_PATTERN_ZERO_REF,
     DBF_DICT_CUSTOM,
 )
 
@@ -57,6 +57,9 @@ class DbfDictionaryTable:
         azimuth_deg: np.ndarray,
         elevation_deg: np.ndarray,
         axis: str,
+        *,
+        zero_phase_calibrated: bool = False,
+        phase_reversed: bool = False,
     ) -> np.ndarray:
         azimuths, elevations = np.broadcast_arrays(
             np.asarray(azimuth_deg, dtype=float),
@@ -69,8 +72,32 @@ class DbfDictionaryTable:
             if self.is_2d
             else self._interpolated_rows(flat_az if axis == "azimuth" else flat_el)
         )
+        rows = self._adjust_rows(
+            rows,
+            zero_phase_calibrated=zero_phase_calibrated,
+            phase_reversed=phase_reversed,
+        )
         virtual = self._virtual_rows(array, rows)
         return virtual.reshape(*azimuths.shape, len(array.tx) * len(array.rx))
+
+    def _adjust_rows(
+        self,
+        rows: np.ndarray,
+        *,
+        zero_phase_calibrated: bool,
+        phase_reversed: bool,
+    ) -> np.ndarray:
+        adjusted = np.asarray(rows, dtype=complex)
+        if zero_phase_calibrated:
+            adjusted = _remove_reference_phase(adjusted, self._zero_reference_row())
+        if phase_reversed:
+            adjusted = np.conjugate(adjusted)
+        return adjusted
+
+    def _zero_reference_row(self) -> np.ndarray:
+        if self.is_2d:
+            return self._nearest_rows(np.asarray([0.0]), np.asarray([0.0]))[0]
+        return self._interpolated_rows(np.asarray([0.0]))[0]
 
     def _interpolated_rows(self, angles_deg: np.ndarray) -> np.ndarray:
         query_angles = np.asarray(angles_deg, dtype=float)
@@ -131,8 +158,12 @@ class DbfDictionaryConfig:
     custom_azimuth_table: DbfDictionaryTable | None = None
     custom_elevation_table: DbfDictionaryTable | None = None
     custom_table: DbfDictionaryTable | None = None
+    custom_phase_reversed: bool = False
+    custom_zero_phase_calibrated: bool = False
 
     def __post_init__(self) -> None:
+        if self.mode == DBF_DICT_CHANNEL_PATTERN_ZERO_REF:
+            object.__setattr__(self, "mode", DBF_DICT_CHANNEL_PATTERN)
         if self.custom_table is None:
             return
         if self.custom_azimuth_table is None:
@@ -204,18 +235,13 @@ class DbfDictionaryConfig:
             response = _channel_pattern_response(
                 array, flat_az, flat_el, channel_patterns=channel_patterns
             )
-            return np.conjugate(response)
-        if self.mode == DBF_DICT_CHANNEL_PATTERN_ZERO_REF:
-            response = _channel_pattern_response(
-                array, flat_az, flat_el, channel_patterns=channel_patterns
-            )
             reference = _channel_pattern_response(
                 array,
                 np.zeros_like(flat_az),
                 np.zeros_like(flat_el),
                 channel_patterns=channel_patterns,
             )
-            response = response / np.where(np.abs(reference) > 0.0, reference, 1.0)
+            response = _remove_reference_phase(response, reference)
             return np.conjugate(response)
         if self.mode == DBF_DICT_CUSTOM:
             response = self._custom_2d_response(array, flat_az, flat_el, axis=axis)
@@ -230,12 +256,21 @@ class DbfDictionaryConfig:
     ) -> np.ndarray:
         table = self.custom_table_for_axis(axis)
         if table is None:
-            axis_name = "elevation" if axis == "elevation" else "azimuth"
-            raise ValueError(f"Missing custom {axis_name} DBF dictionary.")
+            zeros = np.zeros_like(angles_deg, dtype=float)
+            azimuths = angles_deg if axis == "azimuth" else zeros
+            elevations = angles_deg if axis == "elevation" else zeros
+            return _ideal_scan_matrix(array, azimuths, elevations, steering_sign=1)
         zeros = np.zeros_like(angles_deg, dtype=float)
         azimuths = angles_deg if axis == "azimuth" else zeros
         elevations = angles_deg if axis == "elevation" else zeros
-        return table.response_matrix(array, azimuths, elevations, axis=axis)
+        return table.response_matrix(
+            array,
+            azimuths,
+            elevations,
+            axis=axis,
+            zero_phase_calibrated=self.custom_zero_phase_calibrated,
+            phase_reversed=self.custom_phase_reversed,
+        )
 
     def _custom_2d_response(
         self,
@@ -247,22 +282,78 @@ class DbfDictionaryConfig:
         az_table = self.custom_azimuth_table
         el_table = self.custom_elevation_table
         if az_table is None or el_table is None:
-            raise ValueError("Missing custom azimuth/elevation DBF dictionary.")
+            return self._custom_separable_2d_response(
+                array,
+                azimuth_deg,
+                elevation_deg,
+            )
         if az_table is el_table and az_table.is_2d:
-            return az_table.response_matrix(array, azimuth_deg, elevation_deg, axis=axis)
+            return az_table.response_matrix(
+                array,
+                azimuth_deg,
+                elevation_deg,
+                axis=axis,
+                zero_phase_calibrated=self.custom_zero_phase_calibrated,
+                phase_reversed=self.custom_phase_reversed,
+            )
 
+        return self._custom_separable_2d_response(array, azimuth_deg, elevation_deg)
+
+    def _custom_separable_2d_response(
+        self,
+        array: AntennaArray,
+        azimuth_deg: np.ndarray,
+        elevation_deg: np.ndarray,
+    ) -> np.ndarray:
+        az_table = self.custom_azimuth_table
+        el_table = self.custom_elevation_table
         zeros = np.zeros_like(azimuth_deg, dtype=float)
-        az_response = az_table.response_matrix(
-            array, azimuth_deg, zeros, axis="azimuth"
+        az_response = _axis_response_or_ideal(
+            array,
+            az_table,
+            azimuth_deg,
+            zeros,
+            axis="azimuth",
+            zero_phase_calibrated=self.custom_zero_phase_calibrated,
+            phase_reversed=self.custom_phase_reversed,
         )
-        el_response = el_table.response_matrix(
-            array, zeros, elevation_deg, axis="elevation"
+        el_response = _axis_response_or_ideal(
+            array,
+            el_table,
+            zeros,
+            elevation_deg,
+            axis="elevation",
+            zero_phase_calibrated=self.custom_zero_phase_calibrated,
+            phase_reversed=self.custom_phase_reversed,
         )
-        az_reference = az_table.response_matrix(array, zeros, zeros, axis="azimuth")
-        el_reference = el_table.response_matrix(array, zeros, zeros, axis="elevation")
+        az_reference = _axis_response_or_ideal(
+            array,
+            az_table,
+            zeros,
+            zeros,
+            axis="azimuth",
+            zero_phase_calibrated=self.custom_zero_phase_calibrated,
+            phase_reversed=self.custom_phase_reversed,
+        )
+        el_reference = _axis_response_or_ideal(
+            array,
+            el_table,
+            zeros,
+            zeros,
+            axis="elevation",
+            zero_phase_calibrated=self.custom_zero_phase_calibrated,
+            phase_reversed=self.custom_phase_reversed,
+        )
         az_delta = _safe_complex_divide(az_response, az_reference)
         el_delta = _safe_complex_divide(el_response, el_reference)
-        base_response = _mean_complex_reference(az_reference, el_reference)
+        if az_table is None and el_table is None:
+            base_response = np.ones_like(az_reference, dtype=complex)
+        elif az_table is None:
+            base_response = el_reference
+        elif el_table is None:
+            base_response = az_reference
+        else:
+            base_response = _mean_complex_reference(az_reference, el_reference)
         return base_response * az_delta * el_delta
 
 
@@ -326,6 +417,10 @@ def load_dbf_dictionary_table(path: str | Path, array: AntennaArray) -> DbfDicti
     order = np.lexsort((np.asarray(elevations, dtype=float), np.asarray(azimuths, dtype=float)))
     if azimuth_index is None and elevation_index is None:
         order = np.argsort(np.asarray(angles, dtype=float))
+    sorted_angles = np.asarray(angles, dtype=float)[order]
+    sorted_azimuths = np.asarray(azimuths, dtype=float)[order]
+    sorted_elevations = np.asarray(elevations, dtype=float)[order]
+    sorted_values = values[order]
     return DbfDictionaryTable(
         source_path=str(source_path),
         angle_column=header[angle_index] if angle_index is not None else "",
@@ -334,15 +429,49 @@ def load_dbf_dictionary_table(path: str | Path, array: AntennaArray) -> DbfDicti
         channel_mode=channel_mode,
         value_format=value_format,
         column_names=channel_names,
-        angles_deg=np.asarray(angles, dtype=float)[order],
-        azimuths_deg=np.asarray(azimuths, dtype=float)[order],
-        elevations_deg=np.asarray(elevations, dtype=float)[order],
-        values=values[order],
+        angles_deg=sorted_angles,
+        azimuths_deg=sorted_azimuths,
+        elevations_deg=sorted_elevations,
+        values=sorted_values,
     )
 
 
 def dictionary_phase_preview(matrix: np.ndarray) -> np.ndarray:
     return np.angle(np.asarray(matrix, dtype=complex), deg=True)
+
+
+def _remove_reference_phase(
+    rows: np.ndarray,
+    reference: np.ndarray,
+) -> np.ndarray:
+    row_matrix = np.asarray(rows, dtype=complex)
+    reference_phase = np.angle(np.asarray(reference, dtype=complex))
+    phase_factor = np.exp(-1j * reference_phase)
+    if phase_factor.ndim == 1:
+        phase_factor = phase_factor[None, :]
+    return row_matrix * phase_factor
+
+
+def _axis_response_or_ideal(
+    array: AntennaArray,
+    table: DbfDictionaryTable | None,
+    azimuth_deg: np.ndarray,
+    elevation_deg: np.ndarray,
+    axis: str,
+    *,
+    zero_phase_calibrated: bool = False,
+    phase_reversed: bool = False,
+) -> np.ndarray:
+    if table is not None:
+        return table.response_matrix(
+            array,
+            azimuth_deg,
+            elevation_deg,
+            axis=axis,
+            zero_phase_calibrated=zero_phase_calibrated,
+            phase_reversed=phase_reversed,
+        )
+    return _ideal_scan_matrix(array, azimuth_deg, elevation_deg, steering_sign=1)
 
 
 def _safe_complex_divide(numerator: np.ndarray, denominator: np.ndarray) -> np.ndarray:

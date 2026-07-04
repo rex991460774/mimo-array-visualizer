@@ -24,8 +24,8 @@ JSON for later use.
 - 2D DBF heatmap in the evaluation panel, with independent azimuth/elevation
   sliders and playback controls for combined angle scanning.
 - Configurable DBF dictionary modes, including ideal, phase-reversed,
-  channel-pattern calibrated, zero-degree reference calibrated, and imported
-  azimuth/elevation CSV/XLSX dictionary matrices with tabular preview.
+  channel-pattern calibrated, and imported azimuth/elevation CSV/XLSX
+  dictionary matrices with tabular preview.
 - HFSS channel-pattern CSV import for per-physical-channel amplitude and phase,
   with separate H/E plane files and summary-column mapping.
 - Readable JSON layout import/export with optional evaluation metadata.
@@ -89,11 +89,14 @@ The toolbar **Peak margin (dB)** input controls the competitor-peak margin
 threshold used by the no-fold ambiguity evaluation.
 
 Use **Configuration -> Configure DBF Dictionary** to choose the DBF dictionary.
-Imported CSV/XLSX dictionaries are loaded separately for azimuth and elevation.
-Each file may provide one row per angle with either virtual channel columns or
-physical Tx/Rx columns. Numeric values are treated as phase degrees; complex
-values such as `1+0.2j` are treated as channel responses. The dictionary dialog
-previews the active axis as an angle-by-channel matrix.
+The channel-pattern dictionary uses the configured channel amplitude/phase data
+with a 0 deg phase reference. Imported CSV/XLSX dictionaries are loaded
+separately for azimuth and elevation. Each file may provide one row per angle
+with either virtual channel columns or physical Tx/Rx columns. Numeric values are
+treated as phase degrees; complex values such as `1+0.2j` are treated as channel
+responses. Imported dictionaries are raw by default, with optional phase reversal
+and optional 0 deg phase calibration in the dictionary dialog. The preview shows
+the active axis as an angle-by-channel matrix.
 
 The right-side evaluation panel also includes a 2D DBF heatmap. The horizontal
 slider selects the true azimuth angle and the vertical slider selects the true

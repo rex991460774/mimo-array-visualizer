@@ -43,6 +43,7 @@ from .analysis import (
     calculate_metrics_and_psf,
     dbf_angle_metrics_from_spectra,
     dbf_2d_spectrum,
+    dbf_2d_normalization_reference,
     dbf_azimuth_spectrum_bank,
     dbf_elevation_spectrum_bank,
     local_peak_indices,
@@ -314,8 +315,18 @@ UI_TEXT = {
     "dbf_dict_ideal": {"zh": "理想几何字典", "en": "Ideal geometric", "ja": "理想幾何辞書"},
     "dbf_dict_reversed": {"zh": "理想反向相位字典", "en": "Ideal reversed phase", "ja": "理想逆位相辞書"},
     "dbf_dict_channel": {"zh": "通道幅相校准字典", "en": "Channel amp/phase dictionary", "ja": "チャネル振幅/位相辞書"},
-    "dbf_dict_channel_zero": {"zh": "0°参考校准字典", "en": "0 deg reference calibrated", "ja": "0°基準校正辞書"},
     "dbf_dict_custom": {"zh": "导入CSV/XLSX字典", "en": "Imported CSV/XLSX", "ja": "CSV/XLSX辞書"},
+    "dbf_dict_custom_options": {"zh": "导入字典选项", "en": "Imported Options", "ja": "読込辞書オプション"},
+    "dbf_dict_phase_reverse": {
+        "zh": "导入字典相位反向",
+        "en": "Reverse imported phase",
+        "ja": "読込位相を反転",
+    },
+    "dbf_dict_zero_calibrate": {
+        "zh": "导入字典按0°相位校准",
+        "en": "0 deg phase calibrate imported",
+        "ja": "読込辞書を0°位相校正",
+    },
     "dbf_dict_axis": {"zh": "预览轴", "en": "Preview axis", "ja": "プレビュー軸"},
     "dbf_dict_load": {"zh": "加载CSV/XLSX", "en": "Load CSV/XLSX", "ja": "CSV/XLSX読込"},
     "dbf_dict_load_az": {"zh": "加载方位字典", "en": "Load Az Dictionary", "ja": "方位辞書読込"},
@@ -357,9 +368,9 @@ UI_TEXT = {
         "ja": "現在のプレビュー軸のCSV/XLSX辞書ファイルを先に読み込んでください。",
     },
     "dbf_dict_need_axis_files": {
-        "zh": "自定义DBF字典需要分别加载方位和俯仰两个文件。",
-        "en": "Custom DBF dictionary requires separate azimuth and elevation files.",
-        "ja": "カスタムDBF辞書には方位と仰角の2ファイルが必要です。",
+        "zh": "自定义DBF字典至少需要加载方位或俯仰其中一个文件。",
+        "en": "Custom DBF dictionary requires at least one azimuth or elevation file.",
+        "ja": "カスタムDBF辞書には方位または仰角の少なくとも1ファイルが必要です。",
     },
     "channel_dialog_title": {
         "zh": "通道幅度/相位方向图设置",
@@ -483,7 +494,7 @@ UI_TEXT = {
     "import_layout_title": {"zh": "导入阵面布局", "en": "Import antenna layout", "ja": "アレイ配置を読み込み"},
     "layout_json_type": {"zh": "阵面布局JSON", "en": "Antenna layout JSON", "ja": "アレイ配置JSON"},
     "all_files_type": {"zh": "所有文件", "en": "All files", "ja": "すべてのファイル"},
-    "hfss_csv_type": {"zh": "HFSS CSV/TSV", "en": "HFSS CSV/TSV", "ja": "HFSS CSV/TSV"},
+    "hfss_csv_type": {"zh": "HFSS CSV/TSV/XLSX", "en": "HFSS CSV/TSV/XLSX", "ja": "HFSS CSV/TSV/XLSX"},
     "csv_type": {"zh": "CSV文件", "en": "CSV files", "ja": "CSVファイル"},
     "tsv_type": {"zh": "TSV文件", "en": "TSV files", "ja": "TSVファイル"},
     "exported_layout": {"zh": "已导出阵面布局：{file}", "en": "Exported layout: {file}", "ja": "アレイ配置を書き出しました：{file}"},
@@ -531,25 +542,27 @@ SECONDARY_EVAL_ROWS = (
 # ── Theme ─────────────────────────────────────────────────────────────
 THEME = {
     # Base
-    "bg": "#f6f7f8",
+    "bg": "#f7f7f8",
     "card_bg": "#ffffff",
-    "panel_bg": "#ffffff",
-    "panel_alt_bg": "#f7f8fa",
-    "card_border": "#e2e5e9",
-    "status_bar_bg": "#f6f7f8",
+    "panel_bg": "#fbfbfc",
+    "panel_alt_bg": "#f4f5f7",
+    "card_border": "#e5e7eb",
+    "status_bar_bg": "#fbfbfc",
     "toolbar_group_bg": "#ffffff",
     "input_bg": "#ffffff",
-    "disabled_bg": "#f0f2f4",
+    "disabled_bg": "#f1f3f5",
     # Accent
-    "accent": "#111827",
-    "accent_hover": "#232a34",
-    "accent_pressed": "#050b16",
-    "accent_light": "#eef2f7",
+    "accent": "#111318",
+    "accent_hover": "#242832",
+    "accent_pressed": "#05070a",
+    "accent_light": "#eef4ff",
     "secondary_accent": "#0f766e",
     "secondary_light": "#ccfbf1",
     "danger": "#dc2626",
     "danger_hover": "#ef4444",
     "danger_pressed": "#b91c1c",
+    "danger_light": "#fff1f2",
+    "danger_border": "#fecdd3",
     "warning": "#d97706",
     # Text
     "text_primary": "#171717",
@@ -573,22 +586,25 @@ THEME = {
     "tx_edge": "#8f1d2c",
     "rx_color": "#2563eb",
     "rx_edge": "#1e3a8a",
-    "selection": "#f59e0b",
+    "selection": "#2563eb",
+    "selection_fill": "#dbeafe",
+    "hover_fill": "#eff6ff",
     "response_line": "#2563eb",
     "response_secondary_line": "#64748b",
     "sidelobe": "#d97706",
     # MplButton
     "mpl_btn_bg": "#ffffff",
-    "mpl_btn_hover": "#f4f6f8",
+    "mpl_btn_hover": "#eef4ff",
     "mpl_btn_text": "#171717",
     "mpl_btn_border": "#d9dde3",
     # ttk buttons
     "button_bg": "#ffffff",
-    "button_hover": "#f4f6f8",
-    "button_pressed": "#eceff3",
+    "button_hover": "#f4f8ff",
+    "button_pressed": "#e8efff",
     "button_border": "#d9dde3",
-    "menu_hover": "#f4f6f8",
-    "focus": "#aab4c2",
+    "menu_hover": "#eef4ff",
+    "focus": "#3b82f6",
+    "focus_soft": "#bfdbfe",
 }
 
 
@@ -633,6 +649,7 @@ class ResponseChart:
     play_button: ttk.Button | None = None
     stop_button: ttk.Button | None = None
     hover_annotation: any = None  # matplotlib Annotation
+    hover_marker: any = None
     hover_db: np.ndarray = None
     hover_angles: np.ndarray = None
     buttons: list = None
@@ -1066,7 +1083,7 @@ def _new_response_hover_annotation(ax):  # noqa: ANN001
         bbox={
             "boxstyle": "round,pad=0.35",
             "facecolor": THEME["card_bg"],
-            "edgecolor": THEME["card_border"],
+            "edgecolor": THEME["focus_soft"],
             "alpha": 1.0,
             "linewidth": 0.8,
         },
@@ -1326,7 +1343,7 @@ def _dbf_dictionary_mode_label(mode: str, language: str = LANGUAGE_ZH) -> str:
         DBF_DICT_IDEAL: "dbf_dict_ideal",
         DBF_DICT_IDEAL_REVERSED: "dbf_dict_reversed",
         DBF_DICT_CHANNEL_PATTERN: "dbf_dict_channel",
-        DBF_DICT_CHANNEL_PATTERN_ZERO_REF: "dbf_dict_channel_zero",
+        DBF_DICT_CHANNEL_PATTERN_ZERO_REF: "dbf_dict_channel",
         DBF_DICT_CUSTOM: "dbf_dict_custom",
     }
     return _text_for_language(labels.get(mode, "dbf_dict_ideal"), language)
@@ -1417,8 +1434,11 @@ class VirtualArrayGui:
 
         # Hover state
         self.physical_hover_annotation = None
+        self.physical_hover_marker = None
         self.virtual_hover_annotation = None
+        self.virtual_hover_marker = None
         self.virtual_hover_xy = np.empty((0, 2), dtype=float)
+        self.virtual_hover_counts = np.empty(0, dtype=int)
         self.virtual_hover_text: list[str] = []
         self.physical_buttons: list[MplButton] = []
         self.physical_button_callbacks: list[int] = []
@@ -1446,6 +1466,7 @@ class VirtualArrayGui:
         self.dbf2d_fig: Figure | None = None
         self.dbf2d_ax = None
         self.dbf2d_canvas: FigureCanvasTkAgg | None = None
+        self.dbf2d_normalization_max: float | None = None
         self.config_menu_button: ttk.Menubutton | None = None
         self.language_menu_button: ttk.Menubutton | None = None
         self.config_menu: tk.Menu | None = None
@@ -1493,6 +1514,8 @@ class VirtualArrayGui:
         root.option_add("*Menu.activeBackground", THEME["menu_hover"])
         root.option_add("*Menu.activeForeground", THEME["text_primary"])
         root.option_add("*Menu.borderWidth", 1)
+        root.option_add("*selectBackground", THEME["selection_fill"])
+        root.option_add("*selectForeground", THEME["text_primary"])
 
         style.configure("TFrame", background=THEME["bg"])
         style.configure("Panel.TFrame", background=THEME["panel_bg"], borderwidth=0)
@@ -1599,7 +1622,11 @@ class VirtualArrayGui:
                 ("disabled", THEME["text_muted"]),
                 ("active", THEME["text_primary"]),
             ],
-            bordercolor=[("pressed", THEME["focus"]), ("active", THEME["focus"])],
+            bordercolor=[
+                ("pressed", THEME["focus"]),
+                ("focus", THEME["focus"]),
+                ("active", THEME["focus_soft"]),
+            ],
             lightcolor=[("pressed", THEME["button_pressed"]), ("active", THEME["button_hover"])],
             darkcolor=[("pressed", THEME["button_pressed"]), ("active", THEME["button_hover"])],
         )
@@ -1621,7 +1648,7 @@ class VirtualArrayGui:
                 ("active", THEME["accent_hover"]),
             ],
             foreground=[("disabled", "#f8fafc"), ("active", THEME["text_inverse"])],
-            bordercolor=[("active", THEME["accent_hover"])],
+            bordercolor=[("focus", THEME["focus"]), ("active", THEME["accent_hover"])],
             lightcolor=[("pressed", THEME["accent_pressed"]), ("active", THEME["accent_hover"])],
             darkcolor=[("pressed", THEME["accent_pressed"]), ("active", THEME["accent_hover"])],
         )
@@ -1635,7 +1662,11 @@ class VirtualArrayGui:
                 ("disabled", THEME["text_muted"]),
                 ("active", THEME["text_primary"]),
             ],
-            "bordercolor": [("pressed", THEME["focus"]), ("active", THEME["focus"])],
+            "bordercolor": [
+                ("pressed", THEME["focus"]),
+                ("focus", THEME["focus"]),
+                ("active", THEME["focus_soft"]),
+            ],
             "lightcolor": [
                 ("pressed", THEME["button_pressed"]),
                 ("active", THEME["button_hover"]),
@@ -1658,6 +1689,113 @@ class VirtualArrayGui:
         )
         style.map("Compact.TButton", **large_button_map)
         style.configure(
+            "CompactPlay.TButton",
+            **compact_button_base,
+            font=(_f, THEME["font_size_sm"], "bold"),
+            background=THEME["button_bg"],
+            foreground=THEME["focus"],
+            bordercolor=THEME["focus_soft"],
+            lightcolor=THEME["button_bg"],
+            darkcolor=THEME["focus_soft"],
+        )
+        style.map(
+            "CompactPlay.TButton",
+            background=[
+                ("disabled", THEME["disabled_bg"]),
+                ("pressed", THEME["button_pressed"]),
+                ("active", THEME["button_hover"]),
+            ],
+            foreground=[
+                ("disabled", THEME["text_muted"]),
+                ("pressed", THEME["focus"]),
+                ("active", THEME["focus"]),
+            ],
+            bordercolor=[
+                ("disabled", THEME["button_border"]),
+                ("focus", THEME["focus"]),
+                ("active", THEME["focus"]),
+            ],
+            lightcolor=[
+                ("pressed", THEME["button_pressed"]),
+                ("active", THEME["button_hover"]),
+            ],
+            darkcolor=[
+                ("pressed", THEME["button_pressed"]),
+                ("active", THEME["button_hover"]),
+            ],
+        )
+        style.configure(
+            "CompactPlayActive.TButton",
+            **compact_button_base,
+            font=(_f, THEME["font_size_sm"], "bold"),
+            background=THEME["selection_fill"],
+            foreground=THEME["focus"],
+            bordercolor=THEME["focus"],
+            lightcolor=THEME["selection_fill"],
+            darkcolor=THEME["focus"],
+        )
+        style.map(
+            "CompactPlayActive.TButton",
+            background=[
+                ("disabled", THEME["disabled_bg"]),
+                ("pressed", THEME["button_pressed"]),
+                ("active", THEME["accent_light"]),
+            ],
+            foreground=[
+                ("disabled", THEME["text_muted"]),
+                ("active", THEME["focus"]),
+            ],
+            bordercolor=[
+                ("disabled", THEME["button_border"]),
+                ("focus", THEME["focus"]),
+                ("active", THEME["focus"]),
+            ],
+            lightcolor=[
+                ("pressed", THEME["button_pressed"]),
+                ("active", THEME["accent_light"]),
+            ],
+            darkcolor=[
+                ("pressed", THEME["button_pressed"]),
+                ("active", THEME["accent_light"]),
+            ],
+        )
+        style.configure(
+            "CompactStop.TButton",
+            **compact_button_base,
+            font=(_f, THEME["font_size_sm"], "bold"),
+            background=THEME["button_bg"],
+            foreground=THEME["danger"],
+            bordercolor=THEME["danger_border"],
+            lightcolor=THEME["button_bg"],
+            darkcolor=THEME["danger_border"],
+        )
+        style.map(
+            "CompactStop.TButton",
+            background=[
+                ("disabled", THEME["disabled_bg"]),
+                ("pressed", "#fee2e2"),
+                ("active", THEME["danger_light"]),
+            ],
+            foreground=[
+                ("disabled", THEME["text_muted"]),
+                ("pressed", THEME["danger_pressed"]),
+                ("active", THEME["danger_pressed"]),
+            ],
+            bordercolor=[
+                ("disabled", THEME["button_border"]),
+                ("focus", THEME["danger"]),
+                ("active", THEME["danger"]),
+            ],
+            lightcolor=[
+                ("pressed", "#fee2e2"),
+                ("active", THEME["danger_light"]),
+            ],
+            darkcolor=[
+                ("pressed", "#fee2e2"),
+                ("active", THEME["danger_light"]),
+            ],
+        )
+        style.configure(
             "CompactAccent.TButton",
             **compact_button_base,
             font=(_f, THEME["font_size_sm"], "bold"),
@@ -1675,7 +1813,7 @@ class VirtualArrayGui:
                 ("active", THEME["accent_hover"]),
             ],
             foreground=[("disabled", "#f8fafc"), ("active", THEME["text_inverse"])],
-            bordercolor=[("active", THEME["accent_hover"])],
+            bordercolor=[("focus", THEME["focus"]), ("active", THEME["accent_hover"])],
             lightcolor=[("pressed", THEME["accent_pressed"]), ("active", THEME["accent_hover"])],
             darkcolor=[("pressed", THEME["accent_pressed"]), ("active", THEME["accent_hover"])],
         )
@@ -1714,7 +1852,11 @@ class VirtualArrayGui:
                 ("active", THEME["button_hover"]),
             ],
             foreground=[("active", THEME["text_primary"])],
-            bordercolor=[("pressed", THEME["focus"]), ("active", THEME["focus"])],
+            bordercolor=[
+                ("pressed", THEME["focus"]),
+                ("focus", THEME["focus"]),
+                ("active", THEME["focus_soft"]),
+            ],
             lightcolor=[("pressed", THEME["button_pressed"]), ("active", THEME["button_hover"])],
             darkcolor=[("pressed", THEME["button_pressed"]), ("active", THEME["button_hover"])],
         )
@@ -1766,11 +1908,19 @@ class VirtualArrayGui:
             lightcolor=THEME["input_bg"],
             darkcolor=THEME["button_border"],
             insertcolor=THEME["text_primary"],
+            selectbackground=THEME["selection_fill"],
+            selectforeground=THEME["text_primary"],
         )
         style.map(
             "TEntry",
-            bordercolor=[("focus", THEME["focus"]), ("active", THEME["focus"])],
-            fieldbackground=[("disabled", THEME["disabled_bg"])],
+            bordercolor=[
+                ("focus", THEME["focus"]),
+                ("active", THEME["focus_soft"]),
+            ],
+            fieldbackground=[
+                ("disabled", THEME["disabled_bg"]),
+                ("focus", THEME["input_bg"]),
+            ],
         )
         style.configure(
             "TCombobox",
@@ -1780,6 +1930,20 @@ class VirtualArrayGui:
             foreground=THEME["text_primary"],
             bordercolor=THEME["button_border"],
             arrowcolor=THEME["text_secondary"],
+            selectbackground=THEME["selection_fill"],
+            selectforeground=THEME["text_primary"],
+        )
+        style.map(
+            "TCombobox",
+            bordercolor=[
+                ("focus", THEME["focus"]),
+                ("active", THEME["focus_soft"]),
+            ],
+            fieldbackground=[
+                ("readonly", THEME["input_bg"]),
+                ("disabled", THEME["disabled_bg"]),
+            ],
+            arrowcolor=[("active", THEME["focus"]), ("disabled", THEME["text_muted"])],
         )
         style.configure(
             "Horizontal.TScale",
@@ -1809,8 +1973,8 @@ class VirtualArrayGui:
         )
         style.map(
             "Treeview",
-            background=[("selected", THEME["accent"])],
-            foreground=[("selected", THEME["text_inverse"])],
+            background=[("selected", THEME["selection_fill"])],
+            foreground=[("selected", THEME["text_primary"])],
         )
         style.configure(
             "Treeview.Heading",
@@ -1819,6 +1983,11 @@ class VirtualArrayGui:
             font=(_f, THEME["font_size_sm"], "bold"),
             relief="flat",
             padding=(6, 5),
+        )
+        style.map(
+            "Treeview.Heading",
+            background=[("active", THEME["button_hover"])],
+            foreground=[("active", THEME["text_primary"])],
         )
 
         # ── Row 0: Physical Array + Virtual Array ─────────────────
@@ -2178,7 +2347,7 @@ class VirtualArrayGui:
                 if mode == "azimuth"
                 else self.toggle_el_dbf_animation
             ),
-            style="CompactAccent.TButton",
+            style="CompactPlay.TButton",
             width=6,
         )
         play_button.grid(row=0, column=1, sticky="e", padx=(8, 5))
@@ -2186,7 +2355,7 @@ class VirtualArrayGui:
             control_row,
             text=self._t("dbf_stop_compact"),
             command=self.stop_dbf_scan_animation,
-            style="CompactDanger.TButton",
+            style="CompactStop.TButton",
             width=6,
         )
         stop_button.grid(row=0, column=2, sticky="e")
@@ -2371,7 +2540,7 @@ class VirtualArrayGui:
             button_row,
             text=self._t("dbf2d_play_az"),
             command=lambda: self.toggle_dbf2d_animation("azimuth"),
-            style="CompactAccent.TButton",
+            style="CompactPlay.TButton",
             width=8,
         )
         self.dbf2d_az_button.grid(row=0, column=0, sticky="ew", padx=(0, 4))
@@ -2379,7 +2548,7 @@ class VirtualArrayGui:
             button_row,
             text=self._t("dbf2d_play_el"),
             command=lambda: self.toggle_dbf2d_animation("elevation"),
-            style="Compact.TButton",
+            style="CompactPlay.TButton",
             width=8,
         )
         self.dbf2d_el_button.grid(row=0, column=1, sticky="ew", padx=4)
@@ -2387,7 +2556,7 @@ class VirtualArrayGui:
             button_row,
             text=self._t("dbf2d_stop"),
             command=self.stop_dbf2d_animation,
-            style="CompactDanger.TButton",
+            style="CompactStop.TButton",
             width=7,
         )
         self.dbf2d_stop_button.grid(row=0, column=2, sticky="ew", padx=(4, 0))
@@ -3009,7 +3178,12 @@ class VirtualArrayGui:
                     text = self._t("dbf_resume_compact")
                 else:
                     text = self._t("dbf_play_compact")
-                chart.play_button.configure(text=text)
+                style_name = (
+                    "CompactPlayActive.TButton"
+                    if is_active_mode or has_paused_mode
+                    else "CompactPlay.TButton"
+                )
+                chart.play_button.configure(text=text, style=style_name)
             if chart.stop_button is not None:
                 chart.stop_button.configure(text=self._t("dbf_stop_compact"))
                 state = tk.NORMAL if self.dbf_scan_mode == mode else tk.DISABLED
@@ -3337,13 +3511,23 @@ class VirtualArrayGui:
             self.dbf2d_az_button.configure(
                 text=self._t("dbf2d_pause_az")
                 if self.dbf2d_az_playing
-                else self._t("dbf2d_play_az")
+                else self._t("dbf2d_play_az"),
+                style=(
+                    "CompactPlayActive.TButton"
+                    if self.dbf2d_az_playing
+                    else "CompactPlay.TButton"
+                ),
             )
         if self.dbf2d_el_button is not None:
             self.dbf2d_el_button.configure(
                 text=self._t("dbf2d_pause_el")
                 if self.dbf2d_el_playing
-                else self._t("dbf2d_play_el")
+                else self._t("dbf2d_play_el"),
+                style=(
+                    "CompactPlayActive.TButton"
+                    if self.dbf2d_el_playing
+                    else "CompactPlay.TButton"
+                ),
             )
         if self.dbf2d_stop_button is not None:
             state = tk.NORMAL if self.dbf2d_az_playing or self.dbf2d_el_playing else tk.DISABLED
@@ -3354,6 +3538,14 @@ class VirtualArrayGui:
         if self.dbf2d_ax is None or self.dbf2d_canvas is None:
             return
         azimuth, elevation = self._current_dbf2d_angles()
+        if self.dbf2d_normalization_max is None:
+            self.dbf2d_normalization_max = dbf_2d_normalization_reference(
+                self.current_array(),
+                tx_pattern=self.element_pattern,
+                rx_pattern=self.element_pattern,
+                channel_patterns=self.channel_patterns,
+                dbf_dictionary=self.dbf_dictionary,
+            )
         scan_azimuths, scan_elevations, spectrum_db = dbf_2d_spectrum(
             self.current_array(),
             true_azimuth_deg=azimuth,
@@ -3362,6 +3554,7 @@ class VirtualArrayGui:
             rx_pattern=self.element_pattern,
             channel_patterns=self.channel_patterns,
             dbf_dictionary=self.dbf_dictionary,
+            normalization_max=self.dbf2d_normalization_max,
         )
         peak_el_index, peak_az_index = np.unravel_index(
             int(np.argmax(spectrum_db)), spectrum_db.shape
@@ -3447,8 +3640,15 @@ class VirtualArrayGui:
         root_frame.grid_columnconfigure(1, weight=1)
         root_frame.grid_rowconfigure(0, weight=1)
 
-        mode_var = tk.StringVar(value=self.dbf_dictionary.mode)
+        initial_mode = self.dbf_dictionary.mode
+        if initial_mode == DBF_DICT_CHANNEL_PATTERN_ZERO_REF:
+            initial_mode = DBF_DICT_CHANNEL_PATTERN
+        mode_var = tk.StringVar(value=initial_mode)
         axis_var = tk.StringVar(value="azimuth")
+        phase_reverse_var = tk.BooleanVar(value=self.dbf_dictionary.custom_phase_reversed)
+        zero_calibrate_var = tk.BooleanVar(
+            value=self.dbf_dictionary.custom_zero_phase_calibrated
+        )
         custom_holder: dict[str, DbfDictionaryTable | None] = {
             "azimuth": self.dbf_dictionary.custom_azimuth_table,
             "elevation": self.dbf_dictionary.custom_elevation_table,
@@ -3463,14 +3663,12 @@ class VirtualArrayGui:
         )
         mode_frame.grid(row=0, column=0, sticky="ns", padx=(0, 10))
         mode_frame.grid_columnconfigure(1, weight=1)
-        for row, mode in enumerate(
-            (
-                DBF_DICT_IDEAL,
-                DBF_DICT_IDEAL_REVERSED,
-                DBF_DICT_CHANNEL_PATTERN,
-                DBF_DICT_CHANNEL_PATTERN_ZERO_REF,
-                DBF_DICT_CUSTOM,
-            )
+        mode_row = 0
+        for mode in (
+            DBF_DICT_IDEAL,
+            DBF_DICT_IDEAL_REVERSED,
+            DBF_DICT_CHANNEL_PATTERN,
+            DBF_DICT_CUSTOM,
         ):
             ttk.Radiobutton(
                 mode_frame,
@@ -3478,60 +3676,92 @@ class VirtualArrayGui:
                 variable=mode_var,
                 value=mode,
                 command=lambda: redraw_preview(),
-            ).grid(row=row, column=0, sticky="w", pady=(0, 5))
+            ).grid(row=mode_row, column=0, sticky="w", pady=(0, 5))
+            mode_row += 1
 
-        ttk.Separator(mode_frame).grid(row=5, column=0, sticky="ew", pady=6)
+        ttk.Separator(mode_frame).grid(row=mode_row, column=0, sticky="ew", pady=6)
+        mode_row += 1
         ttk.Label(
             mode_frame,
             text=self._t("dbf_dict_axis"),
             style="Muted.TLabel",
-        ).grid(row=6, column=0, sticky="w")
+        ).grid(row=mode_row, column=0, sticky="w")
+        mode_row += 1
         ttk.Radiobutton(
             mode_frame,
             text=self._t("az_short"),
             variable=axis_var,
             value="azimuth",
             command=lambda: redraw_preview(),
-        ).grid(row=7, column=0, sticky="w", pady=(4, 0))
+        ).grid(row=mode_row, column=0, sticky="w", pady=(4, 0))
+        mode_row += 1
         ttk.Radiobutton(
             mode_frame,
             text=self._t("el_short"),
             variable=axis_var,
             value="elevation",
             command=lambda: redraw_preview(),
-        ).grid(row=8, column=0, sticky="w", pady=(2, 0))
+        ).grid(row=mode_row, column=0, sticky="w", pady=(2, 0))
+        mode_row += 1
 
-        ttk.Separator(mode_frame).grid(row=9, column=0, columnspan=2, sticky="ew", pady=8)
+        ttk.Separator(mode_frame).grid(row=mode_row, column=0, columnspan=2, sticky="ew", pady=8)
+        mode_row += 1
         ttk.Label(mode_frame, textvariable=az_file_var, style="Muted.TLabel").grid(
-            row=10, column=0, columnspan=2, sticky="ew", pady=(0, 3)
+            row=mode_row, column=0, columnspan=2, sticky="ew", pady=(0, 3)
         )
+        mode_row += 1
         ttk.Button(
             mode_frame,
             text=self._t("dbf_dict_load_az"),
             command=lambda: load_custom_dictionary("azimuth"),
             style="Large.TButton",
-        ).grid(row=11, column=0, sticky="ew", pady=(0, 4))
+        ).grid(row=mode_row, column=0, sticky="ew", pady=(0, 4))
         ttk.Button(
             mode_frame,
             text=self._t("dbf_dict_clear_az"),
             command=lambda: clear_custom_dictionary("azimuth"),
             style="Large.TButton",
-        ).grid(row=11, column=1, sticky="ew", padx=(6, 0), pady=(0, 4))
+        ).grid(row=mode_row, column=1, sticky="ew", padx=(6, 0), pady=(0, 4))
+        mode_row += 1
         ttk.Label(mode_frame, textvariable=el_file_var, style="Muted.TLabel").grid(
-            row=12, column=0, columnspan=2, sticky="ew", pady=(3, 3)
+            row=mode_row, column=0, columnspan=2, sticky="ew", pady=(3, 3)
         )
+        mode_row += 1
         ttk.Button(
             mode_frame,
             text=self._t("dbf_dict_load_el"),
             command=lambda: load_custom_dictionary("elevation"),
             style="Large.TButton",
-        ).grid(row=13, column=0, sticky="ew")
+        ).grid(row=mode_row, column=0, sticky="ew")
         ttk.Button(
             mode_frame,
             text=self._t("dbf_dict_clear_el"),
             command=lambda: clear_custom_dictionary("elevation"),
             style="Large.TButton",
-        ).grid(row=13, column=1, sticky="ew", padx=(6, 0))
+        ).grid(row=mode_row, column=1, sticky="ew", padx=(6, 0))
+        mode_row += 1
+
+        ttk.Separator(mode_frame).grid(row=mode_row, column=0, columnspan=2, sticky="ew", pady=8)
+        mode_row += 1
+        ttk.Label(
+            mode_frame,
+            text=self._t("dbf_dict_custom_options"),
+            style="Muted.TLabel",
+        ).grid(row=mode_row, column=0, columnspan=2, sticky="w")
+        mode_row += 1
+        ttk.Checkbutton(
+            mode_frame,
+            text=self._t("dbf_dict_phase_reverse"),
+            variable=phase_reverse_var,
+            command=lambda: redraw_preview(),
+        ).grid(row=mode_row, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        mode_row += 1
+        ttk.Checkbutton(
+            mode_frame,
+            text=self._t("dbf_dict_zero_calibrate"),
+            variable=zero_calibrate_var,
+            command=lambda: redraw_preview(),
+        ).grid(row=mode_row, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
         preview_frame = ttk.LabelFrame(
             root_frame,
@@ -3604,15 +3834,15 @@ class VirtualArrayGui:
             if mode == DBF_DICT_CUSTOM:
                 if require_complete and (
                     custom_holder["azimuth"] is None
-                    or custom_holder["elevation"] is None
+                    and custom_holder["elevation"] is None
                 ):
                     raise ValueError(self._t("dbf_dict_need_axis_files"))
-                if not require_complete and custom_holder[axis_var.get()] is None:
-                    raise ValueError(self._t("dbf_dict_need_file"))
             return DbfDictionaryConfig(
                 mode=mode,
                 custom_azimuth_table=custom_holder["azimuth"],
                 custom_elevation_table=custom_holder["elevation"],
+                custom_phase_reversed=phase_reverse_var.get(),
+                custom_zero_phase_calibrated=zero_calibrate_var.get(),
             )
 
         def show_matrix_message(message: str) -> None:
@@ -3998,9 +4228,10 @@ class VirtualArrayGui:
             title=title,
             initialdir=str(self.last_pattern_dir),
             filetypes=[
-                (self._t("hfss_csv_type"), "*.csv *.tsv"),
+                (self._t("hfss_csv_type"), "*.csv *.tsv *.xlsx *.xlsm"),
                 (self._t("csv_type"), "*.csv"),
                 (self._t("tsv_type"), "*.tsv"),
+                ("Excel", "*.xlsx *.xlsm"),
                 (self._t("all_files_type"), "*.*"),
             ],
         )
@@ -4398,6 +4629,10 @@ class VirtualArrayGui:
                         else None
                     ),
                 },
+                "custom_phase_reversed": self.dbf_dictionary.custom_phase_reversed,
+                "custom_zero_phase_calibrated": (
+                    self.dbf_dictionary.custom_zero_phase_calibrated
+                ),
             },
             "virtual_utilization": {
                 "unique_points": metrics.unique_count,
@@ -4436,6 +4671,7 @@ class VirtualArrayGui:
     def generate_virtual_array(self) -> None:
         self.stop_dbf_scan_animation(restore_response=False)
         self.stop_dbf2d_animation(update_status=False)
+        self.dbf2d_normalization_max = None
         array = self.current_array()
         unique, counts = array.unique_virtual_xy(decimals=ROUND_DECIMALS)
         pair_map = self._build_virtual_pair_map(array)
@@ -4499,15 +4735,28 @@ class VirtualArrayGui:
             linewidths=0.55,
             label="Rx",
         )
+        self.physical_hover_marker = self.physical_ax.scatter(
+            [],
+            [],
+            marker="o",
+            s=260,
+            facecolors=THEME["hover_fill"],
+            edgecolors=THEME["focus"],
+            linewidths=1.6,
+            alpha=0.45,
+            zorder=4,
+            label="_nolegend_",
+        )
+        self.physical_hover_marker.set_visible(False)
         if self.selected_element is not None:
             self.physical_ax.scatter(
                 _to_display_lambda([self.selected_element.x]),
                 _to_display_lambda([self.selected_element.y]),
                 marker="o",
-                s=280,
+                s=292,
                 facecolors="none",
                 edgecolors=THEME["selection"],
-                linewidths=2.4,
+                linewidths=2.6,
                 zorder=5,
                 label="_nolegend_",
             )
@@ -4527,7 +4776,7 @@ class VirtualArrayGui:
                     color=THEME["text_primary"],
                     bbox={
                         "boxstyle": "round,pad=0.18",
-                        "facecolor": THEME["accent_light"],
+                        "facecolor": THEME["selection_fill"],
                         "edgecolor": THEME["focus"],
                         "alpha": 0.95,
                         "linewidth": 0.6,
@@ -4624,11 +4873,11 @@ class VirtualArrayGui:
             bbox={
                 "boxstyle": "round,pad=0.35",
                 "facecolor": THEME["card_bg"],
-                "edgecolor": THEME["card_border"],
+                "edgecolor": THEME["focus_soft"],
                 "alpha": 0.95,
                 "linewidth": 0.8,
             },
-            arrowprops={"arrowstyle": "->", "color": THEME["text_muted"], "linewidth": 0.8},
+            arrowprops={"arrowstyle": "->", "color": THEME["focus"], "linewidth": 0.8},
             fontsize=8,
             color=THEME["text_primary"],
         )
@@ -4683,6 +4932,19 @@ class VirtualArrayGui:
                 linewidths=1.35,
                 label=self._t("duplicate_point"),
             )
+        self.virtual_hover_marker = self.virtual_ax.scatter(
+            [],
+            [],
+            marker="o",
+            s=210,
+            facecolors=THEME["hover_fill"],
+            edgecolors=THEME["focus"],
+            linewidths=1.5,
+            alpha=0.5,
+            zorder=7,
+            label="_nolegend_",
+        )
+        self.virtual_hover_marker.set_visible(False)
         for (x, y), count in zip(unique_display, counts):
             if count > 1:
                 self.virtual_ax.annotate(
@@ -4697,6 +4959,7 @@ class VirtualArrayGui:
 
         # Store hover data
         self.virtual_hover_xy = unique_display
+        self.virtual_hover_counts = counts.astype(int, copy=True)
         self.virtual_hover_text = []
         for x, y in unique:
             key = (round(float(x), ROUND_DECIMALS), round(float(y), ROUND_DECIMALS))
@@ -4722,11 +4985,11 @@ class VirtualArrayGui:
             bbox={
                 "boxstyle": "round,pad=0.35",
                 "facecolor": THEME["card_bg"],
-                "edgecolor": THEME["card_border"],
+                "edgecolor": THEME["focus_soft"],
                 "alpha": 0.95,
                 "linewidth": 0.8,
             },
-            arrowprops={"arrowstyle": "->", "color": THEME["text_muted"], "linewidth": 0.8},
+            arrowprops={"arrowstyle": "->", "color": THEME["focus"], "linewidth": 0.8},
             fontsize=8,
         )
         self.virtual_hover_annotation.set_visible(False)
@@ -5055,6 +5318,18 @@ class VirtualArrayGui:
         chart.hover_db = response_db
         chart.hover_angles = response_angles
         chart.hover_annotation = _new_response_hover_annotation(chart.ax)
+        chart.hover_marker = chart.ax.scatter(
+            [],
+            [],
+            marker="o",
+            s=42,
+            facecolors=THEME["selection_fill"],
+            edgecolors=THEME["focus"],
+            linewidths=1.2,
+            zorder=8,
+            clip_on=True,
+        )
+        chart.hover_marker.set_visible(False)
 
     # ── Notes helpers ─────────────────────────────────────────────────
 
@@ -5158,14 +5433,21 @@ class VirtualArrayGui:
             dictionary_state = state.get("dbf_dictionary")
             if isinstance(dictionary_state, dict):
                 mode = str(dictionary_state.get("mode", DBF_DICT_IDEAL))
-                if mode not in {
+                if mode == DBF_DICT_CHANNEL_PATTERN_ZERO_REF:
+                    mode = DBF_DICT_CHANNEL_PATTERN
+                elif mode not in {
                     DBF_DICT_IDEAL,
                     DBF_DICT_IDEAL_REVERSED,
                     DBF_DICT_CHANNEL_PATTERN,
-                    DBF_DICT_CHANNEL_PATTERN_ZERO_REF,
                     DBF_DICT_CUSTOM,
                 }:
                     mode = DBF_DICT_IDEAL
+                custom_phase_reversed = bool(
+                    dictionary_state.get("custom_phase_reversed", False)
+                )
+                custom_zero_phase_calibrated = bool(
+                    dictionary_state.get("custom_zero_phase_calibrated", False)
+                )
                 custom_azimuth_table = None
                 custom_elevation_table = None
                 legacy_custom_path = dictionary_state.get("custom_path")
@@ -5181,7 +5463,6 @@ class VirtualArrayGui:
                         ("elevation", custom_elevation_path),
                     ):
                         if not isinstance(custom_path, str) or not custom_path:
-                            mode = DBF_DICT_IDEAL
                             continue
                         try:
                             table = load_dbf_dictionary_table(
@@ -5199,10 +5480,17 @@ class VirtualArrayGui:
                             custom_azimuth_table = table
                         else:
                             custom_elevation_table = table
+                    if (
+                        custom_azimuth_table is None
+                        and custom_elevation_table is None
+                    ):
+                        mode = DBF_DICT_IDEAL
                 self.dbf_dictionary = DbfDictionaryConfig(
                     mode=mode,
                     custom_azimuth_table=custom_azimuth_table,
                     custom_elevation_table=custom_elevation_table,
+                    custom_phase_reversed=custom_phase_reversed,
+                    custom_zero_phase_calibrated=custom_zero_phase_calibrated,
                 )
 
             pattern_path = state.get("element_pattern_path")
@@ -5258,6 +5546,10 @@ class VirtualArrayGui:
                     self.dbf_dictionary.custom_elevation_table.source_path
                     if self.dbf_dictionary.custom_elevation_table is not None
                     else ""
+                ),
+                "custom_phase_reversed": self.dbf_dictionary.custom_phase_reversed,
+                "custom_zero_phase_calibrated": (
+                    self.dbf_dictionary.custom_zero_phase_calibrated
                 ),
             },
             "layout": self._layout_coordinates_config(),
@@ -5454,8 +5746,14 @@ class VirtualArrayGui:
             or event.ydata is None
             or len(self.virtual_hover_xy) == 0
         ):
+            needs_redraw = False
             if self.virtual_hover_annotation.get_visible():
                 self.virtual_hover_annotation.set_visible(False)
+                needs_redraw = True
+            if self.virtual_hover_marker is not None and self.virtual_hover_marker.get_visible():
+                self.virtual_hover_marker.set_visible(False)
+                needs_redraw = True
+            if needs_redraw:
                 self.virt_canvas.draw_idle()
             return
 
@@ -5467,12 +5765,27 @@ class VirtualArrayGui:
         )
         index = int(np.argmin(normalized_distance))
         if normalized_distance[index] > 0.018:
+            needs_redraw = False
             if self.virtual_hover_annotation.get_visible():
                 self.virtual_hover_annotation.set_visible(False)
+                needs_redraw = True
+            if self.virtual_hover_marker is not None and self.virtual_hover_marker.get_visible():
+                self.virtual_hover_marker.set_visible(False)
+                needs_redraw = True
+            if needs_redraw:
                 self.virt_canvas.draw_idle()
             return
 
         xy = self.virtual_hover_xy[index]
+        if self.virtual_hover_marker is not None:
+            count = (
+                int(self.virtual_hover_counts[index])
+                if self.virtual_hover_counts.size > index
+                else 1
+            )
+            self.virtual_hover_marker.set_offsets([xy])
+            self.virtual_hover_marker.set_sizes([210 + min(max(count - 1, 0), 6) * 36])
+            self.virtual_hover_marker.set_visible(True)
         self.virtual_hover_annotation.xy = (xy[0], xy[1])
         self.virtual_hover_annotation.set_text(self.virtual_hover_text[index])
         self.virtual_hover_annotation.set_visible(True)
@@ -5482,8 +5795,25 @@ class VirtualArrayGui:
         if self.physical_hover_annotation is None:
             return
         if event.inaxes != self.physical_ax or event.xdata is None or event.ydata is None:
+            needs_redraw = False
             if self.physical_hover_annotation.get_visible():
                 self.physical_hover_annotation.set_visible(False)
+                needs_redraw = True
+            if self.physical_hover_marker is not None and self.physical_hover_marker.get_visible():
+                self.physical_hover_marker.set_visible(False)
+                needs_redraw = True
+            if needs_redraw:
+                self.phys_canvas.draw_idle()
+            return
+        if not self.elements:
+            needs_redraw = False
+            if self.physical_hover_annotation.get_visible():
+                self.physical_hover_annotation.set_visible(False)
+                needs_redraw = True
+            if self.physical_hover_marker is not None and self.physical_hover_marker.get_visible():
+                self.physical_hover_marker.set_visible(False)
+                needs_redraw = True
+            if needs_redraw:
                 self.phys_canvas.draw_idle()
             return
 
@@ -5498,14 +5828,23 @@ class VirtualArrayGui:
         )
         index = int(np.argmin(distances))
         if distances[index] > 2.0:
+            needs_redraw = False
             if self.physical_hover_annotation.get_visible():
                 self.physical_hover_annotation.set_visible(False)
+                needs_redraw = True
+            if self.physical_hover_marker is not None and self.physical_hover_marker.get_visible():
+                self.physical_hover_marker.set_visible(False)
+                needs_redraw = True
+            if needs_redraw:
                 self.phys_canvas.draw_idle()
             return
 
         element = self.elements[index]
         display_x = element.x * DISPLAY_SCALE_LAMBDA
         display_y = element.y * DISPLAY_SCALE_LAMBDA
+        if self.physical_hover_marker is not None:
+            self.physical_hover_marker.set_offsets([[display_x, display_y]])
+            self.physical_hover_marker.set_visible(True)
         self.physical_hover_annotation.xy = (display_x, display_y)
         self.physical_hover_annotation.set_text(
             f"{element.name}\nx = {display_x:g} λ\ny = {display_y:g} λ"
@@ -5525,14 +5864,23 @@ class VirtualArrayGui:
             or event.ydata is None
             or chart.hover_db.size == 0
         ):
+            needs_redraw = False
             if chart.hover_annotation.get_visible():
                 chart.hover_annotation.set_visible(False)
+                needs_redraw = True
+            if chart.hover_marker is not None and chart.hover_marker.get_visible():
+                chart.hover_marker.set_visible(False)
+                needs_redraw = True
+            if needs_redraw:
                 chart.canvas.draw_idle()
             return
 
         angle_index = int(np.argmin(np.abs(chart.hover_angles - event.xdata)))
         angle = float(chart.hover_angles[angle_index])
         gain = float(chart.hover_db[angle_index])
+        if chart.hover_marker is not None:
+            chart.hover_marker.set_offsets([[angle, gain]])
+            chart.hover_marker.set_visible(True)
         chart.hover_annotation.xy = (float(event.xdata), float(event.ydata))
         x_low, x_high = chart.ax.get_xlim()
         y_low, y_high = chart.ax.get_ylim()
@@ -5552,11 +5900,19 @@ class VirtualArrayGui:
     def _hide_response_hover(self, chart: ResponseChart) -> None:
         if chart.hover_annotation is None:
             return
+        needs_redraw = False
         if chart.hover_annotation.get_visible():
             chart.hover_annotation.set_visible(False)
+            needs_redraw = True
+        if chart.hover_marker is not None and chart.hover_marker.get_visible():
+            chart.hover_marker.set_visible(False)
+            needs_redraw = True
+        if needs_redraw:
             chart.canvas.draw_idle()
 
     def _nearest_element(self, x: float, y: float) -> EditableElement | None:
+        if not self.elements:
+            return None
         distances = [
             ((element.x - x) ** 2 + (element.y - y) ** 2, element)
             for element in self.elements

@@ -322,6 +322,7 @@ def dbf_2d_spectrum(
     rx_pattern: ElementPattern | None = None,
     channel_patterns: ChannelPatternSet | None = None,
     dbf_dictionary: DbfDictionaryConfig | None = None,
+    normalization_max: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return one conventional 2D DBF spectrum for a true az/el source angle."""
     if scan_azimuths_deg is None:
@@ -371,11 +372,77 @@ def dbf_2d_spectrum(
     pattern_weight = _element_pattern_weight(tx_pattern, az_grid, el_grid)
     pattern_weight *= _element_pattern_weight(rx_pattern, az_grid, el_grid)
     spectra = np.abs(response * pattern_weight)
-    maximum = float(np.max(spectra)) if spectra.size else 0.0
+    maximum = (
+        float(normalization_max)
+        if normalization_max is not None and float(normalization_max) > 0.0
+        else float(np.max(spectra)) if spectra.size else 0.0
+    )
     if maximum > 0.0:
         spectra = spectra / maximum
     spectra_db = 20.0 * np.log10(np.maximum(spectra, 1e-6))
     return scan_azimuths_deg, scan_elevations_deg, spectra_db
+
+
+def dbf_2d_normalization_reference(
+    array: AntennaArray,
+    scan_azimuths_deg: np.ndarray | None = None,
+    scan_elevations_deg: np.ndarray | None = None,
+    true_azimuths_deg: np.ndarray | None = None,
+    true_elevations_deg: np.ndarray | None = None,
+    tx_pattern: ElementPattern | None = None,
+    rx_pattern: ElementPattern | None = None,
+    channel_patterns: ChannelPatternSet | None = None,
+    dbf_dictionary: DbfDictionaryConfig | None = None,
+) -> float:
+    """Return a fixed 2D DBF amplitude reference for comparable frame colors."""
+    if scan_azimuths_deg is None:
+        scan_azimuths_deg = _default_dbf_angles()
+    else:
+        scan_azimuths_deg = np.asarray(scan_azimuths_deg, dtype=float)
+    if scan_elevations_deg is None:
+        scan_elevations_deg = _default_dbf_angles()
+    else:
+        scan_elevations_deg = np.asarray(scan_elevations_deg, dtype=float)
+    if true_azimuths_deg is None:
+        true_azimuths_deg = _default_dbf_angles()
+    else:
+        true_azimuths_deg = np.asarray(true_azimuths_deg, dtype=float)
+    if true_elevations_deg is None:
+        true_elevations_deg = _default_dbf_angles()
+    else:
+        true_elevations_deg = np.asarray(true_elevations_deg, dtype=float)
+
+    scan_az_grid, scan_el_grid = np.meshgrid(scan_azimuths_deg, scan_elevations_deg)
+    if dbf_dictionary is not None and not dbf_dictionary.uses_auto_ideal_sign:
+        dictionary = dbf_dictionary.scan_matrix_2d(
+            array,
+            scan_az_grid.ravel(),
+            scan_el_grid.ravel(),
+            axis="azimuth",
+            channel_patterns=channel_patterns,
+        )
+    else:
+        dictionary = _dbf_2d_scan_matrix(
+            array,
+            scan_az_grid.ravel(),
+            scan_el_grid.ravel(),
+            steering_sign=DBF_DEFAULT_STEERING_SIGN,
+        )
+    pattern_weight = _element_pattern_weight(tx_pattern, scan_az_grid, scan_el_grid)
+    pattern_weight *= _element_pattern_weight(rx_pattern, scan_az_grid, scan_el_grid)
+    dictionary_norm = np.linalg.norm(dictionary, axis=1)
+    scan_scale = dictionary_norm * np.abs(np.asarray(pattern_weight).ravel())
+
+    true_az_grid, true_el_grid = np.meshgrid(true_azimuths_deg, true_elevations_deg)
+    signals = _dbf_2d_signal_matrix(
+        array,
+        true_az_grid.ravel(),
+        true_el_grid.ravel(),
+        channel_patterns=channel_patterns,
+    )
+    signal_scale = np.linalg.norm(signals, axis=1)
+    reference = float(np.max(scan_scale) * np.max(signal_scale))
+    return reference if reference > 0.0 else 1.0
 
 
 def dbf_azimuth_angle_metrics(
@@ -764,8 +831,9 @@ def _dbf_spectrum_bank(
         pattern_weight = np.full_like(scan_angles_deg, float(pattern_weight))
 
     spectra = np.abs(response.T * pattern_weight[None, :])
-    maxima = np.max(spectra, axis=1, keepdims=True)
-    spectra = np.divide(spectra, maxima, out=np.zeros_like(spectra), where=maxima > 0)
+    maximum = float(np.max(spectra)) if spectra.size else 0.0
+    if maximum > 0.0:
+        spectra = spectra / maximum
     spectra_db = 20.0 * np.log10(np.maximum(spectra, 1e-6))
     return true_angles_deg, scan_angles_deg, spectra_db
 
@@ -905,6 +973,39 @@ def _dbf_2d_signal_vector(
     return _dbf_2d_steering_vector(
         array, true_azimuth_deg, true_elevation_deg
     ) * channel_weight
+
+
+def _dbf_2d_signal_matrix(
+    array: AntennaArray,
+    true_azimuth_deg: np.ndarray,
+    true_elevation_deg: np.ndarray,
+    channel_patterns: ChannelPatternSet | None,
+) -> np.ndarray:
+    azimuths, elevations = np.broadcast_arrays(
+        np.asarray(true_azimuth_deg, dtype=float),
+        np.asarray(true_elevation_deg, dtype=float),
+    )
+    flat_az = azimuths.ravel()
+    flat_el = elevations.ravel()
+    channel_weight = _channel_pattern_weight(channel_patterns, array, flat_az, flat_el)
+    virtual_count = len(array.tx) * len(array.rx)
+    if np.isscalar(channel_weight):
+        weights = np.ones((len(flat_az), virtual_count), dtype=complex) * complex(
+            channel_weight
+        )
+    else:
+        weights = np.asarray(channel_weight, dtype=complex).reshape(
+            virtual_count, len(flat_az)
+        ).T
+    if _channel_pattern_has_any_phase(channel_patterns, array):
+        return weights
+    steering = _dbf_2d_scan_matrix(
+        array,
+        flat_az,
+        flat_el,
+        steering_sign=1,
+    )
+    return steering * weights
 
 
 def _select_dbf_steering_sign(

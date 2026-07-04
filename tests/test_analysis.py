@@ -9,6 +9,7 @@ from virtual_array.analysis import (
     calculate_metrics_and_psf,
     dbf_angle_metrics_from_spectra,
     dbf_2d_spectrum,
+    dbf_2d_normalization_reference,
     dbf_azimuth_angle_metrics,
     dbf_azimuth_spectrum,
     dbf_azimuth_spectrum_bank,
@@ -17,6 +18,12 @@ from virtual_array.analysis import (
     estimate_resolution,
 )
 from virtual_array.examples.case4_5tx7rx_sel import build_array
+from virtual_array.element_pattern import (
+    PATTERN_KIND_AMPLITUDE,
+    PATTERN_PLANE_HORIZONTAL,
+    ChannelPatternSet,
+    PatternSeries,
+)
 from virtual_array.geometry import AntennaArray
 from virtual_array.gui import (
     RESPONSE_MODE_AZIMUTH,
@@ -123,6 +130,38 @@ def test_dbf_azimuth_spectrum_bank_builds_181_true_angle_spectra() -> None:
         assert spectra_db[index, peak_index] == pytest.approx(0.0)
 
 
+def test_dbf_spectrum_bank_uses_global_frame_normalization() -> None:
+    array = AntennaArray.from_xy(tx_x=[0], tx_y=[0], rx_x=[0], rx_y=[0])
+    amplitude_series = PatternSeries(
+        name="amp",
+        source_path="amp.csv",
+        angle_column="Theta",
+        value_column="amp",
+        value_kind=PATTERN_KIND_AMPLITUDE,
+        angles_deg=np.array([-90.0, 0.0, 90.0]),
+        values=np.array([-20.0, 0.0, -20.0]),
+    )
+    channel_patterns = ChannelPatternSet()
+    channel_patterns.set_series(
+        "Rx1",
+        PATTERN_KIND_AMPLITUDE,
+        PATTERN_PLANE_HORIZONTAL,
+        amplitude_series,
+    )
+
+    true_angles, _scan_angles, spectra_db = dbf_azimuth_spectrum_bank(
+        array,
+        true_angles_deg=np.array([-90.0, 0.0, 90.0]),
+        scan_angles_deg=np.array([-90.0, 0.0, 90.0]),
+        channel_patterns=channel_patterns,
+    )
+
+    assert np.array_equal(true_angles, np.array([-90.0, 0.0, 90.0]))
+    assert np.max(spectra_db[1]) == pytest.approx(0.0)
+    assert np.max(spectra_db[0]) == pytest.approx(-20.0)
+    assert np.max(spectra_db[2]) == pytest.approx(-20.0)
+
+
 def test_dbf_elevation_spectrum_matches_psf_elevation_cut() -> None:
     array = AntennaArray.from_xy(tx_x=[0], tx_y=[0], rx_x=[0, 0, 0], rx_y=[0, 1, 2])
     af_db, azimuths, elevations, _metrics = calculate_metrics_and_psf(array)
@@ -183,6 +222,47 @@ def test_dbf_2d_spectrum_peaks_at_true_azimuth_and_elevation() -> None:
     assert azimuths[peak_az_index] == pytest.approx(20.0)
     assert elevations[peak_el_index] == pytest.approx(10.0)
     assert spectrum_db[peak_el_index, peak_az_index] == pytest.approx(0.0)
+
+
+def test_dbf_2d_spectrum_accepts_fixed_normalization_reference() -> None:
+    array = AntennaArray.from_xy(tx_x=[0], tx_y=[0], rx_x=[0], rx_y=[0])
+    amplitude_series = PatternSeries(
+        name="amp",
+        source_path="amp.csv",
+        angle_column="Theta",
+        value_column="amp",
+        value_kind=PATTERN_KIND_AMPLITUDE,
+        angles_deg=np.array([-90.0, 0.0, 90.0]),
+        values=np.array([-20.0, 0.0, -20.0]),
+    )
+    channel_patterns = ChannelPatternSet()
+    channel_patterns.set_series(
+        "Rx1",
+        PATTERN_KIND_AMPLITUDE,
+        PATTERN_PLANE_HORIZONTAL,
+        amplitude_series,
+    )
+    reference = dbf_2d_normalization_reference(
+        array,
+        scan_azimuths_deg=np.array([-90.0, 0.0, 90.0]),
+        scan_elevations_deg=np.array([0.0]),
+        true_azimuths_deg=np.array([-90.0, 0.0, 90.0]),
+        true_elevations_deg=np.array([0.0]),
+        channel_patterns=channel_patterns,
+    )
+
+    _azimuths, _elevations, spectrum_db = dbf_2d_spectrum(
+        array,
+        true_azimuth_deg=-90.0,
+        true_elevation_deg=0.0,
+        scan_azimuths_deg=np.array([-90.0, 0.0, 90.0]),
+        scan_elevations_deg=np.array([0.0]),
+        channel_patterns=channel_patterns,
+        normalization_max=reference,
+    )
+
+    assert reference == pytest.approx(1.0)
+    assert np.max(spectrum_db) == pytest.approx(-20.0)
 
 
 def test_dbf_angle_metrics_report_no_fold_range_for_ideal_linear_array() -> None:

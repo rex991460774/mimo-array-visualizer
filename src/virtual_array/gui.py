@@ -1016,8 +1016,7 @@ def _style_toplevel(window: tk.Toplevel) -> None:
     window.configure(bg=THEME["bg"])
 
 
-def _build_popup_menu(parent: tk.Widget) -> tk.Menu:
-    menu = tk.Menu(parent, tearoff=False)
+def _style_popup_menu(menu: tk.Menu) -> None:
     try:
         menu.configure(
             background=THEME["card_bg"],
@@ -1025,19 +1024,63 @@ def _build_popup_menu(parent: tk.Widget) -> tk.Menu:
             activebackground=THEME["menu_hover"],
             activeforeground=THEME["text_primary"],
             disabledforeground=THEME["text_muted"],
+            selectcolor=THEME["focus"],
             borderwidth=1,
             activeborderwidth=0,
             relief=tk.SOLID,
             font=(THEME["font_family"], THEME["font_size_base"]),
         )
+        try:
+            menu.configure(cursor="hand2")
+        except tk.TclError:
+            pass
     except tk.TclError:
         LOGGER.debug("Menu did not accept all themed options", exc_info=True)
+
+    end_index = menu.index(tk.END)
+    if end_index is None:
+        return
+    for index in range(end_index + 1):
+        entry_type = menu.type(index)
+        try:
+            if entry_type == "separator":
+                menu.entryconfigure(index, background=THEME["card_border"])
+            else:
+                menu.entryconfigure(
+                    index,
+                    background=THEME["card_bg"],
+                    foreground=THEME["text_primary"],
+                    activebackground=THEME["menu_hover"],
+                    activeforeground=THEME["text_primary"],
+                )
+                if entry_type == "cascade":
+                    submenu_name = menu.entrycget(index, "menu")
+                    submenu = menu.nametowidget(submenu_name)
+                    if isinstance(submenu, tk.Menu):
+                        _style_popup_menu(submenu)
+        except (tk.TclError, KeyError):
+            LOGGER.debug("Menu entry did not accept themed options", exc_info=True)
+
+
+def _build_popup_menu(parent: tk.Widget) -> tk.Menu:
+    menu = tk.Menu(parent, tearoff=False)
+    _style_popup_menu(menu)
     return menu
 
 
 def _apply_interactive_cursors(widget: tk.Widget) -> None:
     for child in widget.winfo_children():
-        if isinstance(child, (ttk.Button, ttk.Menubutton, ttk.Scale)):
+        if isinstance(
+            child,
+            (
+                ttk.Button,
+                ttk.Checkbutton,
+                ttk.Combobox,
+                ttk.Menubutton,
+                ttk.Radiobutton,
+                ttk.Scale,
+            ),
+        ):
             try:
                 child.configure(cursor="hand2")
             except tk.TclError:
@@ -1051,7 +1094,8 @@ def _style_canvas_widget(widget: tk.Widget) -> None:
             background=THEME["card_bg"],
             highlightthickness=1,
             highlightbackground=THEME["card_border"],
-            highlightcolor=THEME["focus"],
+            highlightcolor=THEME["card_border"],
+            takefocus=0,
         )
     except tk.TclError:
         LOGGER.debug("Canvas widget did not accept themed border options", exc_info=True)
@@ -1513,7 +1557,11 @@ class VirtualArrayGui:
         root.option_add("*Menu.foreground", THEME["text_primary"])
         root.option_add("*Menu.activeBackground", THEME["menu_hover"])
         root.option_add("*Menu.activeForeground", THEME["text_primary"])
+        root.option_add("*Menu.disabledForeground", THEME["text_muted"])
+        root.option_add("*Menu.selectColor", THEME["focus"])
         root.option_add("*Menu.borderWidth", 1)
+        root.option_add("*Menu.activeBorderWidth", 0)
+        root.option_add("*Menu.relief", "solid")
         root.option_add("*selectBackground", THEME["selection_fill"])
         root.option_add("*selectForeground", THEME["text_primary"])
 
@@ -1676,7 +1724,16 @@ class VirtualArrayGui:
                 ("active", THEME["button_hover"]),
             ],
         }
-        style.configure("Large.TButton", **button_base, font=button_font)
+        style.configure(
+            "Large.TButton",
+            **{**button_base, "relief": "solid"},
+            font=button_font,
+            background=THEME["button_bg"],
+            foreground=THEME["text_primary"],
+            bordercolor=THEME["button_border"],
+            lightcolor=THEME["button_bg"],
+            darkcolor=THEME["button_border"],
+        )
         style.map("Large.TButton", **large_button_map)
         compact_button_base = {
             **button_base,
@@ -1862,21 +1919,33 @@ class VirtualArrayGui:
         )
         style.configure(
             "Danger.TButton",
-            **button_base,
+            **{**button_base, "relief": "solid"},
             font=button_font,
-            background=THEME["danger"],
-            foreground=THEME["text_inverse"],
+            background=THEME["danger_light"],
+            foreground=THEME["danger"],
             bordercolor=THEME["danger"],
-            lightcolor=THEME["danger"],
-            darkcolor=THEME["danger_pressed"],
+            lightcolor=THEME["danger_light"],
+            darkcolor=THEME["danger_border"],
         )
         style.map(
             "Danger.TButton",
-            background=[("pressed", THEME["danger_pressed"]), ("active", THEME["danger_hover"])],
-            foreground=[("active", THEME["text_inverse"])],
-            bordercolor=[("pressed", THEME["danger_pressed"]), ("active", THEME["danger_hover"])],
-            lightcolor=[("pressed", THEME["danger_pressed"]), ("active", THEME["danger_hover"])],
-            darkcolor=[("pressed", THEME["danger_pressed"]), ("active", THEME["danger_hover"])],
+            background=[
+                ("disabled", THEME["disabled_bg"]),
+                ("pressed", "#fee2e2"),
+                ("active", THEME["danger_light"]),
+            ],
+            foreground=[
+                ("disabled", THEME["text_muted"]),
+                ("pressed", THEME["danger_pressed"]),
+                ("active", THEME["danger_pressed"]),
+            ],
+            bordercolor=[
+                ("disabled", THEME["button_border"]),
+                ("focus", THEME["danger"]),
+                ("active", THEME["danger"]),
+            ],
+            lightcolor=[("pressed", "#fee2e2"), ("active", THEME["danger_light"])],
+            darkcolor=[("pressed", "#fee2e2"), ("active", THEME["danger_light"])],
         )
 
         style.configure(
@@ -1945,6 +2014,42 @@ class VirtualArrayGui:
             ],
             arrowcolor=[("active", THEME["focus"]), ("disabled", THEME["text_muted"])],
         )
+        for selector_style in ("TRadiobutton", "TCheckbutton"):
+            style.configure(
+                selector_style,
+                background=THEME["card_bg"],
+                foreground=THEME["text_primary"],
+                font=(_f, THEME["font_size_base"]),
+                focuscolor=THEME["focus_soft"],
+                indicatorbackground=THEME["input_bg"],
+                indicatorforeground=THEME["focus"],
+                indicatorcolor=THEME["selection_fill"],
+                bordercolor=THEME["button_border"],
+                lightcolor=THEME["input_bg"],
+                darkcolor=THEME["button_border"],
+            )
+            style.map(
+                selector_style,
+                background=[
+                    ("pressed", THEME["button_pressed"]),
+                    ("active", THEME["button_hover"]),
+                ],
+                indicatorbackground=[
+                    ("pressed", THEME["button_pressed"]),
+                    ("active", THEME["hover_fill"]),
+                    ("selected", THEME["selection_fill"]),
+                ],
+                indicatorcolor=[
+                    ("pressed", THEME["button_pressed"]),
+                    ("active", THEME["hover_fill"]),
+                    ("selected", THEME["selection_fill"]),
+                ],
+                foreground=[
+                    ("disabled", THEME["text_muted"]),
+                    ("active", THEME["text_primary"]),
+                    ("selected", THEME["text_primary"]),
+                ],
+            )
         style.configure(
             "Horizontal.TScale",
             background=THEME["panel_alt_bg"],
@@ -2082,6 +2187,7 @@ class VirtualArrayGui:
             label=self._t("menu_dbf_dictionary"),
             command=self.open_dbf_dictionary_dialog,
         )
+        _style_popup_menu(self.config_menu)
         self.config_menu_button.configure(menu=self.config_menu)
 
         language_group = toolbar_group()
@@ -2101,6 +2207,7 @@ class VirtualArrayGui:
                 label=self._t(label_key),
                 command=lambda lang=language: self.set_language(lang),
             )
+        _style_popup_menu(self.language_menu)
         self.language_menu_button.configure(menu=self.language_menu)
 
         freq_group = toolbar_group()
@@ -2275,6 +2382,7 @@ class VirtualArrayGui:
                     label=f"{prefix}{self._t(label_key)}",
                     command=lambda lang=language: self.set_language(lang),
                 )
+            _style_popup_menu(self.language_menu)
         if getattr(self, "freq_toolbar_label", None) is not None:
             self.freq_toolbar_label.configure(text=self._t("freq_label"))
         if getattr(self, "margin_toolbar_label", None) is not None:
@@ -2501,7 +2609,7 @@ class VirtualArrayGui:
         self.dbf2d_fig.set_facecolor(THEME["panel_bg"])
         self.dbf2d_ax = self.dbf2d_fig.add_subplot(111)
         self.dbf2d_ax.set_facecolor(THEME["plot_bg"])
-        self.dbf2d_fig.subplots_adjust(top=0.92, left=0.13, right=0.98, bottom=0.18)
+        self.dbf2d_fig.subplots_adjust(top=0.91, left=0.10, right=0.99, bottom=0.10)
         self.dbf2d_canvas = FigureCanvasTkAgg(self.dbf2d_fig, master=self.dbf2d_frame)
         dbf2d_widget = self.dbf2d_canvas.get_tk_widget()
         _style_canvas_widget(dbf2d_widget)
@@ -3574,13 +3682,13 @@ class VirtualArrayGui:
                 float(scan_elevations[0]),
                 float(scan_elevations[-1]),
             ),
-            aspect="equal",
+            aspect="auto",
             cmap="magma",
             vmin=-40.0,
             vmax=0.0,
             interpolation="nearest",
         )
-        ax.set_aspect("equal", adjustable="box")
+        ax.set_aspect("auto")
         ax.axvline(azimuth, color="#ffffff", linewidth=1.0, alpha=0.82)
         ax.axhline(elevation, color="#ffffff", linewidth=1.0, alpha=0.82)
         ax.scatter(
@@ -3599,8 +3707,43 @@ class VirtualArrayGui:
             color=THEME["text_primary"],
             fontweight="bold",
         )
-        ax.set_xlabel(self._t("axis_az_angle"), color=THEME["text_secondary"])
-        ax.set_ylabel(self._t("axis_el_angle"), color=THEME["text_secondary"])
+        ax.set_xlabel("")
+        ax.set_ylabel("")
+        ax.text(
+            0.99,
+            0.02,
+            f"{self._t('az_short')}(°)",
+            transform=ax.transAxes,
+            ha="right",
+            va="bottom",
+            fontsize=7.5,
+            color=THEME["text_secondary"],
+            bbox={
+                "boxstyle": "round,pad=0.18",
+                "facecolor": THEME["plot_bg"],
+                "edgecolor": THEME["axis_spine"],
+                "alpha": 0.78,
+                "linewidth": 0.4,
+            },
+        )
+        ax.text(
+            0.02,
+            0.52,
+            f"{self._t('el_short')}(°)",
+            transform=ax.transAxes,
+            ha="left",
+            va="center",
+            rotation=90,
+            fontsize=7.5,
+            color=THEME["text_secondary"],
+            bbox={
+                "boxstyle": "round,pad=0.18",
+                "facecolor": THEME["plot_bg"],
+                "edgecolor": THEME["axis_spine"],
+                "alpha": 0.78,
+                "linewidth": 0.4,
+            },
+        )
         ax.text(
             0.02,
             0.96,
@@ -3973,6 +4116,7 @@ class VirtualArrayGui:
 
         refresh_file_labels()
         redraw_preview()
+        _apply_interactive_cursors(dialog)
 
     def open_channel_patterns_dialog(self) -> None:
         dialog = tk.Toplevel(self.root)

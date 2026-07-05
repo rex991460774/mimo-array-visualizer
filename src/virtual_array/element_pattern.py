@@ -349,15 +349,40 @@ def load_hfss_summary_pattern(
         value_kind=value_kind,
         max_columns=len(channel_names),
     )
-    if len(series) < len(channel_names):
+    mapped_channel_names = _summary_pattern_channel_names(channel_names, len(series))
+    if mapped_channel_names is None:
         raise ValueError(
             f"Summary pattern has {len(series)} data column(s) after Theta, "
             f"but the current layout needs {len(channel_names)} physical channels."
         )
     return {
         channel_name: pattern_series
-        for channel_name, pattern_series in zip(channel_names, series)
+        for channel_name, pattern_series in zip(mapped_channel_names, series)
     }
+
+
+def _summary_pattern_channel_names(
+    channel_names: list[str],
+    data_column_count: int,
+) -> list[str] | None:
+    if data_column_count == len(channel_names):
+        return list(channel_names)
+
+    tx_names = [
+        channel_name
+        for channel_name in channel_names
+        if channel_name.strip().lower().startswith("tx")
+    ]
+    rx_names = [
+        channel_name
+        for channel_name in channel_names
+        if channel_name.strip().lower().startswith("rx")
+    ]
+    if rx_names and data_column_count == len(rx_names):
+        return rx_names
+    if tx_names and rx_names and data_column_count == len(rx_names) + 1:
+        return [tx_names[0], *rx_names]
+    return None
 
 
 def load_hfss_pattern_series_columns(

@@ -297,14 +297,6 @@ class _FakeRoot:
         self.cancelled.append(after_id)
 
 
-class _FakeProgressVar:
-    def __init__(self) -> None:
-        self.value = None
-
-    def set(self, value: float) -> None:
-        self.value = value
-
-
 class _FakeLabel:
     def __init__(self) -> None:
         self.text = ""
@@ -313,11 +305,31 @@ class _FakeLabel:
         self.text = kwargs["text"]
 
 
-def test_dbf_progress_scrub_pauses_animation_at_selected_frame() -> None:
+class _FakeCursorWidget:
+    def __init__(self) -> None:
+        self.cursor = ""
+
+    def configure(self, **kwargs) -> None:  # noqa: ANN003
+        if "cursor" in kwargs:
+            self.cursor = kwargs["cursor"]
+
+
+class _FakeCanvasWithWidget:
+    def __init__(self) -> None:
+        self.draw_count = 0
+        self.widget = _FakeCursorWidget()
+
+    def draw_idle(self) -> None:
+        self.draw_count += 1
+
+    def get_tk_widget(self) -> _FakeCursorWidget:
+        return self.widget
+
+
+def test_dbf_true_line_drag_pauses_animation_at_selected_angle() -> None:
     app = VirtualArrayGui.__new__(VirtualArrayGui)
     app.root = _FakeRoot()
     app.status = _FakeStatus()
-    app.dbf_progress_updating = False
     app.dbf_scan_active = True
     app.dbf_scan_paused = False
     app.dbf_scan_mode = "azimuth"
@@ -331,7 +343,7 @@ def test_dbf_progress_scrub_pauses_animation_at_selected_frame() -> None:
     app._draw_dbf_scan_frame = lambda: drawn_frames.append(app.dbf_scan_frame)
     app._update_dbf_scan_controls = lambda: None
 
-    app.on_dbf_progress_changed("azimuth", "20.2")
+    app._set_dbf_scan_angle("azimuth", -69.8)
 
     assert app.dbf_scan_active
     assert app.dbf_scan_paused
@@ -342,22 +354,86 @@ def test_dbf_progress_scrub_pauses_animation_at_selected_frame() -> None:
     assert "方位DBF角谱已暂停在-70.0°" in app.status.value
 
 
-def test_dbf_progress_label_tracks_chart_mode_and_frame() -> None:
+def test_dbf_angle_label_tracks_chart_mode_and_frame() -> None:
     app = VirtualArrayGui.__new__(VirtualArrayGui)
-    progress_var = _FakeProgressVar()
     progress_label = _FakeLabel()
-    app.az_chart = SimpleNamespace(progress_var=None, progress_label=None)
+    app.az_chart = SimpleNamespace(progress_label=None)
     app.el_chart = SimpleNamespace(
-        progress_var=progress_var,
         progress_label=progress_label,
     )
-    app.dbf_progress_updating = False
 
     app._set_dbf_progress("elevation", 45, 0.0)
 
-    assert progress_var.value == 45.0
     assert progress_label.text == "俯仰 0° (46/181)"
-    assert not app.dbf_progress_updating
+
+
+def test_response_true_angle_line_sets_hand_cursor_near_guide() -> None:
+    fig = Figure()
+    ax = fig.add_subplot(111)
+    ax.set_xlim(-90, 90)
+    ax.set_ylim(-40, 0)
+    canvas = _FakeCanvasWithWidget()
+    chart = ResponseChart(fig=fig, ax=ax, canvas=canvas, true_angle=0.0)
+    app = VirtualArrayGui.__new__(VirtualArrayGui)
+
+    app._update_response_cursor(
+        SimpleNamespace(inaxes=ax, xdata=1.0, ydata=-10.0),
+        chart,
+    )
+
+    assert canvas.widget.cursor == "hand2"
+
+    app._update_response_cursor(
+        SimpleNamespace(inaxes=ax, xdata=12.0, ydata=-10.0),
+        chart,
+    )
+
+    assert canvas.widget.cursor == ""
+
+
+def test_dbf2d_crosshair_sets_hand_cursor_near_true_angle_guides() -> None:
+    fig = Figure()
+    ax = fig.add_subplot(111)
+    ax.set_xlim(-90, 90)
+    ax.set_ylim(-90, 90)
+    app = VirtualArrayGui.__new__(VirtualArrayGui)
+    app.dbf2d_ax = ax
+    app.dbf2d_canvas = _FakeCanvasWithWidget()
+    app.dbf2d_az_frame = 90
+    app.dbf2d_el_frame = 90
+
+    app._update_dbf2d_cursor(SimpleNamespace(inaxes=ax, xdata=1.0, ydata=45.0))
+
+    assert app.dbf2d_canvas.widget.cursor == "hand2"
+
+    app._update_dbf2d_cursor(SimpleNamespace(inaxes=ax, xdata=20.0, ydata=45.0))
+
+    assert app.dbf2d_canvas.widget.cursor == ""
+
+
+def test_dbf2d_hover_tooltip_reports_nearest_angle_and_gain() -> None:
+    fig = Figure()
+    ax = fig.add_subplot(111)
+    ax.set_xlim(-1, 1)
+    ax.set_ylim(-2, 2)
+    app = VirtualArrayGui.__new__(VirtualArrayGui)
+    app.dbf2d_ax = ax
+    app.dbf2d_canvas = _FakeCanvasWithWidget()
+    app.dbf2d_hover_azimuths = np.array([-1.0, 0.0, 1.0])
+    app.dbf2d_hover_elevations = np.array([-2.0, 2.0])
+    app.dbf2d_hover_db = np.array([[-10.0, -9.0, -8.0], [-7.0, -6.0, -5.0]])
+    app.dbf2d_hover_annotation = _new_response_hover_annotation(ax)
+    app.dbf2d_hover_marker = ax.scatter([], [])
+
+    app._update_dbf2d_hover(SimpleNamespace(inaxes=ax, xdata=0.2, ydata=1.9))
+
+    assert app.dbf2d_hover_annotation.get_visible()
+    assert app.dbf2d_hover_annotation.xy == pytest.approx((0.2, 1.9))
+    tooltip = app.dbf2d_hover_annotation.get_text()
+    assert "方位 = +0.0" in tooltip
+    assert "俯仰 = +2.0" in tooltip
+    assert "增益 = -6.00 dB" in tooltip
+    assert app.dbf2d_canvas.draw_count == 1
 
 
 def test_dbf_peak_marker_prefers_true_angle_when_peaks_are_tied() -> None:

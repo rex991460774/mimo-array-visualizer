@@ -64,6 +64,31 @@ GUI.
 | Button consistency | Unified same-row action buttons to white-background compact buttons with hover/focus highlighting instead of mixed filled blocks. |
 | Help manual | Added a scrollable Help > User Manual window covering menus, layout, editing, DBF controls, pattern/dictionary configuration, and save/restore behavior. |
 
+## Direct Angle Manipulation Pass
+
+| Area | Improvement |
+| --- | --- |
+| 1D DBF spectra | Removed progress sliders and made the orange true-angle guide line draggable for manual scan positioning. |
+| 2D DBF heatmap | Removed azimuth/elevation progress sliders and made the heatmap crosshair draggable to set both true-angle coordinates. |
+| Interaction clarity | Kept play/pause/stop buttons, with manual dragging pausing active scan playback at the selected angle. |
+
+## Hover And Import Affordance Pass
+
+| Area | Improvement |
+| --- | --- |
+| 2D DBF heatmap | Added a hover tooltip that reports the nearest azimuth, elevation, and normalized gain value. |
+| Drag affordance | Added hand cursors when hovering near the 1D true-angle guide or 2D true-angle crosshair. |
+| 1T2R channel phase import | Allowed RX-only summary files so two data columns map to Rx1/Rx2 while three data columns map to Tx1/Rx1/Rx2. |
+
+## Dialog Readability Pass
+
+| Area | Improvement |
+| --- | --- |
+| Angle evaluation | Reduced metric typography, removed forced label wrapping, and shortened long cut-reason text so values are less likely to wrap. |
+| Secondary dialogs | Enlarged default channel-pattern and DBF-dictionary dialogs so tables, preview panes, and action rows have readable space. |
+| Dialog buttons | Unified same-row dialog actions to white Codex-style buttons with gray hover states, reserving danger only for red text. |
+| Help manual | Rewrote the manual as a plain-language guide to modules, menu commands, and the typical workflow instead of mirroring the layout. |
+
 ## Not Integrated Yet
 
 | Skill | Reason |

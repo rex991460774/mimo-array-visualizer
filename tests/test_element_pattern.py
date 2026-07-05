@@ -70,6 +70,52 @@ def test_loads_hfss_summary_columns_in_tx_rx_order_with_zero_phase_calibration(
         assert series.values_at(np.array([0.0]))[0] == pytest.approx(0.0)
 
 
+def test_loads_1t2r_summary_with_rx_only_columns(tmp_path) -> None:
+    csv_path = tmp_path / "rx-only-phase-summary.csv"
+    csv_path.write_text(
+        '"Theta [deg]","RX phase A","RX phase B"\n'
+        "-1,10,20\n"
+        "0,12,24\n",
+        encoding="utf-8",
+    )
+
+    series_by_channel = load_hfss_summary_pattern(
+        csv_path,
+        ["Tx1", "Rx1", "Rx2"],
+        value_kind=PATTERN_KIND_PHASE,
+    )
+
+    assert list(series_by_channel) == ["Rx1", "Rx2"]
+    assert series_by_channel["Rx1"].value_column == "RX phase A"
+    assert series_by_channel["Rx2"].value_column == "RX phase B"
+    assert np.allclose(series_by_channel["Rx1"].values, np.array([-2.0, 0.0]))
+    assert np.allclose(series_by_channel["Rx2"].values, np.array([-4.0, 0.0]))
+
+
+def test_loads_1t2r_summary_with_tx_and_rx_columns(tmp_path) -> None:
+    csv_path = tmp_path / "tx-rx-phase-summary.csv"
+    csv_path.write_text(
+        '"Theta [deg]","TX phase","RX phase A","RX phase B"\n'
+        "-1,5,10,15\n"
+        "0,6,12,18\n",
+        encoding="utf-8",
+    )
+
+    series_by_channel = load_hfss_summary_pattern(
+        csv_path,
+        ["Tx1", "Rx1", "Rx2"],
+        value_kind=PATTERN_KIND_PHASE,
+    )
+
+    assert list(series_by_channel) == ["Tx1", "Rx1", "Rx2"]
+    assert series_by_channel["Tx1"].value_column == "TX phase"
+    assert series_by_channel["Rx1"].value_column == "RX phase A"
+    assert series_by_channel["Rx2"].value_column == "RX phase B"
+    assert np.allclose(series_by_channel["Tx1"].values, np.array([-1.0, 0.0]))
+    assert np.allclose(series_by_channel["Rx1"].values, np.array([-2.0, 0.0]))
+    assert np.allclose(series_by_channel["Rx2"].values, np.array([-3.0, 0.0]))
+
+
 def test_loads_hfss_phase_summary_from_complex_values(tmp_path) -> None:
     csv_path = tmp_path / "complex-phase-summary.csv"
     csv_path.write_text(

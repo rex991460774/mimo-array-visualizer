@@ -144,9 +144,9 @@ NOTE_STYLES = {
 
 UI_TEXT = {
     "app_title": {
-        "zh": "MIMO阵列可视化工具 v{version}",
-        "en": "MIMO Array Visualizer v{version}",
-        "ja": "MIMOアレイ可視化ツール v{version}",
+        "zh": "MIMO阵列可视化工具 V{version}",
+        "en": "MIMO Array Visualizer V{version}",
+        "ja": "MIMOアレイ可視化ツール V{version}",
     },
     "app_name": {
         "zh": "MIMO阵列工作台",
@@ -205,94 +205,71 @@ UI_TEXT = {
     "manual_body": {
         "zh": (
             "MIMO阵列可视化工具使用说明\n\n"
-            "1. 顶部菜单\n"
-            "文件：导入或导出阵面 JSON。\n"
-            "编辑：撤销、重做阵列编辑，设置通道幅相 CSV，配置 DBF 字典。\n"
-            "视图：切换中文、英文、日文界面。\n"
-            "帮助：打开本说明书和关于信息。\n\n"
-            "2. 工作区布局\n"
-            "左侧四个模块显示物理阵列、虚拟阵列、方位 DBF 角谱和俯仰 DBF 角谱。\n"
-            "右侧显示总览或 2D DBF 热图。中间分隔条可以拖动，默认左右各占约 50%。\n\n"
-            "3. 物理阵列编辑\n"
-            "使用 +TX、+RX 添加通道。点击删除进入删除模式，再点击图中的通道删除。\n"
-            "清空会恢复到空阵列。也可以直接在物理阵列图中拖动 TX/RX 通道调整位置。\n"
-            "键盘方向键可微调选中通道，Delete 可删除选中通道，Esc 可退出拖动或删除模式。\n\n"
-            "4. 参数与自动排阵\n"
-            "底部频率输入框用于设置工作频率，单位为 GHz。\n"
-            "竞争峰裕量用于 DBF 模糊/竞争峰判断。自动排阵可输入 T/R 数量并应用阵列。\n\n"
-            "5. DBF 与热图\n"
-            "方位和俯仰角谱支持播放、暂停、停止扫描。\n"
-            "2D DBF 页显示二维角谱热图、颜色标尺、真实角、峰值角和峰值偏差。\n"
-            "2D DBF 页下方按钮可分别播放方位或俯仰扫描，也可以停止 2D 扫描。\n\n"
-            "6. 方向图与字典\n"
-            "编辑菜单可配置通道幅相 CSV 和 DBF 字典。\n"
-            "方向图状态显示在底部状态条和顶部信息区，用于确认当前是否使用理想方向图、通道方向图或自定义字典。\n\n"
-            "7. 保存与恢复\n"
-            "导出阵面 JSON 会保存当前阵列布局和评估信息。\n"
-            "程序会记录部分本地状态，例如窗口尺寸、最近目录、频率、裕量和已加载配置。"
+            "这个程序用来快速搭建 TX/RX 阵列，观察虚拟孔径，并检查 DBF 测角是否容易出现模糊、跳变或旁瓣竞争。\n\n"
+            "一、主要子模块\n"
+            "物理阵列：这里是真实 TX/RX 的位置。可以添加、删除、拖动通道，坐标单位按波长显示。物理位置改变后，后面的虚拟阵列和角谱都会重新计算。\n"
+            "虚拟阵列：显示 TX 与 RX 组合后的等效采样点。点越分散，通常角分辨率越好；点重合越多，可用虚拟通道越少。\n"
+            "方位/俯仰 1D 角谱：看某一个真实角下，DBF 字典会把峰值打到哪里。橙色线是真实角，叉号是估计峰值。拖动橙色线可以手动检查不同真实角。\n"
+            "总览与测角评估：总览看通道数、虚拟通道、口径和分辨率；测角评估看不模糊范围、范围内最大误差、竞争峰裕量和截断原因。\n"
+            "2D DBF 热图：同时看方位和俯仰。颜色越亮表示归一化增益越高，白色十字是真实角，叉号是峰值位置。拖动十字可以同时改变真实方位和真实俯仰。\n"
+            "底部参数：频率影响物理尺寸换算；竞争峰裕量用于判断峰值是否可靠；自动排阵可以快速生成指定数量的 T/R 通道。\n\n"
+            "二、顶部二级菜单\n"
+            "文件 > 导入阵面 JSON：读取之前保存的 TX/RX 布局。\n"
+            "文件 > 导出阵面 JSON：保存当前布局、评估结果和当前配置，方便复现实验。\n"
+            "编辑 > 撤销/重做阵列编辑：回退或恢复最近的阵列位置、添加、删除操作。\n"
+            "编辑 > 设置通道幅相 CSV：给每个物理通道加载 HFSS 等工具导出的幅度/相位方向图。不加载时，该通道按理想通道处理。汇总 CSV 可以一次加载多通道；1T2R 相位文件如果只有两列数据，会按 Rx1、Rx2 读取，三列则按 Tx1、Rx1、Rx2 读取。\n"
+            "编辑 > 配置 DBF 字典：选择测角时使用哪种字典。理想几何字典只按阵列几何算相位；理想反向相位用于快速检查符号约定；通道幅相校准字典会叠加已导入的通道方向图；导入 CSV/XLSX 字典用于使用外部仿真或实测字典。\n"
+            "视图 > 中文/英文/日文：切换界面语言。\n"
+            "帮助 > 使用说明：打开本说明。帮助 > 关于：查看版本和日志路径。\n\n"
+            "三、常见使用顺序\n"
+            "先摆放或导入阵列，再设置频率和竞争峰裕量；如果有通道幅相或外部字典，再从编辑菜单导入；最后看 1D 角谱、2D 热图和测角评估，确认峰值是否跟随真实角、误差是否可接受。"
         ),
         "en": (
             "MIMO Array Visualizer User Manual\n\n"
-            "1. Top menu\n"
-            "File: import or export antenna-layout JSON files.\n"
-            "Edit: undo, redo, set channel amp/phase CSV files, and configure the DBF dictionary.\n"
-            "View: switch the interface language.\n"
-            "Help: open this manual and the About dialog.\n\n"
-            "2. Workspace layout\n"
-            "The left side contains the physical array, virtual array, azimuth DBF spectrum, and elevation DBF spectrum.\n"
-            "The right side contains the overview or the 2D DBF heatmap. Drag the center sash to resize; the default split is about 50/50.\n\n"
-            "3. Physical array editing\n"
-            "Use +TX and +RX to add channels. Click Delete to enter delete mode, then click a channel in the plot.\n"
-            "Clear resets the editable array. You can also drag TX/RX channels directly in the physical-array plot.\n"
-            "Arrow keys nudge the selected channel, Delete removes it, and Esc cancels drag or delete mode.\n\n"
-            "4. Parameters and auto layout\n"
-            "The frequency field sets the working frequency in GHz.\n"
-            "Peak margin controls DBF ambiguity checks. Auto Array applies the requested T/R counts.\n\n"
-            "5. DBF and heatmap\n"
-            "Azimuth and elevation spectra support play, pause, and stop scanning.\n"
-            "The 2D DBF page shows the angle-spectrum heatmap, colorbar, true angle, peak angle, and peak delta.\n"
-            "Use the 2D controls to play azimuth or elevation scans and stop the 2D scan.\n\n"
-            "6. Patterns and dictionaries\n"
-            "Use the Edit menu to configure channel amp/phase CSV files and the DBF dictionary.\n"
-            "The pattern status appears in the footer and header so you can verify the active pattern/dictionary mode.\n\n"
-            "7. Save and restore\n"
-            "Export layout JSON saves the current layout and evaluation data.\n"
-            "The app also remembers local state such as window size, recent folders, frequency, margin, and loaded configuration."
+            "This tool helps you build a TX/RX array, inspect the virtual aperture, and check whether DBF angle estimation is likely to suffer from ambiguity, jumps, or competing sidelobes.\n\n"
+            "Main modules\n"
+            "Physical array: the real TX/RX positions. Add, delete, or drag channels. Coordinates are displayed in wavelengths, and every layout change recalculates the virtual array and spectra.\n"
+            "Virtual array: the equivalent sampling points created by TX/RX combinations. Wider spread usually improves resolution; duplicate points reduce usable virtual channels.\n"
+            "Az/El 1D spectra: show where the DBF dictionary peaks for a selected true angle. The orange line is the true angle and the cross is the estimated peak. Drag the orange line to inspect other angles.\n"
+            "Overview and angle evaluation: overview reports channel count, virtual channels, aperture, and resolution; angle evaluation reports no-fold range, max error, peak margin, and why the valid range stops.\n"
+            "2D DBF heatmap: shows azimuth and elevation together. Brighter color means stronger normalized gain, the white crosshair is the true angle, and the cross marker is the peak. Drag the crosshair to change both true angles.\n"
+            "Footer parameters: frequency controls size conversion; peak margin controls reliability checks; Auto Array quickly creates a requested T/R count.\n\n"
+            "Top menu items\n"
+            "File > Import Array JSON: load a saved TX/RX layout.\n"
+            "File > Export Array JSON: save the current layout, evaluation, and configuration.\n"
+            "Edit > Undo/Redo: step backward or forward through recent layout edits.\n"
+            "Edit > Set Channel Amp/Phase CSV: load per-channel amplitude or phase patterns from HFSS-like exports. Missing channels stay ideal. Summary CSV files can load several channels at once; for 1T2R phase data, two data columns map to Rx1/Rx2 and three data columns map to Tx1/Rx1/Rx2.\n"
+            "Edit > Configure DBF Dictionary: choose the dictionary used for angle estimation. Ideal geometric uses only array geometry; ideal reversed phase checks sign convention; channel amp/phase uses imported channel data; imported CSV/XLSX uses an external simulated or measured dictionary.\n"
+            "View: switch language. Help: open this manual or the About dialog.\n\n"
+            "Typical flow\n"
+            "Place or import the array, set frequency and peak margin, import channel data or dictionaries if available, then check the 1D spectra, 2D heatmap, and angle evaluation to confirm that peaks track the true angle."
         ),
         "ja": (
             "MIMOアレイ可視化ツール使用説明\n\n"
-            "1. 上部メニュー\n"
-            "ファイル：アレイ配置 JSON を読み込み、または書き出します。\n"
-            "編集：元に戻す、やり直し、チャネル振幅/位相 CSV、DBF 辞書設定を行います。\n"
-            "表示：画面言語を切り替えます。\n"
-            "ヘルプ：この説明書とバージョン情報を開きます。\n\n"
-            "2. ワークスペース\n"
-            "左側には物理アレイ、仮想アレイ、方位 DBF スペクトル、仰角 DBF スペクトルを表示します。\n"
-            "右側には概要または 2D DBF ヒートマップを表示します。中央の区切り線はドラッグでき、既定は約 50/50 です。\n\n"
-            "3. 物理アレイ編集\n"
-            "+TX、+RX でチャネルを追加します。削除を押すと削除モードになり、図内のチャネルをクリックして削除できます。\n"
-            "クリアで編集アレイをリセットします。物理アレイ図内で TX/RX を直接ドラッグすることもできます。\n"
-            "矢印キーで選択チャネルを微調整し、Delete で削除、Esc でドラッグまたは削除モードを解除します。\n\n"
-            "4. パラメータと自動配置\n"
-            "周波数欄で動作周波数を GHz 単位で設定します。\n"
-            "ピーク余裕は DBF の曖昧性判定に使います。自動配置では T/R 数を指定して適用します。\n\n"
-            "5. DBF とヒートマップ\n"
-            "方位と仰角スペクトルは再生、一時停止、停止に対応します。\n"
-            "2D DBF ページには角度スペクトル、カラーバー、真角度、ピーク角、ピーク偏差を表示します。\n"
-            "2D コントロールで方位または仰角スキャンを再生し、2D スキャンを停止できます。\n\n"
-            "6. パターンと辞書\n"
-            "編集メニューからチャネル振幅/位相 CSV と DBF 辞書を設定できます。\n"
-            "パターン状態はフッターとヘッダーに表示され、現在のモードを確認できます。\n\n"
-            "7. 保存と復元\n"
-            "配置 JSON の書き出しで現在のレイアウトと評価情報を保存します。\n"
-            "アプリはウィンドウサイズ、最近のフォルダ、周波数、余裕、読み込み済み設定なども記憶します。"
+            "このツールは TX/RX アレイを作成し、仮想開口を確認し、DBF 測角で曖昧性、ジャンプ、競合サイドローブが起きやすいかを見るためのものです。\n\n"
+            "主なモジュール\n"
+            "物理アレイ：実際の TX/RX 位置です。チャネルの追加、削除、ドラッグができ、座標は波長単位で表示されます。\n"
+            "仮想アレイ：TX/RX の組み合わせでできる等価サンプル点です。広がりが大きいほど分解能は良くなりやすく、重複点が多いほど有効チャネルは減ります。\n"
+            "方位/仰角 1D スペクトル：選んだ真角度に対して DBF 辞書のピークがどこに出るかを示します。オレンジ線が真角度、× が推定ピークです。\n"
+            "概要と測角評価：概要はチャネル数、仮想チャネル、開口、分解能を表示します。測角評価は非曖昧範囲、最大誤差、ピーク余裕、範囲が止まる理由を表示します。\n"
+            "2D DBF ヒートマップ：方位と仰角を同時に見ます。明るいほど正規化利得が高く、白い十字が真角度、× がピークです。\n"
+            "下部パラメータ：周波数は寸法換算に使います。ピーク余裕は信頼性判定に使います。自動配置は指定した T/R 数を素早く作成します。\n\n"
+            "上部メニュー\n"
+            "ファイル > アレイ JSON 読み込み：保存済みの TX/RX 配置を読み込みます。\n"
+            "ファイル > アレイ JSON 書き出し：現在の配置、評価、設定を保存します。\n"
+            "編集 > 元に戻す/やり直し：最近の配置編集を戻す、または復元します。\n"
+            "編集 > チャネル振幅/位相 CSV：HFSS などのチャネル振幅/位相データを読み込みます。未設定チャネルは理想として扱います。1T2R 位相データでは、2 列は Rx1/Rx2、3 列は Tx1/Rx1/Rx2 として読みます。\n"
+            "編集 > DBF 辞書設定：測角に使う辞書を選びます。理想幾何、逆位相確認、チャネル振幅/位相、外部 CSV/XLSX 辞書を選択できます。\n"
+            "表示：言語を切り替えます。ヘルプ：この説明書またはバージョン情報を開きます。\n\n"
+            "基本の流れ\n"
+            "アレイを配置または読み込み、周波数とピーク余裕を設定し、必要ならチャネルデータや辞書を読み込み、1D スペクトル、2D ヒートマップ、測角評価を確認します。"
         ),
     },
     "about_title": {"zh": "关于 MIMO阵列工作台", "en": "About MIMO Array Workbench", "ja": "MIMOアレイワークベンチについて"},
     "about_message": {
-        "zh": "MIMO阵列工作台 v{version}\n日志文件：{log_path}",
-        "en": "MIMO Array Workbench v{version}\nLog file: {log_path}",
-        "ja": "MIMOアレイワークベンチ v{version}\nログファイル：{log_path}",
+        "zh": "MIMO阵列工作台 V{version}\n日志文件：{log_path}",
+        "en": "MIMO Array Workbench V{version}\nLog file: {log_path}",
+        "ja": "MIMOアレイワークベンチ V{version}\nログファイル：{log_path}",
     },
     "language_zh": {"zh": "中文", "en": "Chinese", "ja": "中国語"},
     "language_en": {"zh": "英文", "en": "English", "ja": "英語"},
@@ -364,6 +341,11 @@ UI_TEXT = {
         "ja": "グレーティングローブ=最大サイドローブ",
     },
     "gain_value": {"zh": "增益 = {value:.2f} dB", "en": "Gain = {value:.2f} dB", "ja": "利得 = {value:.2f} dB"},
+    "dbf2d_hover": {
+        "zh": "方位 = {az:+.1f}°\n俯仰 = {el:+.1f}°\n增益 = {gain:.2f} dB",
+        "en": "Az = {az:+.1f} deg\nEl = {el:+.1f} deg\nGain = {gain:.2f} dB",
+        "ja": "方位 = {az:+.1f}°\n仰角 = {el:+.1f}°\n利得 = {gain:.2f} dB",
+    },
     "psl_label": {"zh": "{mode} PSL：{value:.2f} dB", "en": "{mode} PSL: {value:.2f} dB", "ja": "{mode} PSL：{value:.2f} dB"},
     "az": {"zh": "方位", "en": "Azimuth", "ja": "方位"},
     "el": {"zh": "俯仰", "en": "Elevation", "ja": "仰角"},
@@ -435,6 +417,11 @@ UI_TEXT = {
         "zh": "已暂停2D DBF的{axis}扫描。",
         "en": "Paused 2D DBF {axis} scan.",
         "ja": "2D DBFの{axis}走査を一時停止。",
+    },
+    "dbf2d_dragged": {
+        "zh": "已拖动2D DBF真实角：方位 {az:+.0f}°，俯仰 {el:+.0f}°。",
+        "en": "Moved 2D DBF true angle: Az {az:+.0f} deg, El {el:+.0f} deg.",
+        "ja": "2D DBF真角度を移動：方位 {az:+.0f}°，仰角 {el:+.0f}°。",
     },
     "dbf2d_stopped": {
         "zh": "已停止2D DBF扫描。",
@@ -852,6 +839,8 @@ THEME = {
     "button_hover": "#f0f7ff",
     "button_pressed": "#e0f2fe",
     "button_border": "#cbd7e3",
+    "dialog_button_hover": "#f0f1ee",
+    "dialog_button_pressed": "#e5e7e2",
     "menu_hover": "#e0f2fe",
     "focus": "#0891b2",
     "focus_soft": "#a5f3fc",
@@ -893,8 +882,6 @@ class ResponseChart:
     fig: Figure
     ax: any  # matplotlib Axes
     canvas: FigureCanvasTkAgg
-    progress_var: tk.DoubleVar | None = None
-    progress_scale: ttk.Scale | None = None
     progress_label: ttk.Label | None = None
     play_button: ttk.Button | None = None
     stop_button: ttk.Button | None = None
@@ -902,6 +889,7 @@ class ResponseChart:
     hover_marker: any = None
     hover_db: np.ndarray = None
     hover_angles: np.ndarray = None
+    true_angle: float | None = None
     buttons: list = None
     button_callbacks: list = None
 
@@ -1592,11 +1580,19 @@ def _ambiguity_level_label(value: str) -> str:
 def _angle_cut_reason_summary(metrics: DbfAngleMetrics | None) -> str:
     if metrics is None:
         return "N/A"
-    negative = metrics.negative_cut_reason or "N/A"
-    positive = metrics.positive_cut_reason or "N/A"
+    reason_labels = {
+        "竞争峰模糊": "峰模糊",
+        "到达数据边界": "边界",
+        "边界受限": "边界受限",
+        "误差跳变": "误差跳变",
+        "谱不可靠": "谱不可靠",
+        "正常": "正常",
+    }
+    negative = reason_labels.get(metrics.negative_cut_reason, metrics.negative_cut_reason) or "N/A"
+    positive = reason_labels.get(metrics.positive_cut_reason, metrics.positive_cut_reason) or "N/A"
     if negative == positive:
         return negative
-    return f"负侧{negative}，正侧{positive}"
+    return f"负:{negative} / 正:{positive}"
 
 
 def _legacy_note_key(note: str) -> str:
@@ -1745,13 +1741,14 @@ class VirtualArrayGui:
         self.dbf_scan_angles = np.empty(0, dtype=float)
         self.dbf_spectra_db = np.empty((0, 0), dtype=float)
         self.dbf_scan_frame = 0
-        self.dbf_progress_updating = False
+        self.dbf_drag_mode: str | None = None
         self.dbf2d_az_frame = _dbf_frame_index_for_angle(0.0)
         self.dbf2d_el_frame = _dbf_frame_index_for_angle(0.0)
         self.dbf2d_az_playing = False
         self.dbf2d_el_playing = False
         self.dbf2d_after_id: str | None = None
         self.dbf2d_progress_updating = False
+        self.dbf2d_dragging = False
         self.dbf2d_az_var: tk.DoubleVar | None = None
         self.dbf2d_el_var: tk.DoubleVar | None = None
         self.dbf2d_az_button: ttk.Button | None = None
@@ -1763,6 +1760,11 @@ class VirtualArrayGui:
         self.dbf2d_cbar_ax = None
         self.dbf2d_canvas: FigureCanvasTkAgg | None = None
         self.dbf2d_normalization_max: float | None = None
+        self.dbf2d_hover_annotation = None
+        self.dbf2d_hover_marker = None
+        self.dbf2d_hover_azimuths = np.empty(0, dtype=float)
+        self.dbf2d_hover_elevations = np.empty(0, dtype=float)
+        self.dbf2d_hover_db = np.empty((0, 0), dtype=float)
         self.workspace_pane: ttk.PanedWindow | None = None
         self.eval_notebook: ttk.Notebook | None = None
         self.config_menu_button: ttk.Menubutton | None = None
@@ -1971,7 +1973,7 @@ class VirtualArrayGui:
             "MetricName.TLabel",
             background=THEME["metric_bg"],
             foreground=THEME["text_secondary"],
-            font=(_f, THEME["font_size_sm"], "bold"),
+            font=(_f, THEME["font_size_sm"]),
         )
         style.configure(
             "MetricSection.TLabel",
@@ -1983,25 +1985,25 @@ class VirtualArrayGui:
             "MetricValue.TLabel",
             background=THEME["metric_bg"],
             foreground=THEME["text_primary"],
-            font=(_fm, THEME["font_size_base"], "bold"),
+            font=(_fm, THEME["font_size_sm"], "bold"),
         )
         style.configure(
             "MetricValueGood.TLabel",
             background=THEME["metric_bg"],
             foreground=THEME["success"],
-            font=(_fm, THEME["font_size_base"], "bold"),
+            font=(_fm, THEME["font_size_sm"], "bold"),
         )
         style.configure(
             "MetricValueWarn.TLabel",
             background=THEME["metric_bg"],
             foreground=THEME["warning"],
-            font=(_fm, THEME["font_size_base"], "bold"),
+            font=(_fm, THEME["font_size_sm"], "bold"),
         )
         style.configure(
             "MetricValueRisk.TLabel",
             background=THEME["metric_bg"],
             foreground=THEME["danger"],
-            font=(_fm, THEME["font_size_base"], "bold"),
+            font=(_fm, THEME["font_size_sm"], "bold"),
         )
 
         button_base = {
@@ -2360,6 +2362,65 @@ class VirtualArrayGui:
             lightcolor=[("pressed", "#fee2e2"), ("active", THEME["danger_light"])],
             darkcolor=[("pressed", "#fee2e2"), ("active", THEME["danger_light"])],
         )
+        dialog_button_base = {
+            **button_base,
+            "padding": (12, 7),
+            "relief": "solid",
+        }
+        dialog_button_map = {
+            "background": [
+                ("disabled", THEME["disabled_bg"]),
+                ("pressed", THEME["dialog_button_pressed"]),
+                ("active", THEME["dialog_button_hover"]),
+            ],
+            "foreground": [
+                ("disabled", THEME["text_muted"]),
+                ("active", THEME["text_primary"]),
+            ],
+            "bordercolor": [
+                ("disabled", THEME["button_border"]),
+                ("focus", THEME["button_border"]),
+                ("active", THEME["button_border"]),
+            ],
+            "lightcolor": [
+                ("pressed", THEME["dialog_button_pressed"]),
+                ("active", THEME["dialog_button_hover"]),
+            ],
+            "darkcolor": [
+                ("pressed", THEME["dialog_button_pressed"]),
+                ("active", THEME["dialog_button_hover"]),
+            ],
+        }
+        style.configure(
+            "DialogButton.TButton",
+            **dialog_button_base,
+            font=button_font,
+            background=THEME["button_bg"],
+            foreground=THEME["text_primary"],
+            bordercolor=THEME["button_border"],
+            lightcolor=THEME["button_bg"],
+            darkcolor=THEME["button_border"],
+        )
+        style.map("DialogButton.TButton", **dialog_button_map)
+        style.configure(
+            "DialogDanger.TButton",
+            **dialog_button_base,
+            font=button_font,
+            background=THEME["button_bg"],
+            foreground=THEME["danger"],
+            bordercolor=THEME["button_border"],
+            lightcolor=THEME["button_bg"],
+            darkcolor=THEME["button_border"],
+        )
+        danger_dialog_map = {
+            **dialog_button_map,
+            "foreground": [
+                ("disabled", THEME["text_muted"]),
+                ("pressed", THEME["danger_pressed"]),
+                ("active", THEME["danger_pressed"]),
+            ],
+        }
+        style.map("DialogDanger.TButton", **danger_dialog_map)
 
         style.configure(
             "TLabelframe",
@@ -2749,14 +2810,34 @@ class VirtualArrayGui:
         # Virtual array: hover only
         self.virt_canvas.mpl_connect("motion_notify_event", self.on_motion)
         # Az/El response: hover only
-        for chart in (self.az_chart, self.el_chart):
+        for mode, chart in (
+            ("azimuth", self.az_chart),
+            ("elevation", self.el_chart),
+        ):
+            chart.canvas.mpl_connect(
+                "button_press_event",
+                lambda event, chart_mode=mode: self.on_dbf_true_line_press(
+                    event, chart_mode
+                ),
+            )
             chart.canvas.mpl_connect("motion_notify_event", self.on_motion)
             chart.canvas.mpl_connect(
+                "button_release_event",
+                lambda event, chart_mode=mode: self.on_dbf_true_line_release(
+                    event, chart_mode
+                ),
+            )
+            chart.canvas.mpl_connect(
                 "figure_leave_event",
-                lambda _event, response_chart=chart: self._hide_response_hover(
+                lambda _event, response_chart=chart: self._on_response_figure_leave(
                     response_chart
                 ),
             )
+        if self.dbf2d_canvas is not None:
+            self.dbf2d_canvas.mpl_connect("button_press_event", self.on_dbf2d_crosshair_press)
+            self.dbf2d_canvas.mpl_connect("motion_notify_event", self.on_dbf2d_crosshair_motion)
+            self.dbf2d_canvas.mpl_connect("button_release_event", self.on_dbf2d_crosshair_release)
+            self.dbf2d_canvas.mpl_connect("figure_leave_event", self.on_dbf2d_figure_leave)
 
         self.root.bind("<Left>", self.on_arrow_key)
         self.root.bind("<Right>", self.on_arrow_key)
@@ -3191,26 +3272,10 @@ class VirtualArrayGui:
         )
         stop_button.grid(row=0, column=2, sticky="e")
         stop_button.configure(state=tk.DISABLED)
-        progress_var = tk.DoubleVar(value=_dbf_frame_index_for_angle(0.0))
-        progress_scale = ttk.Scale(
-            progress_frame,
-            from_=0,
-            to=DBF_SCAN_GRID_SIZE - 1,
-            orient=tk.HORIZONTAL,
-            variable=progress_var,
-            command=lambda value, chart_mode=mode: self.on_dbf_progress_changed(
-                chart_mode, value
-            ),
-            style="Horizontal.TScale",
-        )
-        progress_scale.grid(row=1, column=0, sticky="ew", pady=(4, 0))
-
         return ResponseChart(
             fig=fig,
             ax=ax,
             canvas=canvas,
-            progress_var=progress_var,
-            progress_scale=progress_scale,
             progress_label=progress_label,
             play_button=play_button,
             stop_button=stop_button,
@@ -3320,21 +3385,22 @@ class VirtualArrayGui:
         metric_specs: tuple[tuple[str, str], ...],
         column: int,
     ) -> None:
-        group = ttk.Frame(parent, style="Metric.TFrame", padding=(8, 6))
+        group = ttk.Frame(parent, style="Metric.TFrame", padding=(7, 5))
         group.grid(
             row=0,
             column=column,
             sticky="nsew",
             padx=(0 if column == 0 else 4, 0 if column == 1 else 4),
         )
-        group.grid_columnconfigure(1, weight=1)
+        group.grid_columnconfigure(0, weight=0, minsize=72)
+        group.grid_columnconfigure(1, weight=1, minsize=150)
         title = ttk.Label(
             group,
             text=self._t(axis_key),
             style="MetricSection.TLabel",
             anchor="w",
         )
-        title.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+        title.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 3))
         self.secondary_name_labels[f"{axis_key}_section"] = title
         self.secondary_name_label_keys[f"{axis_key}_section"] = axis_key
 
@@ -3345,18 +3411,18 @@ class VirtualArrayGui:
                 style="MetricName.TLabel",
                 anchor="w",
                 justify=tk.LEFT,
-                wraplength=82,
+                wraplength=0,
             )
-            name_label.grid(row=row, column=0, sticky="w", pady=(1, 2), padx=(0, 6))
+            name_label.grid(row=row, column=0, sticky="w", pady=(0, 1), padx=(0, 8))
             value_label = ttk.Label(
                 group,
                 text="",
                 style="MetricValue.TLabel",
                 anchor="e",
                 justify=tk.RIGHT,
-                wraplength=92,
+                wraplength=260,
             )
-            value_label.grid(row=row, column=1, sticky="ew", pady=(1, 2))
+            value_label.grid(row=row, column=1, sticky="ew", pady=(0, 1))
             self.secondary_name_labels[metric_key] = name_label
             self.secondary_name_label_keys[metric_key] = label_key
             self.secondary_value_labels[metric_key] = value_label
@@ -3434,7 +3500,6 @@ class VirtualArrayGui:
         )
         self.eval_notebook.add(self.dbf2d_frame, text=self._t("eval_tab_dbf2d"))
         self.dbf2d_frame.grid_columnconfigure(0, weight=1)
-        self.dbf2d_frame.grid_columnconfigure(1, weight=0)
         self.dbf2d_frame.grid_rowconfigure(0, weight=1)
 
         self.dbf2d_fig = Figure(figsize=(DBF2D_FIG_SIZE, DBF2D_FIG_SIZE), dpi=FIG_DPI)
@@ -3446,34 +3511,10 @@ class VirtualArrayGui:
         dbf2d_widget = self.dbf2d_canvas.get_tk_widget()
         _style_canvas_widget(dbf2d_widget)
         dbf2d_widget.configure(width=DBF2D_CANVAS_SIZE, height=DBF2D_CANVAS_SIZE)
-        dbf2d_widget.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-
-        self.dbf2d_el_var = tk.DoubleVar(value=float(self.dbf2d_el_frame))
-        el_scale = ttk.Scale(
-            self.dbf2d_frame,
-            from_=DBF_SCAN_GRID_SIZE - 1,
-            to=0,
-            orient=tk.VERTICAL,
-            variable=self.dbf2d_el_var,
-            command=lambda value: self.on_dbf2d_progress_changed("elevation", value),
-            style="Vertical.TScale",
-        )
-        el_scale.grid(row=0, column=1, sticky="ns")
-
-        self.dbf2d_az_var = tk.DoubleVar(value=float(self.dbf2d_az_frame))
-        az_scale = ttk.Scale(
-            self.dbf2d_frame,
-            from_=0,
-            to=DBF_SCAN_GRID_SIZE - 1,
-            orient=tk.HORIZONTAL,
-            variable=self.dbf2d_az_var,
-            command=lambda value: self.on_dbf2d_progress_changed("azimuth", value),
-            style="Horizontal.TScale",
-        )
-        az_scale.grid(row=1, column=0, sticky="ew", pady=(6, 0), padx=(0, 6))
+        dbf2d_widget.grid(row=0, column=0, sticky="nsew")
 
         button_row = ttk.Frame(self.dbf2d_frame, style="Card.TFrame")
-        button_row.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(5, 0))
+        button_row.grid(row=1, column=0, sticky="ew", pady=(5, 0))
         for column in range(3):
             button_row.grid_columnconfigure(column, weight=1, uniform="dbf2d_buttons")
         self.dbf2d_az_button = ttk.Button(
@@ -3509,7 +3550,7 @@ class VirtualArrayGui:
             font=(THEME["font_family_mono"], THEME["font_size_sm"]),
             anchor="center",
         )
-        self.dbf2d_status_label.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        self.dbf2d_status_label.grid(row=2, column=0, sticky="ew", pady=(4, 0))
 
     def _metric_value_style(self, key: str, value: str) -> str:
         if value in {"不可用"}:
@@ -4001,6 +4042,106 @@ class VirtualArrayGui:
         self.status.set(self._t("selection_cleared"))
         return "break"
 
+    def _event_dbf_angle(self, event, chart: ResponseChart) -> float | None:  # noqa: ANN001
+        if event.xdata is not None:
+            return float(event.xdata)
+        if event.x is None or event.y is None:
+            return None
+        try:
+            angle, _gain = chart.ax.transData.inverted().transform((event.x, event.y))
+        except (TypeError, ValueError):
+            return None
+        return float(angle)
+
+    def _set_chart_cursor(self, chart: ResponseChart, cursor: str) -> None:
+        if chart.canvas is None or not hasattr(chart.canvas, "get_tk_widget"):
+            return
+        try:
+            chart.canvas.get_tk_widget().configure(cursor=cursor)
+        except (tk.TclError, AttributeError):
+            return
+
+    def _response_event_near_true_line(self, event, chart: ResponseChart) -> bool:  # noqa: ANN001
+        if event.inaxes != chart.ax or event.xdata is None or chart.true_angle is None:
+            return False
+        x_low, x_high = chart.ax.get_xlim()
+        tolerance = max(2.0, abs(x_high - x_low) * 0.015)
+        return abs(float(event.xdata) - float(chart.true_angle)) <= tolerance
+
+    def _update_response_cursor(self, event, chart: ResponseChart) -> None:  # noqa: ANN001
+        self._set_chart_cursor(
+            chart,
+            "hand2" if self._response_event_near_true_line(event, chart) else "",
+        )
+
+    def _on_response_figure_leave(self, chart: ResponseChart) -> None:
+        self._hide_response_hover(chart)
+        self._set_chart_cursor(chart, "")
+
+    def _set_dbf_scan_frame(self, mode: str, frame: int) -> None:
+        frame = max(0, min(DBF_SCAN_GRID_SIZE - 1, int(frame)))
+
+        if self.dbf_scan_after_id is not None:
+            try:
+                self.root.after_cancel(self.dbf_scan_after_id)
+            except tk.TclError:
+                pass
+            self.dbf_scan_after_id = None
+
+        if (
+            self.dbf_scan_mode != mode
+            or self.dbf_true_angles.size == 0
+            or self.dbf_scan_angles.size == 0
+            or self.dbf_spectra_db.size == 0
+        ):
+            self._normalize_frequency_input()
+            self._load_dbf_spectra(mode)
+
+        self.dbf_scan_frame = min(frame, len(self.dbf_true_angles) - 1)
+        self.dbf_scan_active = True
+        self.dbf_scan_paused = True
+        self._draw_dbf_scan_frame()
+        self._update_dbf_scan_controls()
+        language = getattr(self, "language", LANGUAGE_ZH)
+        label = _dbf_mode_label(mode, language)
+        true_angle = self._current_dbf_true_angle()
+        self.status.set(self._t("dbf_pause_status", mode=label, angle=true_angle))
+
+    def _set_dbf_scan_angle(self, mode: str, angle: float) -> None:
+        self._set_dbf_scan_frame(mode, _dbf_frame_index_for_angle(angle))
+
+    def on_dbf_true_line_press(self, event, mode: str) -> None:  # noqa: ANN001
+        chart = self._chart_for_dbf_mode(mode)
+        if event.button != 1 or event.inaxes != chart.ax:
+            return
+        if not self._response_event_near_true_line(event, chart):
+            return
+        angle = self._event_dbf_angle(event, chart)
+        if angle is None:
+            return
+        self.dbf_drag_mode = mode
+        self._set_chart_cursor(chart, "hand2")
+        self._hide_response_hover(chart)
+        self._set_dbf_scan_angle(mode, angle)
+
+    def _drag_dbf_true_line(self, event) -> None:  # noqa: ANN001
+        mode = self.dbf_drag_mode
+        if mode is None:
+            return
+        chart = self._chart_for_dbf_mode(mode)
+        angle = self._event_dbf_angle(event, chart)
+        if angle is None:
+            return
+        self._set_dbf_scan_angle(mode, angle)
+
+    def on_dbf_true_line_release(self, event, mode: str) -> None:  # noqa: ANN001
+        if self.dbf_drag_mode != mode:
+            return
+        self._drag_dbf_true_line(event)
+        self.dbf_drag_mode = None
+        chart = self._chart_for_dbf_mode(mode)
+        self._update_response_cursor(event, chart)
+
     def toggle_az_dbf_animation(self, _event=None) -> None:  # noqa: ANN001
         self.toggle_dbf_scan_animation("azimuth")
 
@@ -4172,42 +4313,6 @@ class VirtualArrayGui:
                 state = tk.NORMAL if self.dbf_scan_mode == mode else tk.DISABLED
                 chart.stop_button.configure(state=state)
 
-    def on_dbf_progress_changed(self, mode: str, raw_value: str) -> None:
-        if self.dbf_progress_updating:
-            return
-
-        try:
-            frame = int(round(float(raw_value)))
-        except (TypeError, ValueError):
-            return
-        frame = max(0, min(DBF_SCAN_GRID_SIZE - 1, frame))
-
-        if self.dbf_scan_after_id is not None:
-            try:
-                self.root.after_cancel(self.dbf_scan_after_id)
-            except tk.TclError:
-                pass
-            self.dbf_scan_after_id = None
-
-        if (
-            self.dbf_scan_mode != mode
-            or self.dbf_true_angles.size == 0
-            or self.dbf_scan_angles.size == 0
-            or self.dbf_spectra_db.size == 0
-        ):
-            self._normalize_frequency_input()
-            self._load_dbf_spectra(mode)
-
-        self.dbf_scan_frame = min(frame, len(self.dbf_true_angles) - 1)
-        self.dbf_scan_active = True
-        self.dbf_scan_paused = True
-        self._draw_dbf_scan_frame()
-        self._update_dbf_scan_controls()
-        language = getattr(self, "language", LANGUAGE_ZH)
-        label = _dbf_mode_label(mode, language)
-        true_angle = self._current_dbf_true_angle()
-        self.status.set(self._t("dbf_pause_status", mode=label, angle=true_angle))
-
     def _chart_for_dbf_mode(self, mode: str) -> ResponseChart:
         return self.el_chart if mode == "elevation" else self.az_chart
 
@@ -4215,12 +4320,6 @@ class VirtualArrayGui:
         self, mode: str, frame_index: int, true_angle: float
     ) -> None:
         chart = self._chart_for_dbf_mode(mode)
-        if chart.progress_var is not None:
-            self.dbf_progress_updating = True
-            try:
-                chart.progress_var.set(float(frame_index))
-            finally:
-                self.dbf_progress_updating = False
         if chart.progress_label is not None:
             language = getattr(self, "language", LANGUAGE_ZH)
             chart.progress_label.configure(
@@ -4295,6 +4394,7 @@ class VirtualArrayGui:
         language = getattr(self, "language", LANGUAGE_ZH)
         mode_label = _dbf_mode_label(mode, language)
         chart = self._chart_for_dbf_mode(mode)
+        chart.true_angle = float(true_angle)
         ax = chart.ax
         ax.clear()
         _configure_axis_chrome(ax)
@@ -4388,6 +4488,17 @@ class VirtualArrayGui:
         chart.hover_db = spectrum_db
         chart.hover_angles = scan_angles
         chart.hover_annotation = _new_response_hover_annotation(ax)
+        chart.hover_marker = ax.scatter(
+            [],
+            [],
+            marker="o",
+            s=44,
+            facecolors=THEME["hover_fill"],
+            edgecolors=THEME["focus"],
+            linewidths=1.0,
+            zorder=8,
+        )
+        chart.hover_marker.set_visible(False)
         chart.canvas.draw_idle()
 
     def toggle_dbf2d_animation(self, axis: str) -> None:
@@ -4470,6 +4581,102 @@ class VirtualArrayGui:
             self._t("dbf2d_paused_axis", axis=_dbf_mode_label(axis, self.language))
         )
 
+    def _event_dbf2d_angles(self, event) -> tuple[float, float] | None:  # noqa: ANN001
+        if self.dbf2d_ax is None:
+            return None
+        if event.xdata is not None and event.ydata is not None:
+            return float(event.xdata), float(event.ydata)
+        if event.x is None or event.y is None:
+            return None
+        try:
+            azimuth, elevation = self.dbf2d_ax.transData.inverted().transform(
+                (event.x, event.y)
+            )
+        except (TypeError, ValueError):
+            return None
+        return float(azimuth), float(elevation)
+
+    def _set_dbf2d_cursor(self, cursor: str) -> None:
+        if self.dbf2d_canvas is None:
+            return
+        try:
+            self.dbf2d_canvas.get_tk_widget().configure(cursor=cursor)
+        except (tk.TclError, AttributeError):
+            return
+
+    def _dbf2d_event_near_crosshair(self, event) -> bool:  # noqa: ANN001
+        if event.inaxes != self.dbf2d_ax or event.xdata is None or event.ydata is None:
+            return False
+        azimuth, elevation = self._current_dbf2d_angles()
+        x_low, x_high = self.dbf2d_ax.get_xlim()
+        y_low, y_high = self.dbf2d_ax.get_ylim()
+        x_tolerance = max(2.0, abs(x_high - x_low) * 0.015)
+        y_tolerance = max(2.0, abs(y_high - y_low) * 0.015)
+        return (
+            abs(float(event.xdata) - azimuth) <= x_tolerance
+            or abs(float(event.ydata) - elevation) <= y_tolerance
+        )
+
+    def _update_dbf2d_cursor(self, event) -> None:  # noqa: ANN001
+        self._set_dbf2d_cursor(
+            "hand2" if self._dbf2d_event_near_crosshair(event) else ""
+        )
+
+    def _set_dbf2d_angles(self, azimuth: float, elevation: float) -> None:
+        self.dbf2d_az_frame = _dbf_frame_index_for_angle(azimuth)
+        self.dbf2d_el_frame = _dbf_frame_index_for_angle(elevation)
+        self.dbf2d_az_playing = False
+        self.dbf2d_el_playing = False
+        self._cancel_dbf2d_timer()
+        self._draw_dbf2d_heatmap()
+        self._update_dbf2d_controls()
+        current_azimuth, current_elevation = self._current_dbf2d_angles()
+        self.status.set(
+            self._t(
+                "dbf2d_dragged",
+                az=current_azimuth,
+                el=current_elevation,
+            )
+        )
+
+    def on_dbf2d_crosshair_press(self, event) -> None:  # noqa: ANN001
+        if event.button != 1 or event.inaxes != self.dbf2d_ax:
+            return
+        if not self._dbf2d_event_near_crosshair(event):
+            return
+        angles = self._event_dbf2d_angles(event)
+        if angles is None:
+            return
+        self.dbf2d_dragging = True
+        self._set_dbf2d_cursor("hand2")
+        self._hide_dbf2d_hover()
+        self._set_dbf2d_angles(*angles)
+
+    def on_dbf2d_crosshair_motion(self, event) -> None:  # noqa: ANN001
+        if not self.dbf2d_dragging:
+            self._update_dbf2d_cursor(event)
+            self._update_dbf2d_hover(event)
+            return
+        angles = self._event_dbf2d_angles(event)
+        if angles is None:
+            return
+        self._set_dbf2d_cursor("hand2")
+        self._set_dbf2d_angles(*angles)
+
+    def on_dbf2d_crosshair_release(self, event) -> None:  # noqa: ANN001
+        if not self.dbf2d_dragging:
+            return
+        angles = self._event_dbf2d_angles(event)
+        if angles is not None:
+            self._set_dbf2d_angles(*angles)
+        self.dbf2d_dragging = False
+        self._update_dbf2d_cursor(event)
+
+    def on_dbf2d_figure_leave(self, _event) -> None:  # noqa: ANN001
+        if not self.dbf2d_dragging:
+            self._set_dbf2d_cursor("")
+        self._hide_dbf2d_hover()
+
     def _current_dbf2d_angles(self) -> tuple[float, float]:
         azimuth = DBF_SCAN_FOV[0] + self.dbf2d_az_frame * DBF_SCAN_STEP_DEG
         elevation = DBF_SCAN_FOV[0] + self.dbf2d_el_frame * DBF_SCAN_STEP_DEG
@@ -4549,6 +4756,9 @@ class VirtualArrayGui:
             dbf_dictionary=self.dbf_dictionary,
             normalization_max=self.dbf2d_normalization_max,
         )
+        self.dbf2d_hover_azimuths = scan_azimuths
+        self.dbf2d_hover_elevations = scan_elevations
+        self.dbf2d_hover_db = spectrum_db
         peak_el_index, peak_az_index = np.unravel_index(
             int(np.argmax(spectrum_db)), spectrum_db.shape
         )
@@ -4692,6 +4902,18 @@ class VirtualArrayGui:
                 "linewidth": 0.0,
             },
         )
+        self.dbf2d_hover_annotation = _new_response_hover_annotation(ax)
+        self.dbf2d_hover_marker = ax.scatter(
+            [],
+            [],
+            marker="o",
+            s=46,
+            facecolors=THEME["hover_fill"],
+            edgecolors=THEME["focus"],
+            linewidths=1.0,
+            zorder=8,
+        )
+        self.dbf2d_hover_marker.set_visible(False)
         self._set_dbf2d_progress()
         self.dbf2d_canvas.draw_idle()
 
@@ -4700,11 +4922,12 @@ class VirtualArrayGui:
         _style_toplevel(dialog)
         dialog.title(self._t("dbf_dictionary_title"))
         dialog.transient(self.root)
-        dialog.geometry("980x620")
-        dialog.minsize(820, 520)
+        dialog.geometry("1120x700")
+        dialog.minsize(1040, 640)
 
         root_frame = ttk.Frame(dialog, style="Dialog.TFrame", padding=12)
         root_frame.pack(fill=tk.BOTH, expand=True)
+        root_frame.grid_columnconfigure(0, weight=0, minsize=380)
         root_frame.grid_columnconfigure(1, weight=1)
         root_frame.grid_rowconfigure(0, weight=1)
 
@@ -4729,8 +4952,11 @@ class VirtualArrayGui:
             text=self._t("dbf_dictionary_mode_title"),
             padding=(8, 6),
         )
-        mode_frame.grid(row=0, column=0, sticky="ns", padx=(0, 10))
-        mode_frame.grid_columnconfigure(1, weight=1)
+        mode_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        for column in range(2):
+            mode_frame.grid_columnconfigure(
+                column, weight=1, uniform="dbf_dictionary_buttons"
+            )
         mode_row = 0
         for mode in (
             DBF_DICT_IDEAL,
@@ -4782,13 +5008,13 @@ class VirtualArrayGui:
             mode_frame,
             text=self._t("dbf_dict_load_az"),
             command=lambda: load_custom_dictionary("azimuth"),
-            style="Large.TButton",
+            style="DialogButton.TButton",
         ).grid(row=mode_row, column=0, sticky="ew", pady=(0, 4))
         ttk.Button(
             mode_frame,
             text=self._t("dbf_dict_clear_az"),
             command=lambda: clear_custom_dictionary("azimuth"),
-            style="Large.TButton",
+            style="DialogButton.TButton",
         ).grid(row=mode_row, column=1, sticky="ew", padx=(6, 0), pady=(0, 4))
         mode_row += 1
         ttk.Label(mode_frame, textvariable=el_file_var, style="Muted.TLabel").grid(
@@ -4799,13 +5025,13 @@ class VirtualArrayGui:
             mode_frame,
             text=self._t("dbf_dict_load_el"),
             command=lambda: load_custom_dictionary("elevation"),
-            style="Large.TButton",
+            style="DialogButton.TButton",
         ).grid(row=mode_row, column=0, sticky="ew")
         ttk.Button(
             mode_frame,
             text=self._t("dbf_dict_clear_el"),
             command=lambda: clear_custom_dictionary("elevation"),
-            style="Large.TButton",
+            style="DialogButton.TButton",
         ).grid(row=mode_row, column=1, sticky="ew", padx=(6, 0))
         mode_row += 1
 
@@ -5030,13 +5256,13 @@ class VirtualArrayGui:
             button_row,
             text=self._t("dbf_dict_apply"),
             command=apply_dictionary,
-            style="Accent.TButton",
+            style="DialogButton.TButton",
         ).grid(row=0, column=1, sticky="e", padx=(8, 0))
         ttk.Button(
             button_row,
             text=self._t("done"),
             command=dialog.destroy,
-            style="Large.TButton",
+            style="DialogButton.TButton",
         ).grid(row=0, column=2, sticky="e", padx=(8, 0))
 
         refresh_file_labels()
@@ -5048,8 +5274,8 @@ class VirtualArrayGui:
         _style_toplevel(dialog)
         dialog.title(self._t("channel_dialog_title"))
         dialog.transient(self.root)
-        dialog.geometry("900x560")
-        dialog.minsize(760, 460)
+        dialog.geometry("1120x680")
+        dialog.minsize(1020, 600)
 
         root_frame = ttk.Frame(dialog, style="Dialog.TFrame", padding=12)
         root_frame.pack(fill=tk.BOTH, expand=True)
@@ -5062,7 +5288,8 @@ class VirtualArrayGui:
             padding=(8, 6),
         )
         summary_frame.grid(row=0, column=0, sticky="ew")
-        summary_frame.grid_columnconfigure(4, weight=1)
+        for column in range(5):
+            summary_frame.grid_columnconfigure(column, weight=1, uniform="summary_buttons")
 
         summary_specs = (
             (_pattern_slot_label(PATTERN_KIND_AMPLITUDE, PATTERN_PLANE_HORIZONTAL, self.language), PATTERN_KIND_AMPLITUDE, PATTERN_PLANE_HORIZONTAL),
@@ -5077,15 +5304,20 @@ class VirtualArrayGui:
                 command=lambda k=kind, p=plane: self._load_summary_channel_pattern(
                     k, p, dialog, refresh_tree
                 ),
-                style="Large.TButton",
-            ).grid(row=0, column=column, sticky="w", padx=(0 if column == 0 else 6, 0))
+                style="DialogButton.TButton",
+            ).grid(
+                row=0,
+                column=column,
+                sticky="ew",
+                padx=(0 if column == 0 else 6, 0),
+            )
 
         ttk.Button(
             summary_frame,
             text=self._t("clear_all"),
             command=lambda: clear_all_patterns(),
-            style="Danger.TButton",
-        ).grid(row=0, column=5, sticky="e", padx=(8, 0))
+            style="DialogDanger.TButton",
+        ).grid(row=0, column=4, sticky="ew", padx=(6, 0))
 
         table_frame = ttk.LabelFrame(
             root_frame,
@@ -5097,7 +5329,7 @@ class VirtualArrayGui:
         table_frame.grid_columnconfigure(0, weight=1)
 
         columns = ("channel", "amp_h", "amp_e", "phase_h", "phase_e")
-        tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=10)
+        tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=12)
         tree.tag_configure("odd", background=THEME["panel_alt_bg"])
         tree.tag_configure("even", background=THEME["card_bg"])
         headings = {
@@ -5125,27 +5357,34 @@ class VirtualArrayGui:
 
         button_row = ttk.Frame(root_frame, style="Dialog.TFrame")
         button_row.grid(row=2, column=0, sticky="ew", pady=(10, 0))
-        for label, kind, plane in summary_specs:
+        for column in range(6):
+            button_row.grid_columnconfigure(column, weight=1, uniform="channel_buttons")
+        for column, (label, kind, plane) in enumerate(summary_specs):
             ttk.Button(
                 button_row,
                 text=self._t("set_pattern", label=label),
                 command=lambda k=kind, p=plane: self._load_single_channel_pattern(
                     tree, k, p, dialog, refresh_tree
                 ),
-                style="Large.TButton",
-            ).pack(side=tk.LEFT, padx=(0, 6))
+                style="DialogButton.TButton",
+            ).grid(
+                row=0,
+                column=column,
+                sticky="ew",
+                padx=(0 if column == 0 else 6, 0),
+            )
         ttk.Button(
             button_row,
             text=self._t("clear_channel"),
             command=lambda: clear_selected_channel(),
-            style="Danger.TButton",
-        ).pack(side=tk.LEFT, padx=(6, 0))
+            style="DialogDanger.TButton",
+        ).grid(row=0, column=4, sticky="ew", padx=(6, 0))
         ttk.Button(
             button_row,
             text=self._t("done"),
             command=dialog.destroy,
-            style="Accent.TButton",
-        ).pack(side=tk.RIGHT)
+            style="DialogButton.TButton",
+        ).grid(row=0, column=5, sticky="ew", padx=(6, 0))
 
         def refresh_tree() -> None:
             selected = tree.selection()
@@ -6754,6 +6993,13 @@ class VirtualArrayGui:
             self.drag_start_snapshot = None
 
     def on_motion(self, event) -> None:  # noqa: ANN001
+        if self.dbf_drag_mode is not None:
+            self._set_chart_cursor(
+                self._chart_for_dbf_mode(self.dbf_drag_mode), "hand2"
+            )
+            self._drag_dbf_true_line(event)
+            return
+
         if self.dragging is not None:
             if event.x is None or event.y is None:
                 return
@@ -6787,6 +7033,8 @@ class VirtualArrayGui:
 
         self._update_physical_hover(event)
         self._update_virtual_hover(event)
+        self._update_response_cursor(event, self.az_chart)
+        self._update_response_cursor(event, self.el_chart)
         self._update_response_hover(
             event, self.az_chart, _dbf_short_label("azimuth", self.language)
         )
@@ -6987,6 +7235,69 @@ class VirtualArrayGui:
         )
         self.physical_hover_annotation.set_visible(True)
         self.phys_canvas.draw_idle()
+
+    def _hide_dbf2d_hover(self) -> None:
+        if self.dbf2d_hover_annotation is None:
+            return
+        needs_redraw = False
+        if self.dbf2d_hover_annotation.get_visible():
+            self.dbf2d_hover_annotation.set_visible(False)
+            needs_redraw = True
+        if (
+            self.dbf2d_hover_marker is not None
+            and self.dbf2d_hover_marker.get_visible()
+        ):
+            self.dbf2d_hover_marker.set_visible(False)
+            needs_redraw = True
+        if needs_redraw and self.dbf2d_canvas is not None:
+            self.dbf2d_canvas.draw_idle()
+
+    def _update_dbf2d_hover(self, event) -> None:  # noqa: ANN001
+        if self.dbf2d_hover_annotation is None:
+            return
+        if (
+            event.inaxes != self.dbf2d_ax
+            or event.xdata is None
+            or event.ydata is None
+            or self.dbf2d_hover_azimuths.size == 0
+            or self.dbf2d_hover_elevations.size == 0
+            or self.dbf2d_hover_db.size == 0
+        ):
+            self._hide_dbf2d_hover()
+            return
+
+        az_index = int(np.argmin(np.abs(self.dbf2d_hover_azimuths - event.xdata)))
+        el_index = int(np.argmin(np.abs(self.dbf2d_hover_elevations - event.ydata)))
+        if (
+            el_index >= self.dbf2d_hover_db.shape[0]
+            or az_index >= self.dbf2d_hover_db.shape[1]
+        ):
+            self._hide_dbf2d_hover()
+            return
+
+        azimuth = float(self.dbf2d_hover_azimuths[az_index])
+        elevation = float(self.dbf2d_hover_elevations[el_index])
+        gain = float(self.dbf2d_hover_db[el_index, az_index])
+        if self.dbf2d_hover_marker is not None:
+            self.dbf2d_hover_marker.set_offsets([[azimuth, elevation]])
+            self.dbf2d_hover_marker.set_visible(True)
+
+        self.dbf2d_hover_annotation.xy = (float(event.xdata), float(event.ydata))
+        x_low, x_high = self.dbf2d_ax.get_xlim()
+        y_low, y_high = self.dbf2d_ax.get_ylim()
+        x_frac = (float(event.xdata) - x_low) / (x_high - x_low) if x_high != x_low else 0.5
+        y_frac = (float(event.ydata) - y_low) / (y_high - y_low) if y_high != y_low else 0.5
+        x_offset = -12 if x_frac > 0.70 else 12
+        y_offset = -30 if y_frac > 0.62 else 14
+        self.dbf2d_hover_annotation.set_position((x_offset, y_offset))
+        self.dbf2d_hover_annotation.set_ha("right" if x_offset < 0 else "left")
+        self.dbf2d_hover_annotation.set_va("top" if y_offset < 0 else "bottom")
+        self.dbf2d_hover_annotation.set_text(
+            self._t("dbf2d_hover", az=azimuth, el=elevation, gain=gain)
+        )
+        self.dbf2d_hover_annotation.set_visible(True)
+        if self.dbf2d_canvas is not None:
+            self.dbf2d_canvas.draw_idle()
 
     def _update_response_hover(
         self, event, chart: ResponseChart, label: str  # noqa: ANN001

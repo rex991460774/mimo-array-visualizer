@@ -19,13 +19,17 @@ from matplotlib.widgets import Button as MplButton
 
 from .app_state import load_state, save_state, state_path
 from .dbf_dictionary import (
+    DBF_DICTIONARY_QUALITY_DANGER,
+    DBF_DICTIONARY_QUALITY_WARNING,
     DBF_DICT_CHANNEL_PATTERN,
     DBF_DICT_CHANNEL_PATTERN_ZERO_REF,
     DBF_DICT_CUSTOM,
     DBF_DICT_IDEAL,
     DBF_DICT_IDEAL_REVERSED,
     DbfDictionaryConfig,
+    DbfDictionaryQualityReport,
     DbfDictionaryTable,
+    dictionary_quality_report,
     dictionary_phase_preview,
     load_dbf_dictionary_table,
 )
@@ -43,7 +47,6 @@ from .analysis import (
     calculate_metrics_and_psf,
     dbf_angle_metrics_from_spectra,
     dbf_2d_spectrum,
-    dbf_2d_normalization_reference,
     dbf_azimuth_spectrum_bank,
     dbf_elevation_spectrum_bank,
     local_peak_indices,
@@ -91,6 +94,9 @@ RESPONSE_MODE_ELEVATION = "el"
 RESPONSE_SIDELOBE_PROMINENCE_DB = 0.5
 RESPONSE_SIDELOBE_GUARD_CLEARANCE_DB = 0.5
 DBF_SCAN_INTERVAL_MS = 55
+DBF_DISPLAY_DB = "db"
+DBF_DISPLAY_MAGNITUDE = "magnitude"
+SUPPORTED_DBF_DISPLAY_MODES = (DBF_DISPLAY_DB, DBF_DISPLAY_MAGNITUDE)
 LANGUAGE_ZH = "zh"
 LANGUAGE_EN = "en"
 LANGUAGE_JA = "ja"
@@ -211,8 +217,8 @@ UI_TEXT = {
             "虚拟阵列：显示 TX 与 RX 组合后的等效采样点。点越分散，通常角分辨率越好；点重合越多，可用虚拟通道越少。\n"
             "方位/俯仰 1D 角谱：看某一个真实角下，DBF 字典会把峰值打到哪里。橙色线是真实角，叉号是估计峰值。拖动橙色线可以手动检查不同真实角。\n"
             "总览与测角评估：总览看通道数、虚拟通道、口径和分辨率；测角评估看不模糊范围、范围内最大误差、竞争峰裕量和截断原因。\n"
-            "2D DBF 热图：同时看方位和俯仰。颜色越亮表示归一化增益越高，白色十字是真实角，叉号是峰值位置。拖动十字可以同时改变真实方位和真实俯仰。\n"
-            "底部参数：频率影响物理尺寸换算；竞争峰裕量用于判断峰值是否可靠；自动排阵可以快速生成指定数量的 T/R 通道。\n\n"
+            "2D DBF 热图：同时看方位和俯仰。颜色越亮表示相关系数越高，白色十字是真实角，叉号是峰值位置。拖动十字可以同时改变真实方位和真实俯仰。\n"
+            "底部参数：频率影响物理尺寸换算；竞争峰裕量用于判断峰值是否可靠；自动排阵可以快速生成指定数量的 T/R 通道；DBF 显示可在 dB 和模值之间切换，dB 适合看动态范围，模值适合看轮廓边界。\n\n"
             "二、顶部二级菜单\n"
             "文件 > 导入阵面 JSON：读取之前保存的 TX/RX 布局。\n"
             "文件 > 导出阵面 JSON：保存当前布局、评估结果和当前配置，方便复现实验。\n"
@@ -232,8 +238,8 @@ UI_TEXT = {
             "Virtual array: the equivalent sampling points created by TX/RX combinations. Wider spread usually improves resolution; duplicate points reduce usable virtual channels.\n"
             "Az/El 1D spectra: show where the DBF dictionary peaks for a selected true angle. The orange line is the true angle and the cross is the estimated peak. Drag the orange line to inspect other angles.\n"
             "Overview and angle evaluation: overview reports channel count, virtual channels, aperture, and resolution; angle evaluation reports no-fold range, max error, peak margin, and why the valid range stops.\n"
-            "2D DBF heatmap: shows azimuth and elevation together. Brighter color means stronger normalized gain, the white crosshair is the true angle, and the cross marker is the peak. Drag the crosshair to change both true angles.\n"
-            "Footer parameters: frequency controls size conversion; peak margin controls reliability checks; Auto Array quickly creates a requested T/R count.\n\n"
+            "2D DBF heatmap: shows azimuth and elevation together. Brighter color means higher correlation, the white crosshair is the true angle, and the cross marker is the peak. Drag the crosshair to change both true angles.\n"
+            "Footer parameters: frequency controls size conversion; peak margin controls reliability checks; Auto Array quickly creates a requested T/R count; DBF Display switches between dB and magnitude, where dB is better for dynamic range and magnitude is better for shape boundaries.\n\n"
             "Top menu items\n"
             "File > Import Array JSON: load a saved TX/RX layout.\n"
             "File > Export Array JSON: save the current layout, evaluation, and configuration.\n"
@@ -252,8 +258,8 @@ UI_TEXT = {
             "仮想アレイ：TX/RX の組み合わせでできる等価サンプル点です。広がりが大きいほど分解能は良くなりやすく、重複点が多いほど有効チャネルは減ります。\n"
             "方位/仰角 1D スペクトル：選んだ真角度に対して DBF 辞書のピークがどこに出るかを示します。オレンジ線が真角度、× が推定ピークです。\n"
             "概要と測角評価：概要はチャネル数、仮想チャネル、開口、分解能を表示します。測角評価は非曖昧範囲、最大誤差、ピーク余裕、範囲が止まる理由を表示します。\n"
-            "2D DBF ヒートマップ：方位と仰角を同時に見ます。明るいほど正規化利得が高く、白い十字が真角度、× がピークです。\n"
-            "下部パラメータ：周波数は寸法換算に使います。ピーク余裕は信頼性判定に使います。自動配置は指定した T/R 数を素早く作成します。\n\n"
+            "2D DBF ヒートマップ：方位と仰角を同時に見ます。明るいほど相関係数が高く、白い十字が真角度、× がピークです。\n"
+            "下部パラメータ：周波数は寸法換算に使います。ピーク余裕は信頼性判定に使います。自動配置は指定した T/R 数を素早く作成します。DBF 表示は dB と振幅を切り替えられ、dB はダイナミックレンジ、振幅は形状の境界確認に向いています。\n\n"
             "上部メニュー\n"
             "ファイル > アレイ JSON 読み込み：保存済みの TX/RX 配置を読み込みます。\n"
             "ファイル > アレイ JSON 書き出し：現在の配置、評価、設定を保存します。\n"
@@ -332,6 +338,9 @@ UI_TEXT = {
     "axis_az_angle": {"zh": "方位角(°)", "en": "Azimuth angle (deg)", "ja": "方位角(°)"},
     "axis_el_angle": {"zh": "俯仰角(°)", "en": "Elevation angle (deg)", "ja": "仰角(°)"},
     "axis_gain": {"zh": "归一化增益(dB)", "en": "Normalized gain (dB)", "ja": "正規化利得(dB)"},
+    "axis_magnitude": {"zh": "归一化模值", "en": "Normalized magnitude", "ja": "正規化振幅"},
+    "dbf_axis_correlation_db": {"zh": "相关系数(dB)", "en": "Correlation (dB)", "ja": "相関係数(dB)"},
+    "dbf_axis_correlation_mag": {"zh": "相关系数模值", "en": "Correlation magnitude", "ja": "相関係数振幅"},
     "max_sidelobe": {"zh": "最大旁瓣", "en": "Max sidelobe", "ja": "最大サイドローブ"},
     "guard_edge_max": {"zh": "保护区边界最大值", "en": "Guard-edge max", "ja": "ガード端最大値"},
     "grating_lobe": {"zh": "栅瓣", "en": "Grating lobe", "ja": "グレーティングローブ"},
@@ -341,10 +350,13 @@ UI_TEXT = {
         "ja": "グレーティングローブ=最大サイドローブ",
     },
     "gain_value": {"zh": "增益 = {value:.2f} dB", "en": "Gain = {value:.2f} dB", "ja": "利得 = {value:.2f} dB"},
+    "magnitude_value": {"zh": "模值 = {value:.3f}", "en": "Magnitude = {value:.3f}", "ja": "振幅 = {value:.3f}"},
+    "dbf_correlation_db_value": {"zh": "相关系数 = {value:.2f} dB", "en": "Correlation = {value:.2f} dB", "ja": "相関係数 = {value:.2f} dB"},
+    "dbf_correlation_mag_value": {"zh": "相关系数 = {value:.3f}", "en": "Correlation = {value:.3f}", "ja": "相関係数 = {value:.3f}"},
     "dbf2d_hover": {
-        "zh": "方位 = {az:+.1f}°\n俯仰 = {el:+.1f}°\n增益 = {gain:.2f} dB",
-        "en": "Az = {az:+.1f} deg\nEl = {el:+.1f} deg\nGain = {gain:.2f} dB",
-        "ja": "方位 = {az:+.1f}°\n仰角 = {el:+.1f}°\n利得 = {gain:.2f} dB",
+        "zh": "方位 = {az:+.1f}°\n俯仰 = {el:+.1f}°\n{value}",
+        "en": "Az = {az:+.1f} deg\nEl = {el:+.1f} deg\n{value}",
+        "ja": "方位 = {az:+.1f}°\n仰角 = {el:+.1f}°\n{value}",
     },
     "psl_label": {"zh": "{mode} PSL：{value:.2f} dB", "en": "{mode} PSL: {value:.2f} dB", "ja": "{mode} PSL：{value:.2f} dB"},
     "az": {"zh": "方位", "en": "Azimuth", "ja": "方位"},
@@ -407,7 +419,16 @@ UI_TEXT = {
         "en": "Peak delta\nAz {az:+.0f} deg | El {el:+.0f} deg",
         "ja": "ピーク偏差\n方位 {az:+.0f}° | 仰角 {el:+.0f}°",
     },
-    "dbf2d_colorbar_label": {"zh": "归一化增益(dB)", "en": "Normalized gain (dB)", "ja": "正規化利得(dB)"},
+    "dbf2d_colorbar_label": {"zh": "相关系数(dB)", "en": "Correlation (dB)", "ja": "相関係数(dB)"},
+    "dbf2d_colorbar_label_mag": {"zh": "相关系数模值", "en": "Correlation magnitude", "ja": "相関係数振幅"},
+    "dbf_display_label": {"zh": "DBF显示", "en": "DBF Display", "ja": "DBF表示"},
+    "dbf_display_db": {"zh": "dB", "en": "dB", "ja": "dB"},
+    "dbf_display_magnitude": {"zh": "模值", "en": "Magnitude", "ja": "振幅"},
+    "dbf_display_changed": {
+        "zh": "DBF显示已切换为{mode}。",
+        "en": "DBF display switched to {mode}.",
+        "ja": "DBF表示を{mode}に切り替えました。",
+    },
     "dbf2d_running": {
         "zh": "正在播放2D DBF：{axes}。",
         "en": "Playing 2D DBF: {axes}.",
@@ -463,6 +484,26 @@ UI_TEXT = {
         "zh": "{mode} | {rows}角度 × {cols}通道",
         "en": "{mode} | {rows} angles × {cols} channels",
         "ja": "{mode} | {rows}角度 × {cols}チャネル",
+    },
+    "dbf_dict_quality_unavailable": {
+        "zh": "质量提示：暂无可评估的字典矩阵。（仅供参考，不影响应用）",
+        "en": "Quality note: no dictionary matrix to evaluate. (Advisory only; it does not block Apply.)",
+        "ja": "品質メモ：評価できる辞書行列がありません。（参考表示のみ。適用は妨げません）",
+    },
+    "dbf_dict_quality_ok": {
+        "zh": "质量提示：正常。竞争峰模糊行 {ambiguous_rows}；零范数行 {zeros}；非近邻有效秩 {rank}/{rank_rows}。（仅供参考，不影响应用）",
+        "en": "Quality note: OK. Competitor-ambiguous rows {ambiguous_rows}; zero-norm rows {zeros}; non-neighbor rank {rank}/{rank_rows}. (Advisory only; it does not block Apply.)",
+        "ja": "品質メモ：正常。競合ピーク曖昧行 {ambiguous_rows}；ゼロノルム行 {zeros}；非近傍有効ランク {rank}/{rank_rows}。（参考表示のみ。適用は妨げません）",
+    },
+    "dbf_dict_quality_warning": {
+        "zh": "质量提示：注意。竞争峰模糊行 {ambiguous_rows}；零范数行 {zeros}；非近邻有效秩 {rank}/{rank_rows}。理想字典多为阵列几何/通道数限制；导入字典可再查角度列、通道顺序或校准设置。（仅供参考，不影响应用）",
+        "en": "Quality note: Watch. Competitor-ambiguous rows {ambiguous_rows}; zero-norm rows {zeros}; non-neighbor rank {rank}/{rank_rows}. For ideal dictionaries this is usually array geometry/channel count; for imports, check angle columns, channel order, or calibration. (Advisory only; it does not block Apply.)",
+        "ja": "品質メモ：注意。競合ピーク曖昧行 {ambiguous_rows}；ゼロノルム行 {zeros}；非近傍有効ランク {rank}/{rank_rows}。理想辞書ではアレイ幾何/チャネル数の制限が主因です。読込辞書では角度列、チャネル順、校正設定を確認してください。（参考表示のみ。適用は妨げません）",
+    },
+    "dbf_dict_quality_danger": {
+        "zh": "质量提示：风险。竞争峰模糊行 {ambiguous_rows}；零范数行 {zeros}；非近邻有效秩 {rank}/{rank_rows}。理想字典通常表示阵列几何在这些角度区分度不足；导入字典则建议检查角度列、通道顺序或校准设置。（仅供参考，不影响应用）",
+        "en": "Quality note: Risk. Competitor-ambiguous rows {ambiguous_rows}; zero-norm rows {zeros}; non-neighbor rank {rank}/{rank_rows}. For ideal dictionaries this means the array geometry has weak separation at those angles; for imports, check angle columns, channel order, or calibration. (Advisory only; it does not block Apply.)",
+        "ja": "品質メモ：リスク。競合ピーク曖昧行 {ambiguous_rows}；ゼロノルム行 {zeros}；非近傍有効ランク {rank}/{rank_rows}。理想辞書では該当角度でアレイ幾何の分離が弱いことを示します。読込辞書では角度列、チャネル順、校正設定を確認してください。（参考表示のみ。適用は妨げません）",
     },
     "dbf_dict_file_status": {
         "zh": "{axis}：{file}",
@@ -1759,7 +1800,6 @@ class VirtualArrayGui:
         self.dbf2d_ax = None
         self.dbf2d_cbar_ax = None
         self.dbf2d_canvas: FigureCanvasTkAgg | None = None
-        self.dbf2d_normalization_max: float | None = None
         self.dbf2d_hover_annotation = None
         self.dbf2d_hover_marker = None
         self.dbf2d_hover_azimuths = np.empty(0, dtype=float)
@@ -1787,6 +1827,10 @@ class VirtualArrayGui:
             value=_format_frequency_ghz(DEFAULT_FREQUENCY_GHZ)
         )
         self.frequency_entry: ttk.Entry | None = None
+        self.dbf_display_mode = tk.StringVar(value=DBF_DISPLAY_DB)
+        self.dbf_display_label: ttk.Label | None = None
+        self.dbf_display_db_radio: ttk.Radiobutton | None = None
+        self.dbf_display_mag_radio: ttk.Radiobutton | None = None
         self.pattern_status = tk.StringVar(value=self._t("pattern_ideal"))
         self.status = tk.StringVar(
             value=self._t("status_initial")
@@ -2691,7 +2735,7 @@ class VirtualArrayGui:
         status_row = ttk.Frame(controls_outer, style="Status.TFrame", padding=(12, 0, 12, 8))
         status_row.pack(fill=tk.X)
 
-        controls.grid_columnconfigure(3, weight=1)
+        controls.grid_columnconfigure(4, weight=1)
 
         def toolbar_group(
             column: int,
@@ -2776,7 +2820,29 @@ class VirtualArrayGui:
         )
         self.auto_apply_button.pack(side=tk.LEFT)
 
-        pattern_group = toolbar_group(3, sticky="ew", padx=(0, 0))
+        display_group = toolbar_group(3)
+        self.dbf_display_label = ttk.Label(
+            display_group, text=self._t("dbf_display_label"), style="Toolbar.TLabel"
+        )
+        self.dbf_display_label.pack(side=tk.LEFT, padx=(0, 4))
+        self.dbf_display_db_radio = ttk.Radiobutton(
+            display_group,
+            text=self._t("dbf_display_db"),
+            variable=self.dbf_display_mode,
+            value=DBF_DISPLAY_DB,
+            command=self.on_dbf_display_mode_changed,
+        )
+        self.dbf_display_db_radio.pack(side=tk.LEFT, padx=(0, 4))
+        self.dbf_display_mag_radio = ttk.Radiobutton(
+            display_group,
+            text=self._t("dbf_display_magnitude"),
+            variable=self.dbf_display_mode,
+            value=DBF_DISPLAY_MAGNITUDE,
+            command=self.on_dbf_display_mode_changed,
+        )
+        self.dbf_display_mag_radio.pack(side=tk.LEFT)
+
+        pattern_group = toolbar_group(4, sticky="ew", padx=(0, 0))
         # Pattern indicator and controls
         self.pattern_canvas = tk.Canvas(
             pattern_group,
@@ -3043,7 +3109,7 @@ class VirtualArrayGui:
             ("chip_virtual_channels", self.header_kpi_texts["chip_virtual_channels"], 11),
             ("chip_az_resolution", self.header_kpi_texts["chip_az_resolution"], 8),
             ("chip_el_resolution", self.header_kpi_texts["chip_el_resolution"], 8),
-            ("chip_peak_margin", self.header_kpi_texts["chip_peak_margin"], 18),
+            ("chip_peak_margin", self.header_kpi_texts["chip_peak_margin"], 22),
         )
         for column, (label_key, value_var, value_width) in enumerate(chip_specs):
             self._build_header_chip(
@@ -3161,6 +3227,12 @@ class VirtualArrayGui:
             self.auto_toolbar_label.configure(text=self._t("auto_label"))
         if getattr(self, "auto_apply_button", None) is not None:
             self.auto_apply_button.configure(text=self._t("auto_apply"))
+        if getattr(self, "dbf_display_label", None) is not None:
+            self.dbf_display_label.configure(text=self._t("dbf_display_label"))
+        if getattr(self, "dbf_display_db_radio", None) is not None:
+            self.dbf_display_db_radio.configure(text=self._t("dbf_display_db"))
+        if getattr(self, "dbf_display_mag_radio", None) is not None:
+            self.dbf_display_mag_radio.configure(text=self._t("dbf_display_magnitude"))
         for key, button in self.physical_action_buttons.items():
             button.configure(text=self._t(key))
         self._update_delete_button_state()
@@ -3607,9 +3679,16 @@ class VirtualArrayGui:
         self.header_kpi_texts["chip_virtual_channels"].set(values["row_virtual_channels"])
         self.header_kpi_texts["chip_az_resolution"].set(values["row_az_resolution"])
         self.header_kpi_texts["chip_el_resolution"].set(values["row_el_resolution"])
+        if self.language == LANGUAGE_ZH:
+            az_margin_label, el_margin_label = "方", "俯"
+        elif self.language == LANGUAGE_JA:
+            az_margin_label, el_margin_label = "方", "仰"
+        else:
+            az_margin_label, el_margin_label = "Az", "El"
+        az_margin = sec_values["row_az_margin"].replace(" dB", "dB")
+        el_margin = sec_values["row_el_margin"].replace(" dB", "dB")
         self.header_kpi_texts["chip_peak_margin"].set(
-            f"{self._t('az_short')} {sec_values['row_az_margin']} / "
-            f"{self._t('el_short')} {sec_values['row_el_margin']}"
+            f"{az_margin_label}{az_margin} / {el_margin_label}{el_margin}"
         )
 
     # ── Array data ────────────────────────────────────────────────────
@@ -3647,6 +3726,59 @@ class VirtualArrayGui:
     def current_margin_db(self) -> float:
         margin = _parse_margin_db(self.margin_db.get())
         return margin if margin is not None else self.last_valid_margin_db
+
+    def _current_dbf_display_mode(self) -> str:
+        mode = DBF_DISPLAY_DB
+        mode_var = getattr(self, "dbf_display_mode", None)
+        if mode_var is not None:
+            try:
+                mode = str(mode_var.get())
+            except Exception:
+                mode = DBF_DISPLAY_DB
+        if mode not in SUPPORTED_DBF_DISPLAY_MODES:
+            mode = DBF_DISPLAY_DB
+            if mode_var is not None:
+                try:
+                    mode_var.set(mode)
+                except Exception:
+                    pass
+        return mode
+
+    def _dbf_display_values(self, spectrum_db: np.ndarray) -> np.ndarray:
+        db_values = np.asarray(spectrum_db, dtype=float)
+        if self._current_dbf_display_mode() == DBF_DISPLAY_MAGNITUDE:
+            magnitude = np.power(10.0, np.minimum(db_values, 0.0) / 20.0)
+            return np.clip(
+                np.nan_to_num(magnitude, nan=0.0, posinf=1.0, neginf=0.0),
+                0.0,
+                1.0,
+            )
+        return np.clip(
+            np.nan_to_num(db_values, nan=-40.0, posinf=0.0, neginf=-40.0),
+            -40.0,
+            0.0,
+        )
+
+    def _dbf_display_value(self, value_db: float) -> float:
+        values = self._dbf_display_values(np.array([value_db], dtype=float))
+        return float(values[0])
+
+    def _dbf_display_axis_label(self) -> str:
+        if self._current_dbf_display_mode() == DBF_DISPLAY_MAGNITUDE:
+            return self._t("dbf_axis_correlation_mag")
+        return self._t("dbf_axis_correlation_db")
+
+    def _dbf_display_colorbar_label(self) -> str:
+        if self._current_dbf_display_mode() == DBF_DISPLAY_MAGNITUDE:
+            return self._t("dbf2d_colorbar_label_mag")
+        return self._t("dbf2d_colorbar_label")
+
+    def _format_dbf_display_value(self, value_db: float) -> str:
+        if self._current_dbf_display_mode() == DBF_DISPLAY_MAGNITUDE:
+            return self._t(
+                "dbf_correlation_mag_value", value=self._dbf_display_value(value_db)
+            )
+        return self._t("dbf_correlation_db_value", value=value_db)
 
     def wavelength_mm(self) -> float:
         return LIGHT_SPEED_MM_PER_NS / self.current_frequency_ghz()
@@ -3978,6 +4110,24 @@ class VirtualArrayGui:
             self.status.set(self._t("margin_set", value=_format_margin_db(margin)))
         else:
             self.status.set(self._t("margin_invalid", value=_format_margin_db(margin)))
+        return "break"
+
+    def on_dbf_display_mode_changed(self) -> str:
+        mode = self._current_dbf_display_mode()
+        if hasattr(self, "az_chart") and hasattr(self, "el_chart"):
+            if self.dbf_scan_active or self.dbf_scan_mode is not None:
+                self._draw_dbf_scan_frame()
+            else:
+                self._draw_dbf_reference_spectrum("azimuth")
+                self._draw_dbf_reference_spectrum("elevation")
+        if getattr(self, "dbf2d_canvas", None) is not None:
+            self._draw_dbf2d_heatmap()
+        label_key = (
+            "dbf_display_magnitude"
+            if mode == DBF_DISPLAY_MAGNITUDE
+            else "dbf_display_db"
+        )
+        self.status.set(self._t("dbf_display_changed", mode=self._t(label_key)))
         return "break"
 
     def on_save_shortcut(self, _event=None) -> str:  # noqa: ANN001
@@ -4385,10 +4535,12 @@ class VirtualArrayGui:
         if frame_index is not None:
             self._set_dbf_progress(mode, frame_index, true_angle)
 
-        clipped_spectrum = np.clip(spectrum_db, -40.0, 0.0)
+        display_spectrum = self._dbf_display_values(spectrum_db)
+        true_display_value = self._dbf_display_value(true_gain)
+        peak_display_value = self._dbf_display_value(peak_gain)
         ax.plot(
             scan_angles,
-            clipped_spectrum,
+            display_spectrum,
             color=THEME["response_line"],
             linewidth=5.0,
             alpha=0.12,
@@ -4396,7 +4548,7 @@ class VirtualArrayGui:
         )
         ax.plot(
             scan_angles,
-            clipped_spectrum,
+            display_spectrum,
             color=THEME["response_line"],
             linewidth=2.0,
             solid_capstyle="round",
@@ -4411,7 +4563,7 @@ class VirtualArrayGui:
         )
         ax.scatter(
             [true_angle],
-            [max(true_gain, -40.0)],
+            [true_display_value],
             marker="o",
             s=58,
             color=THEME["sidelobe"],
@@ -4421,7 +4573,7 @@ class VirtualArrayGui:
         )
         ax.scatter(
             [peak_angle],
-            [max(peak_gain, -40.0)],
+            [peak_display_value],
             marker="x",
             s=70,
             color=THEME["secondary_accent"],
@@ -4430,7 +4582,10 @@ class VirtualArrayGui:
             label=self._t("legend_peak"),
         )
         ax.set_xlim(DBF_SCAN_FOV)
-        ax.set_ylim(-40.0, 1.0)
+        if self._current_dbf_display_mode() == DBF_DISPLAY_MAGNITUDE:
+            ax.set_ylim(-0.02, 1.04)
+        else:
+            ax.set_ylim(-40.0, 1.0)
         ax.set_title(
             self._t("dbf_title", mode=mode_label),
             pad=6,
@@ -4441,7 +4596,11 @@ class VirtualArrayGui:
         )
         axis_key = "axis_el_angle" if mode == "elevation" else "axis_az_angle"
         ax.set_xlabel(self._t(axis_key), color=THEME["text_secondary"])
-        ax.set_ylabel(self._t("axis_gain"), labelpad=2, color=THEME["text_secondary"])
+        ax.set_ylabel(
+            self._dbf_display_axis_label(),
+            labelpad=2,
+            color=THEME["text_secondary"],
+        )
         ax.grid(True, alpha=THEME["grid_alpha"], color=THEME["grid_color"], linewidth=0.55)
         ax.text(
             0.02,
@@ -4722,14 +4881,6 @@ class VirtualArrayGui:
         if self.dbf2d_ax is None or self.dbf2d_canvas is None:
             return
         azimuth, elevation = self._current_dbf2d_angles()
-        if self.dbf2d_normalization_max is None:
-            self.dbf2d_normalization_max = dbf_2d_normalization_reference(
-                self.current_array(),
-                tx_pattern=self.element_pattern,
-                rx_pattern=self.element_pattern,
-                channel_patterns=self.channel_patterns,
-                dbf_dictionary=self.dbf_dictionary,
-            )
         scan_azimuths, scan_elevations, spectrum_db = dbf_2d_spectrum(
             self.current_array(),
             true_azimuth_deg=azimuth,
@@ -4738,7 +4889,6 @@ class VirtualArrayGui:
             rx_pattern=self.element_pattern,
             channel_patterns=self.channel_patterns,
             dbf_dictionary=self.dbf_dictionary,
-            normalization_max=self.dbf2d_normalization_max,
         )
         self.dbf2d_hover_azimuths = scan_azimuths
         self.dbf2d_hover_elevations = scan_elevations
@@ -4754,8 +4904,15 @@ class VirtualArrayGui:
         ax = self.dbf2d_ax
         ax.clear()
         _configure_axis_chrome(ax)
+        display_mode = self._current_dbf_display_mode()
+        display_spectrum = self._dbf_display_values(spectrum_db)
+        color_min, color_max = (
+            (0.0, 1.0)
+            if display_mode == DBF_DISPLAY_MAGNITUDE
+            else (-40.0, 0.0)
+        )
         image = ax.imshow(
-            np.clip(spectrum_db, -40.0, 0.0),
+            display_spectrum,
             origin="lower",
             extent=(
                 float(scan_azimuths[0]),
@@ -4765,15 +4922,17 @@ class VirtualArrayGui:
             ),
             aspect="auto",
             cmap="magma",
-            vmin=-40.0,
-            vmax=0.0,
+            vmin=color_min,
+            vmax=color_max,
             interpolation="nearest",
         )
         if self.dbf2d_cbar_ax is not None and self.dbf2d_fig is not None:
             self.dbf2d_cbar_ax.clear()
             colorbar = self.dbf2d_fig.colorbar(image, cax=self.dbf2d_cbar_ax)
+            if display_mode == DBF_DISPLAY_MAGNITUDE:
+                colorbar.set_ticks(np.linspace(0.0, 1.0, 6))
             colorbar.set_label(
-                self._t("dbf2d_colorbar_label"),
+                self._dbf_display_colorbar_label(),
                 color=THEME["text_secondary"],
                 fontsize=7.5,
             )
@@ -5076,6 +5235,13 @@ class VirtualArrayGui:
             font=(THEME["font_family_mono"], THEME["font_size_sm"]),
         )
         preview_status.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        quality_status = ttk.Label(
+            preview_frame,
+            text="",
+            style="Card.TLabel",
+            wraplength=680,
+        )
+        quality_status.grid(row=2, column=0, sticky="ew", pady=(4, 0))
 
         button_row = ttk.Frame(root_frame, style="Dialog.TFrame")
         button_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
@@ -5130,6 +5296,33 @@ class VirtualArrayGui:
             matrix_tree.column("message", width=520, anchor="center", stretch=True)
             matrix_tree.insert("", tk.END, values=(message,))
             preview_status.configure(text=message)
+            quality_status.configure(
+                text=self._t("dbf_dict_quality_unavailable"),
+                foreground=THEME["text_secondary"],
+            )
+
+        def update_quality_status(report: DbfDictionaryQualityReport) -> None:
+            if report.severity == DBF_DICTIONARY_QUALITY_DANGER:
+                text_key = "dbf_dict_quality_danger"
+                color = THEME["danger"]
+            elif report.severity == DBF_DICTIONARY_QUALITY_WARNING:
+                text_key = "dbf_dict_quality_warning"
+                color = THEME["warning"]
+            else:
+                text_key = "dbf_dict_quality_ok"
+                color = THEME["success"]
+            quality_status.configure(
+                text=self._t(
+                    text_key,
+                    rows=report.row_count,
+                    cols=report.channel_count,
+                    rank=report.non_neighbor_effective_rank,
+                    rank_rows=report.non_neighbor_rank_rows,
+                    ambiguous_rows=report.competitor_ambiguous_rows,
+                    zeros=report.zero_norm_rows,
+                ),
+                foreground=color,
+            )
 
         def redraw_preview() -> None:
             try:
@@ -5141,6 +5334,7 @@ class VirtualArrayGui:
                     axis=axis_var.get(),
                     channel_patterns=self.channel_patterns,
                 )
+                update_quality_status(dictionary_quality_report(matrix, angles))
                 phase = dictionary_phase_preview(matrix)
                 columns = ("angle",) + tuple(
                     f"CH{index + 1}" for index in range(phase.shape[1])
@@ -6013,7 +6207,6 @@ class VirtualArrayGui:
     def generate_virtual_array(self) -> None:
         self.stop_dbf_scan_animation(restore_response=False)
         self.stop_dbf2d_animation(update_status=False)
-        self.dbf2d_normalization_max = None
         array = self.current_array()
         unique, counts = array.unique_virtual_xy(decimals=ROUND_DECIMALS)
         pair_map = self._build_virtual_pair_map(array)
@@ -6771,6 +6964,10 @@ class VirtualArrayGui:
             if parsed_margin is not None:
                 self._set_margin_db(parsed_margin)
 
+            dbf_display_mode = state.get("dbf_display_mode")
+            if dbf_display_mode in SUPPORTED_DBF_DISPLAY_MODES:
+                self.dbf_display_mode.set(str(dbf_display_mode))
+
             window = state.get("window")
             if isinstance(window, dict):
                 geometry = _validated_window_geometry(window.get("geometry"))
@@ -6894,6 +7091,7 @@ class VirtualArrayGui:
             "last_pattern_dir": str(self.last_pattern_dir),
             "frequency_ghz": _format_frequency_ghz(self.current_frequency_ghz()),
             "ambiguity_margin_db": _format_margin_db(self.current_margin_db()),
+            "dbf_display_mode": self._current_dbf_display_mode(),
             "dbf_dictionary": {
                 "mode": self.dbf_dictionary.mode,
                 "custom_azimuth_path": (
@@ -7261,7 +7459,7 @@ class VirtualArrayGui:
 
         azimuth = float(self.dbf2d_hover_azimuths[az_index])
         elevation = float(self.dbf2d_hover_elevations[el_index])
-        gain = float(self.dbf2d_hover_db[el_index, az_index])
+        gain_db = float(self.dbf2d_hover_db[el_index, az_index])
         if self.dbf2d_hover_marker is not None:
             self.dbf2d_hover_marker.set_offsets([[azimuth, elevation]])
             self.dbf2d_hover_marker.set_visible(True)
@@ -7277,7 +7475,12 @@ class VirtualArrayGui:
         self.dbf2d_hover_annotation.set_ha("right" if x_offset < 0 else "left")
         self.dbf2d_hover_annotation.set_va("top" if y_offset < 0 else "bottom")
         self.dbf2d_hover_annotation.set_text(
-            self._t("dbf2d_hover", az=azimuth, el=elevation, gain=gain)
+            self._t(
+                "dbf2d_hover",
+                az=azimuth,
+                el=elevation,
+                value=self._format_dbf_display_value(gain_db),
+            )
         )
         self.dbf2d_hover_annotation.set_visible(True)
         if self.dbf2d_canvas is not None:
@@ -7308,9 +7511,10 @@ class VirtualArrayGui:
 
         angle_index = int(np.argmin(np.abs(chart.hover_angles - event.xdata)))
         angle = float(chart.hover_angles[angle_index])
-        gain = float(chart.hover_db[angle_index])
+        gain_db = float(chart.hover_db[angle_index])
+        display_value = self._dbf_display_value(gain_db)
         if chart.hover_marker is not None:
-            chart.hover_marker.set_offsets([[angle, gain]])
+            chart.hover_marker.set_offsets([[angle, display_value]])
             chart.hover_marker.set_visible(True)
         chart.hover_annotation.xy = (float(event.xdata), float(event.ydata))
         x_low, x_high = chart.ax.get_xlim()
@@ -7323,7 +7527,7 @@ class VirtualArrayGui:
         chart.hover_annotation.set_ha("right" if x_offset < 0 else "left")
         chart.hover_annotation.set_va("top" if y_offset < 0 else "bottom")
         chart.hover_annotation.set_text(
-            f"{label} = {angle:.1f}°\n{self._t('gain_value', value=gain)}"
+            f"{label} = {angle:.1f}°\n{self._format_dbf_display_value(gain_db)}"
         )
         chart.hover_annotation.set_visible(True)
         chart.canvas.draw_idle()

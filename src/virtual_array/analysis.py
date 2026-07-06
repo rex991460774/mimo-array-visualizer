@@ -31,6 +31,7 @@ DBF_CUT_REASON_BOUNDARY = "到达数据边界"
 DBF_QUALITY_OK = "正常"
 MAINLOBE_GUARD_AZ = 2.0
 MAINLOBE_GUARD_EL = 6.0
+DBF_CORRELATION_EPS = 1e-12
 
 
 @dataclass(frozen=True)
@@ -324,7 +325,7 @@ def dbf_2d_spectrum(
     dbf_dictionary: DbfDictionaryConfig | None = None,
     normalization_max: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return one conventional 2D DBF spectrum for a true az/el source angle."""
+    """Return one normalized-correlation 2D DBF spectrum for a true az/el angle."""
     if scan_azimuths_deg is None:
         scan_azimuths_deg = _default_dbf_angles()
     else:
@@ -366,19 +367,9 @@ def dbf_2d_spectrum(
             el_grid.ravel(),
             steering_sign=steering_sign,
         )
-    response = dictionary @ signal
-    response = response.reshape(len(scan_elevations_deg), len(scan_azimuths_deg))
-
-    pattern_weight = _element_pattern_weight(tx_pattern, az_grid, el_grid)
-    pattern_weight *= _element_pattern_weight(rx_pattern, az_grid, el_grid)
-    spectra = np.abs(response * pattern_weight)
-    maximum = (
-        float(normalization_max)
-        if normalization_max is not None and float(normalization_max) > 0.0
-        else float(np.max(spectra)) if spectra.size else 0.0
-    )
-    if maximum > 0.0:
-        spectra = spectra / maximum
+    _ = tx_pattern, rx_pattern, normalization_max
+    spectra = _dbf_correlation_response(dictionary, signal)[:, 0]
+    spectra = spectra.reshape(len(scan_elevations_deg), len(scan_azimuths_deg))
     spectra_db = 20.0 * np.log10(np.maximum(spectra, 1e-6))
     return scan_azimuths_deg, scan_elevations_deg, spectra_db
 
@@ -394,55 +385,23 @@ def dbf_2d_normalization_reference(
     channel_patterns: ChannelPatternSet | None = None,
     dbf_dictionary: DbfDictionaryConfig | None = None,
 ) -> float:
-    """Return a fixed 2D DBF amplitude reference for comparable frame colors."""
-    if scan_azimuths_deg is None:
-        scan_azimuths_deg = _default_dbf_angles()
-    else:
-        scan_azimuths_deg = np.asarray(scan_azimuths_deg, dtype=float)
-    if scan_elevations_deg is None:
-        scan_elevations_deg = _default_dbf_angles()
-    else:
-        scan_elevations_deg = np.asarray(scan_elevations_deg, dtype=float)
-    if true_azimuths_deg is None:
-        true_azimuths_deg = _default_dbf_angles()
-    else:
-        true_azimuths_deg = np.asarray(true_azimuths_deg, dtype=float)
-    if true_elevations_deg is None:
-        true_elevations_deg = _default_dbf_angles()
-    else:
-        true_elevations_deg = np.asarray(true_elevations_deg, dtype=float)
+    """Return the legacy 2D reference value.
 
-    scan_az_grid, scan_el_grid = np.meshgrid(scan_azimuths_deg, scan_elevations_deg)
-    if dbf_dictionary is not None and not dbf_dictionary.uses_auto_ideal_sign:
-        dictionary = dbf_dictionary.scan_matrix_2d(
-            array,
-            scan_az_grid.ravel(),
-            scan_el_grid.ravel(),
-            axis="azimuth",
-            channel_patterns=channel_patterns,
-        )
-    else:
-        dictionary = _dbf_2d_scan_matrix(
-            array,
-            scan_az_grid.ravel(),
-            scan_el_grid.ravel(),
-            steering_sign=DBF_DEFAULT_STEERING_SIGN,
-        )
-    pattern_weight = _element_pattern_weight(tx_pattern, scan_az_grid, scan_el_grid)
-    pattern_weight *= _element_pattern_weight(rx_pattern, scan_az_grid, scan_el_grid)
-    dictionary_norm = np.linalg.norm(dictionary, axis=1)
-    scan_scale = dictionary_norm * np.abs(np.asarray(pattern_weight).ravel())
-
-    true_az_grid, true_el_grid = np.meshgrid(true_azimuths_deg, true_elevations_deg)
-    signals = _dbf_2d_signal_matrix(
+    DBF spectra are now normalized by correlation coefficient per frame, so the
+    amplitude reference no longer changes the displayed result.
+    """
+    _ = (
         array,
-        true_az_grid.ravel(),
-        true_el_grid.ravel(),
-        channel_patterns=channel_patterns,
+        scan_azimuths_deg,
+        scan_elevations_deg,
+        true_azimuths_deg,
+        true_elevations_deg,
+        tx_pattern,
+        rx_pattern,
+        channel_patterns,
+        dbf_dictionary,
     )
-    signal_scale = np.linalg.norm(signals, axis=1)
-    reference = float(np.max(scan_scale) * np.max(signal_scale))
-    return reference if reference > 0.0 else 1.0
+    return 1.0
 
 
 def dbf_azimuth_angle_metrics(
@@ -808,34 +767,35 @@ def _dbf_spectrum_bank(
             axis=axis,
             steering_sign=steering_sign,
         )
-    response = dictionary @ signal_phase
+    response = _dbf_correlation_response(dictionary, signal_phase)
 
-    zeros = np.zeros_like(scan_angles_deg, dtype=float)
-    if axis == "azimuth":
-        pattern_azimuths = scan_angles_deg
-        pattern_elevations = zeros
-    elif axis == "elevation":
-        pattern_azimuths = zeros
-        pattern_elevations = scan_angles_deg
-    else:
+    if axis not in {"azimuth", "elevation"}:
         raise ValueError(f"Unknown DBF axis: {axis!r}")
-
-    pattern_weight = _element_pattern_weight(
-        tx_pattern, pattern_azimuths, pattern_elevations
-    )
-    pattern_weight *= _element_pattern_weight(
-        rx_pattern, pattern_azimuths, pattern_elevations
-    )
-    pattern_weight = np.asarray(pattern_weight, dtype=float)
-    if pattern_weight.ndim == 0:
-        pattern_weight = np.full_like(scan_angles_deg, float(pattern_weight))
-
-    spectra = np.abs(response.T * pattern_weight[None, :])
-    maximum = float(np.max(spectra)) if spectra.size else 0.0
-    if maximum > 0.0:
-        spectra = spectra / maximum
+    _ = tx_pattern, rx_pattern
+    spectra = response.T
     spectra_db = 20.0 * np.log10(np.maximum(spectra, 1e-6))
     return true_angles_deg, scan_angles_deg, spectra_db
+
+
+def _dbf_correlation_response(
+    dictionary: np.ndarray,
+    signals: np.ndarray,
+) -> np.ndarray:
+    dictionary_matrix = np.asarray(dictionary, dtype=complex)
+    signal_matrix = np.asarray(signals, dtype=complex)
+    if signal_matrix.ndim == 1:
+        signal_matrix = signal_matrix[:, None]
+    response = np.abs(dictionary_matrix @ signal_matrix)
+    dictionary_norms = np.linalg.norm(dictionary_matrix, axis=1)
+    signal_norms = np.linalg.norm(signal_matrix, axis=0)
+    denominator = dictionary_norms[:, None] * signal_norms[None, :]
+    correlation = np.divide(
+        response,
+        denominator,
+        out=np.zeros_like(response, dtype=float),
+        where=denominator > DBF_CORRELATION_EPS,
+    )
+    return np.clip(correlation, 0.0, 1.0)
 
 
 def _default_dbf_angles() -> np.ndarray:

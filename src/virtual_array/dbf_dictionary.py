@@ -27,6 +27,26 @@ DBF_DICTIONARY_MODES = (
 
 CHANNEL_MODE_VIRTUAL = "virtual"
 CHANNEL_MODE_PHYSICAL = "physical"
+DBF_DICTIONARY_QUALITY_OK = "ok"
+DBF_DICTIONARY_QUALITY_WARNING = "warning"
+DBF_DICTIONARY_QUALITY_DANGER = "danger"
+DBF_DICTIONARY_COMPETITOR_MARGIN_DB = 0.5
+DBF_DICTIONARY_FAR_ANGLE_SEPARATION_DEG = 10.0
+DBF_DICTIONARY_FAR_SPATIAL_SEPARATION = float(
+    np.sin(np.radians(DBF_DICTIONARY_FAR_ANGLE_SEPARATION_DEG))
+)
+DBF_DICTIONARY_ROW_NORM_EPS = 1e-12
+
+
+@dataclass(frozen=True)
+class DbfDictionaryQualityReport:
+    severity: str
+    row_count: int
+    channel_count: int
+    zero_norm_rows: int
+    competitor_ambiguous_rows: int
+    non_neighbor_effective_rank: int
+    non_neighbor_rank_rows: int
 
 
 @dataclass(frozen=True)
@@ -438,6 +458,233 @@ def load_dbf_dictionary_table(path: str | Path, array: AntennaArray) -> DbfDicti
 
 def dictionary_phase_preview(matrix: np.ndarray) -> np.ndarray:
     return np.angle(np.asarray(matrix, dtype=complex), deg=True)
+
+
+def dictionary_quality_report(
+    matrix: np.ndarray,
+    angles_deg: np.ndarray | None = None,
+) -> DbfDictionaryQualityReport:
+    rows = np.asarray(matrix, dtype=complex)
+    if rows.ndim != 2:
+        rows = np.atleast_2d(rows)
+    row_count, channel_count = rows.shape if rows.ndim == 2 else (0, 0)
+    if row_count == 0 or channel_count == 0:
+        return DbfDictionaryQualityReport(
+            severity=DBF_DICTIONARY_QUALITY_DANGER,
+            row_count=row_count,
+            channel_count=channel_count,
+            zero_norm_rows=row_count,
+            competitor_ambiguous_rows=0,
+            non_neighbor_effective_rank=0,
+            non_neighbor_rank_rows=0,
+        )
+
+    row_norms = np.linalg.norm(rows, axis=1)
+    valid_mask = row_norms > DBF_DICTIONARY_ROW_NORM_EPS
+    valid_rows = rows[valid_mask]
+    zero_norm_rows = int(row_count - int(np.count_nonzero(valid_mask)))
+    if valid_rows.shape[0] < 2:
+        return DbfDictionaryQualityReport(
+            severity=DBF_DICTIONARY_QUALITY_DANGER,
+            row_count=row_count,
+            channel_count=channel_count,
+            zero_norm_rows=zero_norm_rows,
+            competitor_ambiguous_rows=0,
+            non_neighbor_effective_rank=int(valid_rows.shape[0]),
+            non_neighbor_rank_rows=int(valid_rows.shape[0]),
+        )
+
+    normalized = valid_rows / row_norms[valid_mask, None]
+    correlation = np.abs(normalized @ np.conjugate(normalized.T))
+    spectra_db = 20.0 * np.log10(
+        np.clip(correlation, DBF_DICTIONARY_ROW_NORM_EPS, 1.0)
+    )
+    competitor_ambiguous_rows = sum(
+        1
+        for row_index, spectrum_db in enumerate(spectra_db)
+        if _dictionary_peak_margin_db(spectrum_db, row_index)
+        <= DBF_DICTIONARY_COMPETITOR_MARGIN_DB
+    )
+
+    representative_positions = _dictionary_representative_positions(
+        valid_mask,
+        row_count,
+        angles_deg,
+    )
+    representative_rows = normalized[representative_positions]
+    non_neighbor_effective_rank = _dictionary_effective_rank(representative_rows)
+    non_neighbor_rank_rows = int(representative_rows.shape[0])
+
+    severity = DBF_DICTIONARY_QUALITY_OK
+    if (
+        zero_norm_rows > 0
+        or competitor_ambiguous_rows > 0
+        or (non_neighbor_rank_rows > 1 and non_neighbor_effective_rank <= 1)
+    ):
+        severity = DBF_DICTIONARY_QUALITY_DANGER
+
+    return DbfDictionaryQualityReport(
+        severity=severity,
+        row_count=row_count,
+        channel_count=channel_count,
+        zero_norm_rows=zero_norm_rows,
+        competitor_ambiguous_rows=competitor_ambiguous_rows,
+        non_neighbor_effective_rank=non_neighbor_effective_rank,
+        non_neighbor_rank_rows=non_neighbor_rank_rows,
+    )
+
+
+def _dictionary_far_pair_mask(
+    valid_mask: np.ndarray,
+    row_count: int,
+    angles_deg: np.ndarray | None,
+) -> np.ndarray:
+    valid_indices = np.flatnonzero(valid_mask)
+    valid_coordinates = _dictionary_valid_spatial_coordinates(
+        valid_mask,
+        row_count,
+        angles_deg,
+    )
+    if valid_coordinates is not None:
+        return (
+            np.abs(valid_coordinates[:, None] - valid_coordinates[None, :])
+            >= DBF_DICTIONARY_FAR_SPATIAL_SEPARATION
+        )
+    index_delta = np.abs(valid_indices[:, None] - valid_indices[None, :])
+    return index_delta > 1
+
+
+def _dictionary_valid_spatial_coordinates(
+    valid_mask: np.ndarray,
+    row_count: int,
+    angles_deg: np.ndarray | None,
+) -> np.ndarray | None:
+    if angles_deg is None:
+        return None
+    angles = np.asarray(angles_deg, dtype=float)
+    if angles.shape[0] != row_count:
+        return None
+    return _dictionary_spatial_coordinates(angles[np.flatnonzero(valid_mask)])
+
+
+def _dictionary_peak_margin_db(spectrum_db: np.ndarray, main_index: int) -> float:
+    values = np.asarray(spectrum_db, dtype=float)
+    if values.size == 0:
+        return float("-inf")
+    main_peak = float(values[main_index])
+    left_bound, right_bound = _dictionary_main_lobe_bounds(values, main_index)
+    competitor_indices = [
+        index
+        for index in _dictionary_local_peak_indices(values)
+        if index < left_bound or index > right_bound
+    ]
+    if not competitor_indices:
+        return float("inf")
+    competitor_peak = max(float(values[index]) for index in competitor_indices)
+    return main_peak - competitor_peak
+
+
+def _dictionary_main_lobe_bounds(values_db: np.ndarray, main_index: int) -> tuple[int, int]:
+    left = main_index
+    while left > 0:
+        current = float(values_db[left])
+        prev_value = float(values_db[left - 1])
+        next_value = float(values_db[left + 1]) if left + 1 < len(values_db) else current
+        if (
+            left < main_index
+            and current <= prev_value
+            and current <= next_value
+            and (current < prev_value or current < next_value)
+        ):
+            break
+        left -= 1
+
+    right = main_index
+    while right < len(values_db) - 1:
+        current = float(values_db[right])
+        prev_value = float(values_db[right - 1]) if right > 0 else current
+        next_value = float(values_db[right + 1])
+        if (
+            right > main_index
+            and current <= prev_value
+            and current <= next_value
+            and (current < prev_value or current < next_value)
+        ):
+            break
+        right += 1
+    return left, right
+
+
+def _dictionary_local_peak_indices(values_db: np.ndarray) -> list[int]:
+    if len(values_db) == 0:
+        return []
+    peaks: list[int] = []
+    index = 0
+    while index < len(values_db):
+        start = index
+        while (
+            index + 1 < len(values_db)
+            and abs(float(values_db[index + 1]) - float(values_db[start])) <= 1e-9
+        ):
+            index += 1
+        end = index
+        value = float(values_db[start])
+        left = float(values_db[start - 1]) if start > 0 else float("-inf")
+        right = float(values_db[end + 1]) if end + 1 < len(values_db) else float("-inf")
+        if value >= left and value >= right and (value > left or value > right):
+            peaks.append((start + end) // 2)
+        index += 1
+    return peaks
+
+
+def _dictionary_representative_positions(
+    valid_mask: np.ndarray,
+    row_count: int,
+    angles_deg: np.ndarray | None,
+) -> np.ndarray:
+    valid_indices = np.flatnonzero(valid_mask)
+    if valid_indices.size == 0:
+        return np.empty(0, dtype=int)
+    if angles_deg is not None:
+        angles = np.asarray(angles_deg, dtype=float)
+        if angles.shape[0] == row_count:
+            valid_coordinates = _dictionary_spatial_coordinates(angles[valid_indices])
+            order = np.argsort(valid_coordinates)
+            selected: list[int] = []
+            last_coordinate: float | None = None
+            for position in order:
+                coordinate = float(valid_coordinates[position])
+                if (
+                    last_coordinate is None
+                    or coordinate - last_coordinate
+                    >= DBF_DICTIONARY_FAR_SPATIAL_SEPARATION
+                ):
+                    selected.append(int(position))
+                    last_coordinate = coordinate
+            return np.asarray(selected, dtype=int)
+
+    selected = []
+    last_index: int | None = None
+    for position, original_index in enumerate(valid_indices):
+        if last_index is None or int(original_index) - last_index > 1:
+            selected.append(position)
+            last_index = int(original_index)
+    return np.asarray(selected, dtype=int)
+
+
+def _dictionary_spatial_coordinates(angles_deg: np.ndarray) -> np.ndarray:
+    return np.sin(np.radians(np.asarray(angles_deg, dtype=float)))
+
+
+def _dictionary_effective_rank(rows: np.ndarray) -> int:
+    matrix = np.asarray(rows, dtype=complex)
+    if matrix.size == 0:
+        return 0
+    singular_values = np.linalg.svd(matrix, compute_uv=False)
+    if singular_values.size == 0:
+        return 0
+    rank_tolerance = max(matrix.shape) * np.finfo(float).eps * float(singular_values[0])
+    return int(np.count_nonzero(singular_values > rank_tolerance))
 
 
 def _remove_reference_phase(

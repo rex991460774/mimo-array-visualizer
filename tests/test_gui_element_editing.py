@@ -9,6 +9,7 @@ from matplotlib.figure import Figure
 
 from virtual_array.analysis import DBF_SCAN_GRID_SIZE
 from virtual_array.gui import (
+    DBF_DISPLAY_MAGNITUDE,
     EditableElement,
     MAX_HISTORY_STATES,
     ResponseChart,
@@ -163,6 +164,16 @@ def test_response_hover_tooltip_follows_cursor_without_arrow() -> None:
 
     assert not annotation.get_visible()
     assert canvas.draw_count == 2
+
+
+def test_dbf_display_values_convert_db_to_correlation_magnitude() -> None:
+    app = VirtualArrayGui.__new__(VirtualArrayGui)
+    app.dbf_display_mode = SimpleNamespace(get=lambda: DBF_DISPLAY_MAGNITUDE)
+
+    values = app._dbf_display_values(np.array([-40.0, -6.020599913, 0.0, 3.0]))
+
+    assert values == pytest.approx([0.01, 0.5, 1.0, 1.0])
+    assert app._format_dbf_display_value(-6.020599913) == "相关系数 = 0.500"
 
 
 def test_window_geometry_validation_accepts_tk_geometry_strings() -> None:
@@ -411,7 +422,7 @@ def test_dbf2d_crosshair_sets_hand_cursor_near_true_angle_guides() -> None:
     assert app.dbf2d_canvas.widget.cursor == ""
 
 
-def test_dbf2d_hover_tooltip_reports_nearest_angle_and_gain() -> None:
+def test_dbf2d_hover_tooltip_reports_nearest_angle_and_correlation() -> None:
     fig = Figure()
     ax = fig.add_subplot(111)
     ax.set_xlim(-1, 1)
@@ -432,8 +443,31 @@ def test_dbf2d_hover_tooltip_reports_nearest_angle_and_gain() -> None:
     tooltip = app.dbf2d_hover_annotation.get_text()
     assert "方位 = +0.0" in tooltip
     assert "俯仰 = +2.0" in tooltip
-    assert "增益 = -6.00 dB" in tooltip
+    assert "相关系数 = -6.00 dB" in tooltip
     assert app.dbf2d_canvas.draw_count == 1
+
+
+def test_dbf2d_hover_tooltip_uses_magnitude_display_mode() -> None:
+    fig = Figure()
+    ax = fig.add_subplot(111)
+    ax.set_xlim(-1, 1)
+    ax.set_ylim(-2, 2)
+    app = VirtualArrayGui.__new__(VirtualArrayGui)
+    app.dbf_display_mode = SimpleNamespace(get=lambda: DBF_DISPLAY_MAGNITUDE)
+    app.dbf2d_ax = ax
+    app.dbf2d_canvas = _FakeCanvasWithWidget()
+    app.dbf2d_hover_azimuths = np.array([-1.0, 0.0, 1.0])
+    app.dbf2d_hover_elevations = np.array([-2.0, 2.0])
+    app.dbf2d_hover_db = np.array([[-10.0, -9.0, -8.0], [-7.0, -6.0, -5.0]])
+    app.dbf2d_hover_annotation = _new_response_hover_annotation(ax)
+    app.dbf2d_hover_marker = ax.scatter([], [])
+
+    app._update_dbf2d_hover(SimpleNamespace(inaxes=ax, xdata=0.2, ydata=1.9))
+
+    tooltip = app.dbf2d_hover_annotation.get_text()
+    assert "方位 = +0.0" in tooltip
+    assert "俯仰 = +2.0" in tooltip
+    assert "相关系数 = 0.501" in tooltip
 
 
 def test_dbf_peak_marker_prefers_true_angle_when_peaks_are_tied() -> None:

@@ -6,9 +6,12 @@ from openpyxl import Workbook
 
 from virtual_array.analysis import dbf_azimuth_spectrum_bank
 from virtual_array.dbf_dictionary import (
+    DBF_DICTIONARY_QUALITY_DANGER,
+    DBF_DICTIONARY_QUALITY_OK,
     DBF_DICT_CHANNEL_PATTERN,
     DBF_DICT_CUSTOM,
     DbfDictionaryConfig,
+    dictionary_quality_report,
     load_dbf_dictionary_table,
 )
 from virtual_array.element_pattern import (
@@ -18,6 +21,79 @@ from virtual_array.element_pattern import (
     PatternSeries,
 )
 from virtual_array.geometry import AntennaArray
+
+
+def test_dictionary_quality_report_accepts_distinct_rows() -> None:
+    matrix = np.eye(3, dtype=complex)
+
+    report = dictionary_quality_report(matrix, np.array([-30.0, 0.0, 30.0]))
+
+    assert report.severity == DBF_DICTIONARY_QUALITY_OK
+    assert report.row_count == 3
+    assert report.channel_count == 3
+    assert report.competitor_ambiguous_rows == 0
+    assert report.non_neighbor_effective_rank == 3
+    assert report.non_neighbor_rank_rows == 3
+
+
+def test_dictionary_quality_report_flags_competitor_ambiguous_rows() -> None:
+    matrix = np.array(
+        [
+            [1.0 + 0.0j, 0.0 + 0.0j],
+            [0.0 + 0.0j, 1.0 + 0.0j],
+            [1.0 + 0.0j, 0.0 + 0.0j],
+        ]
+    )
+
+    report = dictionary_quality_report(matrix, np.array([0.0, 20.0, 40.0]))
+
+    assert report.severity == DBF_DICTIONARY_QUALITY_DANGER
+    assert report.competitor_ambiguous_rows == 2
+    assert report.non_neighbor_effective_rank == 2
+    assert report.non_neighbor_rank_rows == 3
+
+
+def test_dictionary_quality_report_ignores_adjacent_similar_rows() -> None:
+    matrix = np.array(
+        [
+            [1.0 + 0.0j, 0.0 + 0.0j],
+            [1.0 + 0.0j, 0.0 + 0.0j],
+            [0.0 + 0.0j, 1.0 + 0.0j],
+        ]
+    )
+
+    report = dictionary_quality_report(matrix, np.array([0.0, 1.0, 20.0]))
+
+    assert report.severity == DBF_DICTIONARY_QUALITY_OK
+    assert report.competitor_ambiguous_rows == 0
+    assert report.non_neighbor_effective_rank == 2
+    assert report.non_neighbor_rank_rows == 2
+
+
+def test_dictionary_quality_report_uses_spatial_separation_near_edges() -> None:
+    matrix = np.array(
+        [
+            [1.0 + 0.0j, 0.0 + 0.0j],
+            [1.0 + 0.0j, 0.0 + 0.0j],
+            [0.0 + 0.0j, 1.0 + 0.0j],
+        ]
+    )
+
+    report = dictionary_quality_report(matrix, np.array([80.0, 90.0, 0.0]))
+
+    assert report.severity == DBF_DICTIONARY_QUALITY_OK
+    assert report.competitor_ambiguous_rows == 0
+    assert report.non_neighbor_effective_rank == 2
+    assert report.non_neighbor_rank_rows == 2
+
+
+def test_dictionary_quality_report_flags_zero_norm_rows() -> None:
+    matrix = np.array([[0.0 + 0.0j, 0.0 + 0.0j], [1.0 + 0.0j, 0.0 + 0.0j]])
+
+    report = dictionary_quality_report(matrix, np.array([0.0, 20.0]))
+
+    assert report.severity == DBF_DICTIONARY_QUALITY_DANGER
+    assert report.zero_norm_rows == 1
 
 
 def test_loads_virtual_channel_phase_dictionary_csv(tmp_path) -> None:
@@ -356,3 +432,29 @@ def test_custom_dictionary_integrates_with_dbf_spectrum_bank(tmp_path) -> None:
     peak_index = int(np.argmax(spectra_db[0]))
     assert true_angles[0] == pytest.approx(30.0)
     assert scan_angles[peak_index] == pytest.approx(30.0)
+
+
+def test_custom_dictionary_row_amplitude_does_not_scale_dbf_peak(tmp_path) -> None:
+    path = tmp_path / "amplitude-weighted-custom.csv"
+    path.write_text(
+        "Angle,V1,V2\n"
+        "-30,1∠0,1∠-90\n"
+        "0,100∠0,100∠0\n"
+        "30,0.1∠0,0.1∠90\n",
+        encoding="utf-8",
+    )
+    array = AntennaArray.from_xy(tx_x=[0], tx_y=[0], rx_x=[0, 1], rx_y=[0, 0])
+    table = load_dbf_dictionary_table(path, array)
+    config = DbfDictionaryConfig(mode=DBF_DICT_CUSTOM, custom_table=table)
+
+    true_angles, scan_angles, spectra_db = dbf_azimuth_spectrum_bank(
+        array,
+        true_angles_deg=np.array([-30.0, 0.0, 30.0]),
+        scan_angles_deg=np.array([-30.0, 0.0, 30.0]),
+        dbf_dictionary=config,
+    )
+
+    assert np.array_equal(true_angles, np.array([-30.0, 0.0, 30.0]))
+    for row_index, true_angle in enumerate(true_angles):
+        peak_index = int(np.argmin(np.abs(scan_angles - true_angle)))
+        assert spectra_db[row_index, peak_index] == pytest.approx(0.0)

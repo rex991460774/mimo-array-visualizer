@@ -130,7 +130,7 @@ def test_dbf_azimuth_spectrum_bank_builds_181_true_angle_spectra() -> None:
         assert spectra_db[index, peak_index] == pytest.approx(0.0)
 
 
-def test_dbf_spectrum_bank_uses_global_frame_normalization() -> None:
+def test_dbf_spectrum_bank_uses_per_frame_correlation_normalization() -> None:
     array = AntennaArray.from_xy(tx_x=[0], tx_y=[0], rx_x=[0], rx_y=[0])
     amplitude_series = PatternSeries(
         name="amp",
@@ -158,8 +158,8 @@ def test_dbf_spectrum_bank_uses_global_frame_normalization() -> None:
 
     assert np.array_equal(true_angles, np.array([-90.0, 0.0, 90.0]))
     assert np.max(spectra_db[1]) == pytest.approx(0.0)
-    assert np.max(spectra_db[0]) == pytest.approx(-20.0)
-    assert np.max(spectra_db[2]) == pytest.approx(-20.0)
+    assert np.max(spectra_db[0]) == pytest.approx(0.0)
+    assert np.max(spectra_db[2]) == pytest.approx(0.0)
 
 
 def test_dbf_elevation_spectrum_matches_psf_elevation_cut() -> None:
@@ -224,7 +224,7 @@ def test_dbf_2d_spectrum_peaks_at_true_azimuth_and_elevation() -> None:
     assert spectrum_db[peak_el_index, peak_az_index] == pytest.approx(0.0)
 
 
-def test_dbf_2d_spectrum_accepts_fixed_normalization_reference() -> None:
+def test_dbf_2d_spectrum_uses_correlation_normalization() -> None:
     array = AntennaArray.from_xy(tx_x=[0], tx_y=[0], rx_x=[0], rx_y=[0])
     amplitude_series = PatternSeries(
         name="amp",
@@ -262,7 +262,7 @@ def test_dbf_2d_spectrum_accepts_fixed_normalization_reference() -> None:
     )
 
     assert reference == pytest.approx(1.0)
-    assert np.max(spectrum_db) == pytest.approx(-20.0)
+    assert np.max(spectrum_db) == pytest.approx(0.0)
 
 
 def test_dbf_angle_metrics_report_no_fold_range_for_ideal_linear_array() -> None:

@@ -1,11 +1,24 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import sys
+
+
+app_icon = None
+if sys.platform == 'win32':
+    app_icon = 'src/virtual_array/assets/mimo_array_logo.ico'
+elif sys.platform == 'darwin':
+    app_icon = 'src/virtual_array/assets/mimo_array_logo.icns'
 
 a = Analysis(
     ['GUI.py'],
     pathex=['src'],
     binaries=[],
-    datas=[],
+    datas=[
+        ('src/virtual_array/assets/mimo_array_logo_48.png', 'virtual_array/assets'),
+        ('src/virtual_array/assets/mimo_array_logo_256.png', 'virtual_array/assets'),
+        ('src/virtual_array/assets/mimo_array_logo.ico', 'virtual_array/assets'),
+        ('src/virtual_array/assets/mimo_array_logo.icns', 'virtual_array/assets'),
+    ],
     hiddenimports=[
         'pyparsing.testing',
         'openpyxl',
@@ -36,6 +49,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=app_icon,
 )
 coll = COLLECT(
     exe,

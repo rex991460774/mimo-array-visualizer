@@ -1,0 +1,16 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": {
+    "pyright": {
+      "command": "pyright-langserver",
+      "args": ["--stdio"],
+      "filetypes": ["python"]
+    }
+  },
+  "formatter": {
+    "python": {
+      "command": "ruff",
+      "args": ["format", "--stdin-filename", "$FILE", "-"]
+    }
+  }
+}

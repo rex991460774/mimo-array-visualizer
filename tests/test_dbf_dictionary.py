@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import builtins
+
 import numpy as np
 import pytest
 from openpyxl import Workbook
 
 from virtual_array.analysis import dbf_azimuth_spectrum_bank
 from virtual_array.dbf_dictionary import (
+    CHANNEL_MODE_PHYSICAL,
+    CHANNEL_MODE_VIRTUAL,
     DBF_DICTIONARY_QUALITY_DANGER,
     DBF_DICTIONARY_QUALITY_OK,
     DBF_DICT_CHANNEL_PATTERN,
@@ -133,6 +137,77 @@ def test_loads_physical_tx_rx_dictionary_xlsx_and_combines_virtual_channels(tmp_
     assert matrix[0] == pytest.approx(
         np.conjugate(np.exp(1j * np.radians(np.array([30.0, 40.0]))))
     )
+
+
+def test_forced_virtual_dictionary_xlsx_uses_left_to_right_columns(tmp_path) -> None:
+    path = tmp_path / "generic-virtual-dict.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Angle", "CH1", "CH2"])
+    sheet.append([0, 0, 90])
+    workbook.save(path)
+    array = AntennaArray.from_xy(tx_x=[0], tx_y=[0], rx_x=[0, 1], rx_y=[0, 0])
+
+    table = load_dbf_dictionary_table(path, array, channel_mode=CHANNEL_MODE_VIRTUAL)
+    config = DbfDictionaryConfig(mode=DBF_DICT_CUSTOM, custom_table=table)
+    matrix = config.scan_matrix(array, np.array([0.0]), axis="azimuth")
+
+    assert table.channel_mode == CHANNEL_MODE_VIRTUAL
+    assert table.column_names == ("CH1", "CH2")
+    assert matrix[0] == pytest.approx(
+        np.conjugate(np.exp(1j * np.radians(np.array([0.0, 90.0]))))
+    )
+
+
+def test_loads_xlsx_dictionary_without_openpyxl(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "generic-virtual-dict.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Angle", "CH1", "CH2"])
+    sheet.append([0, 0, 90])
+    workbook.save(path)
+    real_import = builtins.__import__
+
+    def block_openpyxl(name, *args, **kwargs):  # noqa: ANN001
+        if name == "openpyxl" or name.startswith("openpyxl."):
+            raise ImportError("blocked for fallback test")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", block_openpyxl)
+    array = AntennaArray.from_xy(tx_x=[0], tx_y=[0], rx_x=[0, 1], rx_y=[0, 0])
+
+    table = load_dbf_dictionary_table(path, array, channel_mode=CHANNEL_MODE_VIRTUAL)
+    config = DbfDictionaryConfig(mode=DBF_DICT_CUSTOM, custom_table=table)
+    matrix = config.scan_matrix(array, np.array([0.0]), axis="azimuth")
+
+    assert table.channel_mode == CHANNEL_MODE_VIRTUAL
+    assert matrix[0] == pytest.approx(
+        np.conjugate(np.exp(1j * np.radians(np.array([0.0, 90.0]))))
+    )
+
+
+def test_forced_physical_1tx_dictionary_accepts_rx_only_columns(tmp_path) -> None:
+    path = tmp_path / "rx-only-physical-dict.csv"
+    path.write_text("Angle,CH1,CH2\n0,20,30\n", encoding="utf-8")
+    array = AntennaArray.from_xy(tx_x=[0], tx_y=[0], rx_x=[0, 1], rx_y=[0, 0])
+
+    table = load_dbf_dictionary_table(path, array, channel_mode=CHANNEL_MODE_PHYSICAL)
+    config = DbfDictionaryConfig(mode=DBF_DICT_CUSTOM, custom_table=table)
+    matrix = config.scan_matrix(array, np.array([0.0]), axis="azimuth")
+
+    assert table.channel_mode == CHANNEL_MODE_PHYSICAL
+    assert matrix[0] == pytest.approx(
+        np.conjugate(np.exp(1j * np.radians(np.array([20.0, 30.0]))))
+    )
+
+
+def test_forced_virtual_dictionary_rejects_wrong_column_count(tmp_path) -> None:
+    path = tmp_path / "bad-virtual-dict.csv"
+    path.write_text("Angle,CH1,CH2,CH3\n0,0,10,20\n", encoding="utf-8")
+    array = AntennaArray.from_xy(tx_x=[0], tx_y=[0], rx_x=[0, 1], rx_y=[0, 0])
+
+    with pytest.raises(ValueError, match="expected 2 virtual channel columns"):
+        load_dbf_dictionary_table(path, array, channel_mode=CHANNEL_MODE_VIRTUAL)
 
 
 def test_tx_rx_headers_win_when_physical_and_virtual_column_counts_match(tmp_path) -> None:

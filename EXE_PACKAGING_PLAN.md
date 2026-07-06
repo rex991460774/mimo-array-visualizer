@@ -50,6 +50,8 @@ a = Analysis(
         'virtual_array.plotting',
         'virtual_array.examples',
         'virtual_array.examples.case4_5tx7rx_sel',
+        'openpyxl',
+        'openpyxl.cell._writer',
     ],
     datas=[
         ('src/virtual_array/examples/*.py', 'virtual_array/examples/'),  # 示例数据
@@ -65,6 +67,7 @@ a = Analysis(
 | 问题 | 原因 | 解法 |
 |------|------|------|
 | `ModuleNotFoundError: virtual_array` | PyInstaller 不扫描 `-e` 安装路径 | 用 `--paths src` 或 spec 中 `pathex=['src']` |
+| `Reading XLSX ... requires openpyxl` | `openpyxl` 是动态导入，PyInstaller 可能漏收 | 在 spec 的 `hiddenimports` 加入 `openpyxl` 和 `openpyxl.cell._writer` |
 | 中文字体丢失 | Matplotlib 找不到 `Microsoft YaHei` | 把 `C:/Windows/Fonts/msyh.ttc` 打包进 datas |
 | exe 闪退 | Tkinter 报错后窗口销毁 | 先用 `--console` 版本测试 |
 | 杀软误报 | 单文件模式解压行为触发 | 用 `--onedir`（文件夹模式），误报率极低 |

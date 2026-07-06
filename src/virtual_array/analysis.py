@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .dbf_dictionary import DbfDictionaryConfig
-from .element_pattern import ChannelPatternSet, ElementPattern
+from .element_pattern import ChannelPatternSet, ElementPattern, virtual_channel_names
 from .geometry import AntennaArray
 
 
@@ -1045,7 +1045,14 @@ def _channel_pattern_weight(
     tx_weights = patterns.complex_weights(tx_names, azimuth_deg, elevation_deg)
     rx_weights = patterns.complex_weights(rx_names, azimuth_deg, elevation_deg)
     virtual_weights = tx_weights[:, None, ...] * rx_weights[None, :, ...]
-    return virtual_weights.reshape(len(tx_names) * len(rx_names), *tx_weights.shape[1:])
+    combined = virtual_weights.reshape(
+        len(tx_names) * len(rx_names), *tx_weights.shape[1:]
+    )
+    virtual_names = virtual_channel_names(tx_names, rx_names)
+    direct_virtual_weights = patterns.complex_weights(
+        virtual_names, azimuth_deg, elevation_deg
+    )
+    return combined * direct_virtual_weights
 
 
 def _channel_pattern_has_phase(
@@ -1055,7 +1062,9 @@ def _channel_pattern_has_phase(
 ) -> bool:
     if patterns is None or patterns.is_empty():
         return False
-    channel_names = [point.name for point in array.tx] + [point.name for point in array.rx]
+    tx_names = [point.name for point in array.tx]
+    rx_names = [point.name for point in array.rx]
+    channel_names = [*tx_names, *rx_names, *virtual_channel_names(tx_names, rx_names)]
     for channel_name in channel_names:
         pattern = patterns.pattern_for(channel_name)
         if axis == "azimuth" and pattern.phase_horizontal is not None:
@@ -1071,7 +1080,9 @@ def _channel_pattern_has_any_phase(
 ) -> bool:
     if patterns is None or patterns.is_empty():
         return False
-    channel_names = [point.name for point in array.tx] + [point.name for point in array.rx]
+    tx_names = [point.name for point in array.tx]
+    rx_names = [point.name for point in array.rx]
+    channel_names = [*tx_names, *rx_names, *virtual_channel_names(tx_names, rx_names)]
     for channel_name in channel_names:
         pattern = patterns.pattern_for(channel_name)
         if pattern.phase_horizontal is not None or pattern.phase_elevation is not None:

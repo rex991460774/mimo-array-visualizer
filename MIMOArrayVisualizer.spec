@@ -6,7 +6,11 @@ a = Analysis(
     pathex=['src'],
     binaries=[],
     datas=[],
-    hiddenimports=['pyparsing.testing'],
+    hiddenimports=[
+        'pyparsing.testing',
+        'openpyxl',
+        'openpyxl.cell._writer',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -9,6 +9,8 @@ from matplotlib.figure import Figure
 
 from virtual_array.analysis import DBF_SCAN_GRID_SIZE
 from virtual_array.gui import (
+    CHANNEL_PATTERN_TARGET_PHYSICAL,
+    CHANNEL_PATTERN_TARGET_VIRTUAL,
     DBF_DISPLAY_MAGNITUDE,
     EditableElement,
     MAX_HISTORY_STATES,
@@ -238,6 +240,40 @@ def test_auto_layout_builds_centered_tx_rx_rows() -> None:
         ("Tx3", 2.0, 4.0),
         ("Rx1", -1.0, -4.0),
         ("Rx2", 1.0, -4.0),
+    ]
+
+
+def test_pattern_channel_names_switch_between_physical_and_virtual_targets() -> None:
+    app = VirtualArrayGui.__new__(VirtualArrayGui)
+    app.elements = _build_auto_layout_elements(tx_count=2, rx_count=3)
+
+    assert app._pattern_channel_names(CHANNEL_PATTERN_TARGET_PHYSICAL) == [
+        "Tx1",
+        "Tx2",
+        "Rx1",
+        "Rx2",
+        "Rx3",
+    ]
+    assert app._pattern_channel_names(CHANNEL_PATTERN_TARGET_VIRTUAL) == [
+        "Tx1Rx1",
+        "Tx1Rx2",
+        "Tx1Rx3",
+        "Tx2Rx1",
+        "Tx2Rx2",
+        "Tx2Rx3",
+    ]
+    assert app._all_pattern_channel_names() == [
+        "Tx1",
+        "Tx2",
+        "Rx1",
+        "Rx2",
+        "Rx3",
+        "Tx1Rx1",
+        "Tx1Rx2",
+        "Tx1Rx3",
+        "Tx2Rx1",
+        "Tx2Rx2",
+        "Tx2Rx3",
     ]
 
 

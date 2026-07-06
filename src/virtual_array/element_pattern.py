@@ -7,6 +7,8 @@ from typing import Iterable
 
 import numpy as np
 
+from .table_io import read_xlsx_rows
+
 
 ANGLE_HEADER_KEYWORDS = ("theta", "angle", "azimuth", "az", "deg")
 GAIN_HEADER_KEYWORDS = ("gain", "db", "dbi", "realized")
@@ -343,17 +345,26 @@ def load_hfss_summary_pattern(
     path: str | Path,
     channel_names: list[str],
     value_kind: str,
+    virtual_channel_names: list[str] | None = None,
 ) -> dict[str, PatternSeries]:
     series = load_hfss_pattern_series_columns(
         path,
         value_kind=value_kind,
-        max_columns=len(channel_names),
+        max_columns=max(len(channel_names), len(virtual_channel_names or [])),
     )
-    mapped_channel_names = _summary_pattern_channel_names(channel_names, len(series))
+    mapped_channel_names = _summary_pattern_channel_names(
+        channel_names,
+        len(series),
+        data_column_names=[pattern_series.value_column for pattern_series in series],
+        virtual_channel_names=virtual_channel_names,
+    )
     if mapped_channel_names is None:
+        expected_counts = [len(channel_names)]
+        if virtual_channel_names:
+            expected_counts.append(len(virtual_channel_names))
         raise ValueError(
             f"Summary pattern has {len(series)} data column(s) after Theta, "
-            f"but the current layout needs {len(channel_names)} physical channels."
+            f"but the current layout needs {' or '.join(str(count) for count in expected_counts)} channels."
         )
     return {
         channel_name: pattern_series
@@ -364,7 +375,19 @@ def load_hfss_summary_pattern(
 def _summary_pattern_channel_names(
     channel_names: list[str],
     data_column_count: int,
+    data_column_names: list[str] | None = None,
+    virtual_channel_names: list[str] | None = None,
 ) -> list[str] | None:
+    explicit_names = _explicit_summary_channel_names(
+        data_column_names or [],
+        [*channel_names, *(virtual_channel_names or [])],
+    )
+    if explicit_names is not None:
+        return explicit_names
+
+    if virtual_channel_names and data_column_count == len(virtual_channel_names):
+        return list(virtual_channel_names)
+
     if data_column_count == len(channel_names):
         return list(channel_names)
 
@@ -383,6 +406,48 @@ def _summary_pattern_channel_names(
     if tx_names and rx_names and data_column_count == len(rx_names) + 1:
         return [tx_names[0], *rx_names]
     return None
+
+
+def virtual_channel_names(tx_names: list[str], rx_names: list[str]) -> list[str]:
+    return [f"{tx_name}{rx_name}" for tx_name in tx_names for rx_name in rx_names]
+
+
+def _explicit_summary_channel_names(
+    data_column_names: list[str],
+    candidate_channel_names: list[str],
+) -> list[str] | None:
+    if not data_column_names:
+        return None
+    normalized_candidates = {
+        _normalized_channel_name(channel_name): channel_name
+        for channel_name in candidate_channel_names
+    }
+    mapped_names = []
+    for column_name in data_column_names:
+        normalized_column = _normalized_channel_name(column_name)
+        if normalized_column in normalized_candidates:
+            mapped_names.append(normalized_candidates[normalized_column])
+            continue
+        matches = [
+            (len(candidate), channel_name)
+            for candidate, channel_name in normalized_candidates.items()
+            if candidate and candidate in normalized_column
+        ]
+        if not matches:
+            return None
+        matches.sort(reverse=True)
+        if len(matches) > 1 and matches[0][0] == matches[1][0]:
+            return None
+        mapped_names.append(matches[0][1])
+    return mapped_names
+
+
+def _normalized_channel_name(value: str) -> str:
+    return "".join(
+        character.lower()
+        for character in str(value)
+        if character.isalnum()
+    )
 
 
 def load_hfss_pattern_series_columns(
@@ -505,15 +570,16 @@ def _read_table_rows(path: Path) -> list[list[str]]:
     if path.suffix.lower() in {".xlsx", ".xlsm"}:
         try:
             from openpyxl import load_workbook
-        except ImportError as exc:
-            raise ValueError("Reading XLSX pattern files requires openpyxl.") from exc
-        workbook = load_workbook(path, data_only=True, read_only=True)
-        sheet = workbook.active
-        return [
-            ["" if cell is None else str(cell).strip() for cell in row]
-            for row in sheet.iter_rows(values_only=True)
-            if row and not _is_comment_or_blank(["" if cell is None else str(cell) for cell in row])
-        ]
+        except ImportError:
+            rows = read_xlsx_rows(path)
+        else:
+            workbook = load_workbook(path, data_only=True, read_only=True)
+            sheet = workbook.active
+            rows = [
+                ["" if cell is None else str(cell).strip() for cell in row]
+                for row in sheet.iter_rows(values_only=True)
+            ]
+        return [row for row in rows if row and not _is_comment_or_blank(row)]
 
     delimiter = _detect_delimiter(path)
     with path.open("r", encoding="utf-8-sig", newline="") as file:

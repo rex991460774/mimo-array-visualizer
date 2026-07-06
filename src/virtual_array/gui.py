@@ -26,6 +26,8 @@ from .dbf_dictionary import (
     DBF_DICT_CUSTOM,
     DBF_DICT_IDEAL,
     DBF_DICT_IDEAL_REVERSED,
+    CHANNEL_MODE_PHYSICAL,
+    CHANNEL_MODE_VIRTUAL,
     DbfDictionaryConfig,
     DbfDictionaryQualityReport,
     DbfDictionaryTable,
@@ -63,6 +65,7 @@ from .element_pattern import (
     load_hfss_summary_pattern,
     load_element_pattern,
     pattern_cut_metrics,
+    virtual_channel_names,
 )
 from .geometry import AntennaArray, ArrayPoint
 from .grid import GRID_STEP, snap_to_grid
@@ -97,6 +100,8 @@ DBF_SCAN_INTERVAL_MS = 55
 DBF_DISPLAY_DB = "db"
 DBF_DISPLAY_MAGNITUDE = "magnitude"
 SUPPORTED_DBF_DISPLAY_MODES = (DBF_DISPLAY_DB, DBF_DISPLAY_MAGNITUDE)
+CHANNEL_PATTERN_TARGET_PHYSICAL = "physical"
+CHANNEL_PATTERN_TARGET_VIRTUAL = "virtual"
 LANGUAGE_ZH = "zh"
 LANGUAGE_EN = "en"
 LANGUAGE_JA = "ja"
@@ -190,9 +195,9 @@ UI_TEXT = {
         "ja": "アレイJSONを書き出し",
     },
     "menu_channel_patterns": {
-        "zh": "设置通道幅相CSV",
-        "en": "Set Channel Amp/Phase CSV",
-        "ja": "チャネル振幅/位相CSVを設定",
+        "zh": "配置通道幅相",
+        "en": "Configure Channel Amp/Phase",
+        "ja": "チャネル振幅/位相を設定",
     },
     "menu_dbf_dictionary": {
         "zh": "配置DBF字典",
@@ -224,7 +229,7 @@ UI_TEXT = {
             "文件 > 导入阵面 JSON：读取之前保存的 TX/RX 布局。\n"
             "文件 > 导出阵面 JSON：保存当前布局、评估结果和当前配置，方便复现实验。\n"
             "编辑 > 撤销/重做阵列编辑：回退或恢复最近的阵列位置、添加、删除操作。\n"
-            "编辑 > 设置通道幅相 CSV：给每个物理通道加载 HFSS 等工具导出的幅度/相位方向图。不加载时，该通道按理想通道处理。汇总 CSV 可以一次加载多通道；1T2R 相位文件如果只有两列数据，会按 Rx1、Rx2 读取，三列则按 Tx1、Rx1、Rx2 读取。\n"
+            "编辑 > 配置通道幅相：给物理通道或虚拟通道加载 HFSS 等工具导出的幅度/相位方向图。不加载时，该通道按理想通道处理。汇总 CSV/XLSX 可选择导入目标：物理通道按 Tx/Rx 单通道规则读取；虚拟通道按 Tx1Rx1、Tx1Rx2 到 TxNRxN 的顺序读取。\n"
             "编辑 > 配置 DBF 字典：选择测角时使用哪种字典。理想几何字典只按阵列几何算相位；理想反向相位用于快速检查符号约定；通道幅相校准字典会叠加已导入的通道方向图；导入 CSV/XLSX 字典用于使用外部仿真或实测字典。\n"
             "视图 > 中文/英文/日文：切换界面语言。\n"
             "帮助 > 使用说明：打开本说明。帮助 > 关于：查看版本和日志路径。\n\n"
@@ -245,7 +250,7 @@ UI_TEXT = {
             "File > Import Array JSON: load a saved TX/RX layout.\n"
             "File > Export Array JSON: save the current layout, evaluation, and configuration.\n"
             "Edit > Undo/Redo: step backward or forward through recent layout edits.\n"
-            "Edit > Set Channel Amp/Phase CSV: load per-channel amplitude or phase patterns from HFSS-like exports. Missing channels stay ideal. Summary CSV files can load several channels at once; for 1T2R phase data, two data columns map to Rx1/Rx2 and three data columns map to Tx1/Rx1/Rx2.\n"
+            "Edit > Configure Channel Amp/Phase: load amplitude or phase patterns for physical channels or synthesized virtual channels. Missing channels stay ideal. Choose the summary import target explicitly: physical uses Tx/Rx channel rules, while virtual uses Tx1Rx1, Tx1Rx2 through TxNRxN order.\n"
             "Edit > Configure DBF Dictionary: choose the dictionary used for angle estimation. Ideal geometric uses only array geometry; ideal reversed phase checks sign convention; channel amp/phase uses imported channel data; imported CSV/XLSX uses an external simulated or measured dictionary.\n"
             "View: switch language. Help: open this manual or the About dialog.\n\n"
             "Typical flow\n"
@@ -265,7 +270,7 @@ UI_TEXT = {
             "ファイル > アレイ JSON 読み込み：保存済みの TX/RX 配置を読み込みます。\n"
             "ファイル > アレイ JSON 書き出し：現在の配置、評価、設定を保存します。\n"
             "編集 > 元に戻す/やり直し：最近の配置編集を戻す、または復元します。\n"
-            "編集 > チャネル振幅/位相 CSV：HFSS などのチャネル振幅/位相データを読み込みます。未設定チャネルは理想として扱います。1T2R 位相データでは、2 列は Rx1/Rx2、3 列は Tx1/Rx1/Rx2 として読みます。\n"
+            "編集 > チャネル振幅/位相を設定：物理チャネルまたは合成済み仮想チャネルの振幅/位相データを読み込みます。集約 CSV/XLSX は読込先を選択できます。物理は Tx/Rx ルール、仮想は Tx1Rx1、Tx1Rx2 から TxNRxN の順に読みます。\n"
             "編集 > DBF 辞書設定：測角に使う辞書を選びます。理想幾何、逆位相確認、チャネル振幅/位相、外部 CSV/XLSX 辞書を選択できます。\n"
             "表示：言語を切り替えます。ヘルプ：この説明書またはバージョン情報を開きます。\n\n"
             "基本の流れ\n"
@@ -538,15 +543,18 @@ UI_TEXT = {
         "ja": "カスタムDBF辞書には方位または仰角の少なくとも1ファイルが必要です。",
     },
     "channel_dialog_title": {
-        "zh": "通道幅度/相位方向图设置",
-        "en": "Channel Amplitude/Phase Patterns",
-        "ja": "チャネル振幅/位相パターン設定",
+        "zh": "配置通道幅相",
+        "en": "Configure Channel Amp/Phase",
+        "ja": "チャネル振幅/位相を設定",
     },
-    "summary_csv_title": {"zh": "  汇总CSV  ", "en": "  Summary CSV  ", "ja": "  集約CSV  "},
+    "summary_csv_title": {"zh": "  汇总文件  ", "en": "  Summary Files  ", "ja": "  集約ファイル  "},
+    "summary_target_label": {"zh": "导入目标", "en": "Import target", "ja": "読込先"},
+    "summary_target_physical": {"zh": "物理通道", "en": "Physical", "ja": "物理"},
+    "summary_target_virtual": {"zh": "虚拟通道", "en": "Virtual", "ja": "仮想"},
     "physical_channels_title": {
-        "zh": "  物理通道  ",
-        "en": "  Physical Channels  ",
-        "ja": "  物理チャネル  ",
+        "zh": "  通道列表  ",
+        "en": "  Channel List  ",
+        "ja": "  チャネル一覧  ",
     },
     "load_summary": {"zh": "加载{label}汇总", "en": "Load {label} Summary", "ja": "{label}集約を読み込み"},
     "set_pattern": {"zh": "设置{label}", "en": "Set {label}", "ja": "{label}を設定"},
@@ -555,9 +563,9 @@ UI_TEXT = {
     "done": {"zh": "完成", "en": "Done", "ja": "完了"},
     "column_channel": {"zh": "通道", "en": "Channel", "ja": "チャネル"},
     "select_channel_first": {
-        "zh": "请先选择一个物理通道。",
-        "en": "Select one physical channel first.",
-        "ja": "先に物理チャネルを1つ選択してください。",
+        "zh": "请先选择一个通道。",
+        "en": "Select one channel first.",
+        "ja": "先にチャネルを1つ選択してください。",
     },
     "channel_patterns_title": {"zh": "通道方向图", "en": "Channel patterns", "ja": "チャネルパターン"},
     "channel_cleared": {
@@ -576,9 +584,9 @@ UI_TEXT = {
         "ja": "すべてのチャネルパターンをクリアしました。",
     },
     "load_summary_title": {
-        "zh": "加载{label}汇总CSV",
-        "en": "Load {label} summary CSV",
-        "ja": "{label}集約CSVを読み込み",
+        "zh": "加载{label}汇总文件",
+        "en": "Load {label} summary file",
+        "ja": "{label}集約ファイルを読み込み",
     },
     "load_channel_title": {
         "zh": "加载{channel}的{label}",
@@ -596,14 +604,14 @@ UI_TEXT = {
         "ja": "{channel}の{label}を読み込みました：{file}。",
     },
     "load_summary_failed": {
-        "zh": "加载通道汇总CSV失败",
+        "zh": "加载通道幅相汇总失败",
         "en": "Load channel pattern summary failed",
-        "ja": "チャネル集約CSVの読み込みに失敗",
+        "ja": "チャネル集約の読み込みに失敗",
     },
     "load_channel_failed": {
-        "zh": "加载通道CSV失败",
+        "zh": "加载通道幅相失败",
         "en": "Load channel pattern failed",
-        "ja": "チャネルCSVの読み込みに失敗",
+        "ja": "チャネルの読み込みに失敗",
     },
     "ideal": {"zh": "理想", "en": "ideal", "ja": "理想"},
     "amp": {"zh": "幅度", "en": "Amp", "ja": "振幅"},
@@ -769,9 +777,15 @@ def _text_for_language(key: str, language: str = LANGUAGE_ZH, **kwargs) -> str:
 
 
 def _pattern_slot_label_for_language(kind: str, plane: str, language: str) -> str:
-    kind_key = "amp" if kind == PATTERN_KIND_AMPLITUDE else "phase"
-    plane_text = "E" if plane == PATTERN_PLANE_ELEVATION else "H"
-    return f"{_text_for_language(kind_key, language)} {plane_text}"
+    kind_text = _text_for_language(
+        "amp" if kind == PATTERN_KIND_AMPLITUDE else "phase",
+        language,
+    )
+    plane_text = _text_for_language(
+        "el_short" if plane == PATTERN_PLANE_ELEVATION else "az_short",
+        language,
+    )
+    return f"{plane_text}{kind_text}" if language != LANGUAGE_EN else f"{plane_text} {kind_text}"
 
 
 PRIMARY_EVAL_ROWS = (
@@ -1703,8 +1717,11 @@ def _pattern_slot_label(kind: str, plane: str, language: str = LANGUAGE_ZH) -> s
     kind_label = _text_for_language(
         "amp" if kind == PATTERN_KIND_AMPLITUDE else "phase", language
     )
-    plane_label = "E" if plane == PATTERN_PLANE_ELEVATION else "H"
-    return f"{kind_label} {plane_label}"
+    plane_label = _text_for_language(
+        "el_short" if plane == PATTERN_PLANE_ELEVATION else "az_short",
+        language,
+    )
+    return f"{plane_label}{kind_label}" if language != LANGUAGE_EN else f"{plane_label} {kind_label}"
 
 
 def _dbf_frame_index_for_angle(angle: float) -> int:
@@ -5084,6 +5101,7 @@ class VirtualArrayGui:
             initial_mode = DBF_DICT_CHANNEL_PATTERN
         mode_var = tk.StringVar(value=initial_mode)
         axis_var = tk.StringVar(value="azimuth")
+        dictionary_target_var = tk.StringVar(value=CHANNEL_PATTERN_TARGET_VIRTUAL)
         phase_reverse_var = tk.BooleanVar(value=self.dbf_dictionary.custom_phase_reversed)
         zero_calibrate_var = tk.BooleanVar(
             value=self.dbf_dictionary.custom_zero_phase_calibrated
@@ -5144,6 +5162,28 @@ class VirtualArrayGui:
             value="elevation",
             command=lambda: redraw_preview(),
         ).grid(row=mode_row, column=0, sticky="w", pady=(2, 0))
+        mode_row += 1
+
+        ttk.Separator(mode_frame).grid(row=mode_row, column=0, columnspan=2, sticky="ew", pady=8)
+        mode_row += 1
+        ttk.Label(
+            mode_frame,
+            text=self._t("summary_target_label"),
+            style="Muted.TLabel",
+        ).grid(row=mode_row, column=0, columnspan=2, sticky="w")
+        mode_row += 1
+        ttk.Radiobutton(
+            mode_frame,
+            text=self._t("summary_target_physical"),
+            variable=dictionary_target_var,
+            value=CHANNEL_PATTERN_TARGET_PHYSICAL,
+        ).grid(row=mode_row, column=0, sticky="w", pady=(4, 0))
+        ttk.Radiobutton(
+            mode_frame,
+            text=self._t("summary_target_virtual"),
+            variable=dictionary_target_var,
+            value=CHANNEL_PATTERN_TARGET_VIRTUAL,
+        ).grid(row=mode_row, column=1, sticky="w", pady=(4, 0))
         mode_row += 1
 
         ttk.Separator(mode_frame).grid(row=mode_row, column=0, columnspan=2, sticky="ew", pady=8)
@@ -5253,16 +5293,18 @@ class VirtualArrayGui:
         button_row.grid_columnconfigure(0, weight=1)
 
         def refresh_file_labels() -> None:
-            az_file = (
-                custom_holder["azimuth"].display_name
-                if custom_holder["azimuth"] is not None
-                else self._t("dbf_dict_no_file")
-            )
-            el_file = (
-                custom_holder["elevation"].display_name
-                if custom_holder["elevation"] is not None
-                else self._t("dbf_dict_no_file")
-            )
+            def table_label(table: DbfDictionaryTable | None) -> str:
+                if table is None:
+                    return self._t("dbf_dict_no_file")
+                target_key = (
+                    "summary_target_virtual"
+                    if table.channel_mode == CHANNEL_MODE_VIRTUAL
+                    else "summary_target_physical"
+                )
+                return f"{table.display_name} ({self._t(target_key)})"
+
+            az_file = table_label(custom_holder["azimuth"])
+            el_file = table_label(custom_holder["elevation"])
             az_file_var.set(
                 self._t(
                     "dbf_dict_file_status",
@@ -5389,7 +5431,16 @@ class VirtualArrayGui:
             if not filename:
                 return
             try:
-                table = load_dbf_dictionary_table(filename, self.current_array())
+                table = load_dbf_dictionary_table(
+                    filename,
+                    self.current_array(),
+                    channel_mode=(
+                        CHANNEL_MODE_PHYSICAL
+                        if dictionary_target_var.get()
+                        == CHANNEL_PATTERN_TARGET_PHYSICAL
+                        else CHANNEL_MODE_VIRTUAL
+                    ),
+                )
             except Exception as exc:
                 LOGGER.exception("Failed to load DBF dictionary from %s", filename)
                 messagebox.showerror(self._t("dbf_dict_custom_failed"), str(exc))
@@ -5473,6 +5524,26 @@ class VirtualArrayGui:
         summary_frame.grid(row=0, column=0, sticky="ew")
         for column in range(5):
             summary_frame.grid_columnconfigure(column, weight=1, uniform="summary_buttons")
+        summary_target_var = tk.StringVar(value=CHANNEL_PATTERN_TARGET_PHYSICAL)
+        ttk.Label(
+            summary_frame,
+            text=self._t("summary_target_label"),
+            style="TLabel",
+        ).grid(row=0, column=0, sticky="w", padx=(0, 8), pady=(0, 6))
+        ttk.Radiobutton(
+            summary_frame,
+            text=self._t("summary_target_physical"),
+            variable=summary_target_var,
+            value=CHANNEL_PATTERN_TARGET_PHYSICAL,
+            command=lambda: refresh_tree(),
+        ).grid(row=0, column=1, sticky="w", padx=(0, 8), pady=(0, 6))
+        ttk.Radiobutton(
+            summary_frame,
+            text=self._t("summary_target_virtual"),
+            variable=summary_target_var,
+            value=CHANNEL_PATTERN_TARGET_VIRTUAL,
+            command=lambda: refresh_tree(),
+        ).grid(row=0, column=2, sticky="w", padx=(0, 8), pady=(0, 6))
 
         summary_specs = (
             (_pattern_slot_label(PATTERN_KIND_AMPLITUDE, PATTERN_PLANE_HORIZONTAL, self.language), PATTERN_KIND_AMPLITUDE, PATTERN_PLANE_HORIZONTAL),
@@ -5485,11 +5556,11 @@ class VirtualArrayGui:
                 summary_frame,
                 text=self._t("load_summary", label=label),
                 command=lambda k=kind, p=plane: self._load_summary_channel_pattern(
-                    k, p, dialog, refresh_tree
+                    k, p, summary_target_var.get(), dialog, refresh_tree
                 ),
                 style="DialogButton.TButton",
             ).grid(
-                row=0,
+                row=1,
                 column=column,
                 sticky="ew",
                 padx=(0 if column == 0 else 6, 0),
@@ -5500,7 +5571,7 @@ class VirtualArrayGui:
             text=self._t("clear_all"),
             command=lambda: clear_all_patterns(),
             style="DialogDanger.TButton",
-        ).grid(row=0, column=4, sticky="ew", padx=(6, 0))
+        ).grid(row=1, column=4, sticky="ew", padx=(6, 0))
 
         table_frame = ttk.LabelFrame(
             root_frame,
@@ -5574,7 +5645,9 @@ class VirtualArrayGui:
             selected_channel = selected[0] if selected else None
             for item in tree.get_children():
                 tree.delete(item)
-            for row_index, channel_name in enumerate(self._physical_channel_names()):
+            for row_index, channel_name in enumerate(
+                self._pattern_channel_names(summary_target_var.get())
+            ):
                 pattern = self.channel_patterns.pattern_for(channel_name)
                 tree.insert(
                     "",
@@ -5623,6 +5696,21 @@ class VirtualArrayGui:
         array = self.current_array()
         return [point.name for point in array.tx] + [point.name for point in array.rx]
 
+    def _virtual_channel_names(self) -> list[str]:
+        array = self.current_array()
+        return virtual_channel_names(
+            [point.name for point in array.tx],
+            [point.name for point in array.rx],
+        )
+
+    def _all_pattern_channel_names(self) -> list[str]:
+        return [*self._physical_channel_names(), *self._virtual_channel_names()]
+
+    def _pattern_channel_names(self, target: str) -> list[str]:
+        if target == CHANNEL_PATTERN_TARGET_VIRTUAL:
+            return self._virtual_channel_names()
+        return self._physical_channel_names()
+
     def _selected_pattern_channel(self, tree: ttk.Treeview) -> str | None:
         selected = tree.selection()
         if not selected:
@@ -5637,6 +5725,7 @@ class VirtualArrayGui:
         self,
         kind: str,
         plane: str,
+        target: str,
         parent: tk.Toplevel,
         refresh_callback: callable,
     ) -> None:
@@ -5649,10 +5738,11 @@ class VirtualArrayGui:
         )
         if not filename:
             return
+        channel_names = self._pattern_channel_names(target)
         try:
             series_by_channel = load_hfss_summary_pattern(
                 filename,
-                self._physical_channel_names(),
+                channel_names,
                 value_kind=kind,
             )
         except Exception as exc:
@@ -5738,7 +5828,7 @@ class VirtualArrayGui:
     def _update_channel_pattern_status(self) -> None:
         current_patterns = [
             self.channel_patterns.pattern_for(channel_name)
-            for channel_name in self._physical_channel_names()
+            for channel_name in self._all_pattern_channel_names()
         ]
         channels = sum(not pattern.is_empty() for pattern in current_patterns)
         series = sum(pattern.series_count() for pattern in current_patterns)
@@ -6912,7 +7002,7 @@ class VirtualArrayGui:
         }
 
     def _channel_pattern_export_info(self) -> dict[str, object]:
-        current_channels = self._physical_channel_names()
+        current_channels = self._all_pattern_channel_names()
         configured = []
         for channel_name in current_channels:
             pattern = self.channel_patterns.pattern_for(channel_name)
@@ -7016,6 +7106,10 @@ class VirtualArrayGui:
                     custom_azimuth_path = legacy_custom_path
                 if not isinstance(custom_elevation_path, str) or not custom_elevation_path:
                     custom_elevation_path = legacy_custom_path
+                custom_channel_modes = {
+                    "azimuth": dictionary_state.get("custom_azimuth_channel_mode"),
+                    "elevation": dictionary_state.get("custom_elevation_channel_mode"),
+                }
                 if mode == DBF_DICT_CUSTOM:
                     for axis_name, custom_path in (
                         ("azimuth", custom_azimuth_path),
@@ -7025,7 +7119,9 @@ class VirtualArrayGui:
                             continue
                         try:
                             table = load_dbf_dictionary_table(
-                                custom_path, self.current_array()
+                                custom_path,
+                                self.current_array(),
+                                channel_mode=custom_channel_modes.get(axis_name),
                             )
                         except Exception:
                             LOGGER.warning(
@@ -7104,8 +7200,18 @@ class VirtualArrayGui:
                     if self.dbf_dictionary.custom_azimuth_table is not None
                     else ""
                 ),
+                "custom_azimuth_channel_mode": (
+                    self.dbf_dictionary.custom_azimuth_table.channel_mode
+                    if self.dbf_dictionary.custom_azimuth_table is not None
+                    else ""
+                ),
                 "custom_elevation_path": (
                     self.dbf_dictionary.custom_elevation_table.source_path
+                    if self.dbf_dictionary.custom_elevation_table is not None
+                    else ""
+                ),
+                "custom_elevation_channel_mode": (
+                    self.dbf_dictionary.custom_elevation_table.channel_mode
                     if self.dbf_dictionary.custom_elevation_table is not None
                     else ""
                 ),

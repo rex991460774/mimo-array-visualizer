@@ -7,8 +7,9 @@ from pathlib import Path
 
 import numpy as np
 
-from .element_pattern import ChannelPatternSet
+from .element_pattern import ChannelPatternSet, virtual_channel_names
 from .geometry import AntennaArray
+from .table_io import read_xlsx_rows
 
 
 DBF_DICT_IDEAL = "ideal"
@@ -161,11 +162,16 @@ class DbfDictionaryTable:
                 )
             return _reorder_virtual_columns(array, rows, self.column_names)
 
-        physical_count = len(array.tx) + len(array.rx)
-        if rows.shape[1] != physical_count:
+        tx_count = len(array.tx)
+        rx_count = len(array.rx)
+        physical_counts = {tx_count + rx_count}
+        if tx_count == 1:
+            physical_counts.add(rx_count)
+        if rows.shape[1] not in physical_counts:
+            expected_text = " or ".join(str(count) for count in sorted(physical_counts))
             raise ValueError(
                 f"DBF dictionary has {rows.shape[1]} physical channel columns, "
-                f"but the current layout needs {physical_count}."
+                f"but the current layout needs {expected_text}."
             )
         tx_rows, rx_rows = _split_physical_columns(array, rows, self.column_names)
         virtual = tx_rows[:, :, None] * rx_rows[:, None, :]
@@ -377,7 +383,11 @@ class DbfDictionaryConfig:
         return base_response * az_delta * el_delta
 
 
-def load_dbf_dictionary_table(path: str | Path, array: AntennaArray) -> DbfDictionaryTable:
+def load_dbf_dictionary_table(
+    path: str | Path,
+    array: AntennaArray,
+    channel_mode: str | None = None,
+) -> DbfDictionaryTable:
     source_path = Path(path)
     header, raw_rows = _read_table(source_path)
     if len(header) < 2 or not raw_rows:
@@ -432,7 +442,12 @@ def load_dbf_dictionary_table(path: str | Path, array: AntennaArray) -> DbfDicti
     if value_format == "phase_deg":
         values = np.exp(1j * np.radians(values.real))
     channel_names = tuple(header[index].strip() for index in data_indices)
-    channel_mode = _infer_channel_mode(array, channel_names, values.shape[1])
+    resolved_channel_mode = _infer_channel_mode(
+        array,
+        channel_names,
+        values.shape[1],
+        preferred_mode=channel_mode,
+    )
 
     order = np.lexsort((np.asarray(elevations, dtype=float), np.asarray(azimuths, dtype=float)))
     if azimuth_index is None and elevation_index is None:
@@ -446,7 +461,7 @@ def load_dbf_dictionary_table(path: str | Path, array: AntennaArray) -> DbfDicti
         angle_column=header[angle_index] if angle_index is not None else "",
         azimuth_column=header[azimuth_index] if azimuth_index is not None else None,
         elevation_column=header[elevation_index] if elevation_index is not None else None,
-        channel_mode=channel_mode,
+        channel_mode=resolved_channel_mode,
         value_format=value_format,
         column_names=channel_names,
         angles_deg=sorted_angles,
@@ -771,22 +786,31 @@ def _channel_pattern_response(
     tx_weights = channel_patterns.complex_weights(tx_names, azimuth_deg, elevation_deg)
     rx_weights = channel_patterns.complex_weights(rx_names, azimuth_deg, elevation_deg)
     virtual = tx_weights[:, None, :] * rx_weights[None, :, :]
-    return np.moveaxis(virtual, -1, 0).reshape(len(azimuth_deg), len(tx_names) * len(rx_names))
+    combined = np.moveaxis(virtual, -1, 0).reshape(
+        len(azimuth_deg), len(tx_names) * len(rx_names)
+    )
+    direct_virtual = channel_patterns.complex_weights(
+        virtual_channel_names(tx_names, rx_names),
+        azimuth_deg,
+        elevation_deg,
+    ).T
+    return combined * direct_virtual
 
 
 def _read_table(path: Path) -> tuple[list[str], list[list[str]]]:
     if path.suffix.lower() in {".xlsx", ".xlsm"}:
         try:
             from openpyxl import load_workbook
-        except ImportError as exc:
-            raise ValueError("Reading XLSX DBF dictionaries requires openpyxl.") from exc
-        workbook = load_workbook(path, data_only=True, read_only=True)
-        sheet = workbook.active
-        rows = [
-            ["" if cell is None else str(cell).strip() for cell in row]
-            for row in sheet.iter_rows(values_only=True)
-            if row and any(cell is not None and str(cell).strip() for cell in row)
-        ]
+        except ImportError:
+            rows = read_xlsx_rows(path)
+        else:
+            workbook = load_workbook(path, data_only=True, read_only=True)
+            sheet = workbook.active
+            rows = [
+                ["" if cell is None else str(cell).strip() for cell in row]
+                for row in sheet.iter_rows(values_only=True)
+                if row and any(cell is not None and str(cell).strip() for cell in row)
+            ]
     else:
         delimiter = _detect_delimiter(path)
         with path.open("r", encoding="utf-8-sig", newline="") as file:
@@ -865,7 +889,12 @@ def _infer_channel_mode(
     array: AntennaArray,
     column_names: tuple[str, ...],
     column_count: int,
+    preferred_mode: str | None = None,
 ) -> str:
+    if preferred_mode in {CHANNEL_MODE_PHYSICAL, CHANNEL_MODE_VIRTUAL}:
+        _validate_channel_mode_column_count(array, column_count, preferred_mode)
+        return preferred_mode
+
     if _has_physical_channel_headers(array, column_names):
         return CHANNEL_MODE_PHYSICAL
     if _virtual_column_order(array, column_names) is not None:
@@ -886,6 +915,32 @@ def _infer_channel_mode(
     )
 
 
+def _validate_channel_mode_column_count(
+    array: AntennaArray,
+    column_count: int,
+    channel_mode: str,
+) -> None:
+    tx_count = len(array.tx)
+    rx_count = len(array.rx)
+    physical_counts = {tx_count + rx_count}
+    if tx_count == 1:
+        physical_counts.add(rx_count)
+    virtual_count = tx_count * rx_count
+    expected_counts = (
+        {virtual_count}
+        if channel_mode == CHANNEL_MODE_VIRTUAL
+        else physical_counts
+    )
+    if column_count in expected_counts:
+        return
+    expected_text = " or ".join(str(count) for count in sorted(expected_counts))
+    label = "virtual" if channel_mode == CHANNEL_MODE_VIRTUAL else "physical"
+    raise ValueError(
+        f"DBF dictionary has {column_count} channel columns; expected "
+        f"{expected_text} {label} channel columns."
+    )
+
+
 def _split_physical_columns(
     array: AntennaArray,
     rows: np.ndarray,
@@ -898,6 +953,9 @@ def _split_physical_columns(
         return rows[:, tx_indices], rows[:, rx_indices]
     tx_count = len(array.tx)
     rx_count = len(array.rx)
+    if tx_count == 1 and rows.shape[1] == rx_count:
+        tx_rows = np.ones((rows.shape[0], 1), dtype=complex)
+        return tx_rows, rows[:, :rx_count]
     return rows[:, :tx_count], rows[:, tx_count : tx_count + rx_count]
 
 

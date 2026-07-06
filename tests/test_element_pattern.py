@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import builtins
+
 import numpy as np
 import pytest
 from openpyxl import Workbook
@@ -16,6 +18,7 @@ from virtual_array.element_pattern import (
     load_hfss_summary_pattern,
     load_element_pattern,
     pattern_cut_metrics,
+    virtual_channel_names,
 )
 from virtual_array.geometry import AntennaArray
 
@@ -114,6 +117,104 @@ def test_loads_1t2r_summary_with_tx_and_rx_columns(tmp_path) -> None:
     assert np.allclose(series_by_channel["Tx1"].values, np.array([-1.0, 0.0]))
     assert np.allclose(series_by_channel["Rx1"].values, np.array([-2.0, 0.0]))
     assert np.allclose(series_by_channel["Rx2"].values, np.array([-3.0, 0.0]))
+
+
+def test_loads_summary_as_virtual_channels_in_tx_rx_order(tmp_path) -> None:
+    csv_path = tmp_path / "virtual-phase-summary.csv"
+    csv_path.write_text(
+        '"Theta [deg]","CH1","CH2","CH3","CH4"\n'
+        "-1,10,20,30,40\n"
+        "0,11,22,33,44\n",
+        encoding="utf-8",
+    )
+    channel_names = virtual_channel_names(["Tx1", "Tx2"], ["Rx1", "Rx2"])
+
+    series_by_channel = load_hfss_summary_pattern(
+        csv_path,
+        channel_names,
+        value_kind=PATTERN_KIND_PHASE,
+    )
+
+    assert list(series_by_channel) == ["Tx1Rx1", "Tx1Rx2", "Tx2Rx1", "Tx2Rx2"]
+    assert series_by_channel["Tx1Rx1"].value_column == "CH1"
+    assert series_by_channel["Tx1Rx2"].value_column == "CH2"
+    assert series_by_channel["Tx2Rx1"].value_column == "CH3"
+    assert series_by_channel["Tx2Rx2"].value_column == "CH4"
+    assert np.allclose(series_by_channel["Tx2Rx2"].values, np.array([-4.0, 0.0]))
+
+
+def test_loads_xlsx_summary_as_virtual_channels_in_tx_rx_order(tmp_path) -> None:
+    path = tmp_path / "virtual-phase-summary.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Theta [deg]", "CH1", "CH2", "CH3", "CH4"])
+    sheet.append([-1, 10, 20, 30, 40])
+    sheet.append([0, 11, 22, 33, 44])
+    workbook.save(path)
+    channel_names = virtual_channel_names(["Tx1", "Tx2"], ["Rx1", "Rx2"])
+
+    series_by_channel = load_hfss_summary_pattern(
+        path,
+        channel_names,
+        value_kind=PATTERN_KIND_PHASE,
+    )
+
+    assert list(series_by_channel) == ["Tx1Rx1", "Tx1Rx2", "Tx2Rx1", "Tx2Rx2"]
+    assert series_by_channel["Tx1Rx1"].value_column == "CH1"
+    assert series_by_channel["Tx1Rx2"].value_column == "CH2"
+    assert series_by_channel["Tx2Rx1"].value_column == "CH3"
+    assert series_by_channel["Tx2Rx2"].value_column == "CH4"
+    assert np.allclose(series_by_channel["Tx1Rx1"].values, np.array([-1.0, 0.0]))
+    assert np.allclose(series_by_channel["Tx2Rx2"].values, np.array([-4.0, 0.0]))
+
+
+def test_loads_xlsx_summary_without_openpyxl(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "virtual-phase-summary.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Theta [deg]", "CH1", "CH2"])
+    sheet.append([-1, 10, 20])
+    sheet.append([0, 11, 22])
+    workbook.save(path)
+    real_import = builtins.__import__
+
+    def block_openpyxl(name, *args, **kwargs):  # noqa: ANN001
+        if name == "openpyxl" or name.startswith("openpyxl."):
+            raise ImportError("blocked for fallback test")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", block_openpyxl)
+
+    series_by_channel = load_hfss_summary_pattern(
+        path,
+        ["Tx1Rx1", "Tx1Rx2"],
+        value_kind=PATTERN_KIND_PHASE,
+    )
+
+    assert list(series_by_channel) == ["Tx1Rx1", "Tx1Rx2"]
+    assert np.allclose(series_by_channel["Tx1Rx1"].values, np.array([-1.0, 0.0]))
+    assert np.allclose(series_by_channel["Tx1Rx2"].values, np.array([-2.0, 0.0]))
+
+
+def test_summary_explicit_virtual_headers_map_without_column_count_guess(tmp_path) -> None:
+    csv_path = tmp_path / "virtual-named-phase-summary.csv"
+    csv_path.write_text(
+        '"Theta [deg]","phase_Tx1Rx2","Tx1/Rx1 phase"\n'
+        "-1,10,20\n"
+        "0,12,24\n",
+        encoding="utf-8",
+    )
+
+    series_by_channel = load_hfss_summary_pattern(
+        csv_path,
+        ["Tx1", "Rx1", "Rx2"],
+        value_kind=PATTERN_KIND_PHASE,
+        virtual_channel_names=virtual_channel_names(["Tx1"], ["Rx1", "Rx2"]),
+    )
+
+    assert list(series_by_channel) == ["Tx1Rx2", "Tx1Rx1"]
+    assert series_by_channel["Tx1Rx2"].value_column == "phase_Tx1Rx2"
+    assert series_by_channel["Tx1Rx1"].value_column == "Tx1/Rx1 phase"
 
 
 def test_loads_hfss_phase_summary_from_complex_values(tmp_path) -> None:
@@ -315,6 +416,35 @@ def test_physical_channel_phase_pattern_weights_virtual_channels() -> None:
     center_el = int(np.argmin(np.abs(elevations)))
     center_az = int(np.argmin(np.abs(azimuths)))
 
+    assert af_db[center_el, center_az] < -100.0
+
+
+def test_virtual_channel_phase_pattern_weights_matching_virtual_channel() -> None:
+    array = AntennaArray.from_xy(tx_x=[0], tx_y=[0], rx_x=[0, 1], rx_y=[0, 0])
+    phase_series = PatternSeries(
+        name="phase",
+        source_path="phase.csv",
+        angle_column="Theta",
+        value_column="phase",
+        value_kind=PATTERN_KIND_PHASE,
+        angles_deg=np.array([-90.0, 0.0, 90.0]),
+        values=np.array([180.0, 180.0, 180.0]),
+    )
+    channel_patterns = ChannelPatternSet()
+    channel_patterns.set_series(
+        "Tx1Rx2",
+        PATTERN_KIND_PHASE,
+        PATTERN_PLANE_HORIZONTAL,
+        phase_series,
+    )
+
+    af_db, azimuths, elevations, _metrics = calculate_metrics_and_psf(
+        array,
+        channel_patterns=channel_patterns,
+    )
+
+    center_el = int(np.argmin(np.abs(elevations)))
+    center_az = int(np.argmin(np.abs(azimuths)))
     assert af_db[center_el, center_az] < -100.0
 
 

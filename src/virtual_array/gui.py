@@ -1898,7 +1898,7 @@ class VirtualArrayGui:
             "HeaderTitle.TLabel",
             background=THEME["header_bg"],
             foreground=THEME["text_inverse"],
-            font=(_f, 17, "bold"),
+            font=(_f, 12, "bold"),
         )
         style.configure(
             "HeaderSubtitle.TLabel",
@@ -1910,13 +1910,13 @@ class VirtualArrayGui:
             "HeaderChipName.TLabel",
             background=THEME["chip_bg"],
             foreground=THEME["text_inverse_muted"],
-            font=(_f, THEME["font_size_sm"], "bold"),
+            font=(_f, 8, "bold"),
         )
         style.configure(
             "HeaderChipValue.TLabel",
             background=THEME["chip_bg"],
             foreground=THEME["text_inverse"],
-            font=(_fm, THEME["font_size_base"], "bold"),
+            font=(_fm, THEME["font_size_sm"], "bold"),
         )
         style.configure(
             "Muted.TLabel",
@@ -2288,10 +2288,10 @@ class VirtualArrayGui:
         )
         style.configure(
             "TopMenu.TMenubutton",
-            padding=(22, 10),
+            padding=(14, 5),
             relief="flat",
             borderwidth=0,
-            font=(_f, THEME["font_size_lg"], "bold"),
+            font=(_f, THEME["font_size_base"], "bold"),
             background=THEME["app_menu_bg"],
             foreground=THEME["app_menu_text"],
             bordercolor=THEME["app_menu_bg"],
@@ -2330,7 +2330,7 @@ class VirtualArrayGui:
             "AppMenuArrow.TLabel",
             background=THEME["app_menu_bg"],
             foreground=THEME["app_menu_text"],
-            font=(_f, THEME["font_size_lg"], "bold"),
+            font=(_f, THEME["font_size_base"], "bold"),
         )
         style.configure(
             "Danger.TButton",
@@ -2612,8 +2612,8 @@ class VirtualArrayGui:
             height=650,
         )
         plot_workspace.grid_propagate(False)
-        plot_workspace.grid_rowconfigure(0, weight=1, minsize=300)
-        plot_workspace.grid_rowconfigure(1, weight=1, minsize=260)
+        plot_workspace.grid_rowconfigure(0, weight=1, minsize=280, uniform="plot_rows")
+        plot_workspace.grid_rowconfigure(1, weight=1, minsize=280, uniform="plot_rows")
         plot_workspace.grid_columnconfigure(0, weight=1, uniform="plot")
         plot_workspace.grid_columnconfigure(1, weight=1, uniform="plot")
 
@@ -2853,7 +2853,7 @@ class VirtualArrayGui:
     # ── Response chart helpers ──────────────────────────────────────────
 
     def _build_app_menu(self, parent: tk.Widget) -> None:
-        menu_bar = ttk.Frame(parent, style="AppMenu.TFrame", padding=(8, 4, 12, 4))
+        menu_bar = ttk.Frame(parent, style="AppMenu.TFrame", padding=(6, 2, 8, 2))
         menu_bar.grid(row=0, column=0, columnspan=3, sticky="ew")
         menu_bar.grid_columnconfigure(5, weight=1)
 
@@ -2862,8 +2862,8 @@ class VirtualArrayGui:
             text=">",
             style="AppMenuArrow.TLabel",
             anchor="center",
-            width=2,
-        ).grid(row=0, column=0, sticky="w", padx=(0, 8))
+            width=1,
+        ).grid(row=0, column=0, sticky="w", padx=(0, 6))
 
         menu_specs = (
             ("config_menu_button", "config_menu", "menu_file", 1),
@@ -2876,8 +2876,9 @@ class VirtualArrayGui:
                 menu_bar,
                 text=self._t(label_key),
                 style="TopMenu.TMenubutton",
+                width=5,
             )
-            button.grid(row=0, column=column, sticky="w", padx=(0, 8))
+            button.grid(row=0, column=column, sticky="w", padx=(0, 6))
             menu = _build_popup_menu(button)
             button.configure(menu=menu)
             setattr(self, button_attr, button)
@@ -3017,13 +3018,13 @@ class VirtualArrayGui:
         )
 
     def _build_workspace_header(self, parent: tk.Widget) -> None:
-        header = ttk.Frame(parent, style="Header.TFrame", padding=(16, 10, 16, 10))
+        header = ttk.Frame(parent, style="Header.TFrame", padding=(10, 5, 10, 5))
         header.grid(row=1, column=0, columnspan=3, sticky="ew")
-        header.grid_columnconfigure(0, weight=1)
-        header.grid_columnconfigure(1, weight=0)
+        header.grid_columnconfigure(0, weight=0)
+        header.grid_columnconfigure(1, weight=1)
 
         title_group = ttk.Frame(header, style="Header.TFrame")
-        title_group.grid(row=0, column=0, sticky="ew", padx=(0, 12))
+        title_group.grid(row=0, column=0, sticky="w", padx=(0, 12))
         title_group.grid_columnconfigure(0, weight=1)
         self.header_title_label = ttk.Label(
             title_group,
@@ -3032,40 +3033,25 @@ class VirtualArrayGui:
             anchor="w",
         )
         self.header_title_label.grid(row=0, column=0, sticky="ew")
-        self.header_subtitle_label = ttk.Label(
-            title_group,
-            text=self._t("app_subtitle"),
-            style="HeaderSubtitle.TLabel",
-            anchor="w",
+
+        chip_row = ttk.Frame(header, style="Header.TFrame")
+        chip_row.grid(row=0, column=1, sticky="w")
+        chip_specs = (
+            ("chip_frequency", self.header_frequency_text, 8),
+            ("chip_dictionary", self.header_dictionary_text, 13),
+            ("chip_pattern", self.header_pattern_text, 13),
+            ("chip_virtual_channels", self.header_kpi_texts["chip_virtual_channels"], 11),
+            ("chip_az_resolution", self.header_kpi_texts["chip_az_resolution"], 8),
+            ("chip_el_resolution", self.header_kpi_texts["chip_el_resolution"], 8),
+            ("chip_peak_margin", self.header_kpi_texts["chip_peak_margin"], 18),
         )
-        self.header_subtitle_label.grid(row=1, column=0, sticky="ew", pady=(2, 0))
-
-        state_chip_row = ttk.Frame(header, style="Header.TFrame")
-        state_chip_row.grid(row=0, column=1, sticky="e")
-        for column, (label_key, value_var) in enumerate(
-            (
-                ("chip_frequency", self.header_frequency_text),
-                ("chip_dictionary", self.header_dictionary_text),
-                ("chip_pattern", self.header_pattern_text),
-            )
-        ):
+        for column, (label_key, value_var, value_width) in enumerate(chip_specs):
             self._build_header_chip(
-                state_chip_row,
+                chip_row,
                 column,
                 label_key,
                 value_var,
-                value_width=16,
-            )
-
-        kpi_row = ttk.Frame(header, style="Header.TFrame")
-        kpi_row.grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        for column, (label_key, value_var) in enumerate(self.header_kpi_texts.items()):
-            self._build_header_chip(
-                kpi_row,
-                column,
-                label_key,
-                value_var,
-                value_width=15 if label_key != "chip_peak_margin" else 24,
+                value_width=value_width,
                 compact=True,
             )
 
@@ -3082,9 +3068,9 @@ class VirtualArrayGui:
         chip = ttk.Frame(
             parent,
             style="HeaderChip.TFrame",
-            padding=(8, 4) if compact else (10, 6),
+            padding=(6, 3) if compact else (8, 5),
         )
-        chip.grid(row=0, column=column, sticky="e", padx=(0 if column == 0 else 8, 0))
+        chip.grid(row=0, column=column, sticky="w", padx=(0 if column == 0 else 6, 0))
         label = ttk.Label(
             chip,
             text=self._t(label_key),
@@ -3104,8 +3090,6 @@ class VirtualArrayGui:
     def _refresh_workspace_header(self) -> None:
         if self.header_title_label is not None:
             self.header_title_label.configure(text=self._t("app_name"))
-        if self.header_subtitle_label is not None:
-            self.header_subtitle_label.configure(text=self._t("app_subtitle"))
         for key, label in self.header_chip_labels.items():
             label.configure(text=self._t(key))
 

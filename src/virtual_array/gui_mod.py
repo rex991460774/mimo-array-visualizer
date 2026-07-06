@@ -142,6 +142,9 @@ DISPLAY_GRID_STEP_LAMBDA = 0.5
 PHYSICAL_MAJOR_GRID_STEP_LAMBDA = 1.0
 PHYSICAL_AXIS_MIN_SPAN_LAMBDA = 4.0
 PHYSICAL_AXIS_PADDING_LAMBDA = 2.0
+TOOLBAR_ENTRY_WIDTH = 7
+TOOLBAR_GROUP_PAD_X = 8
+TOOLBAR_GROUP_PAD_Y = 5
 
 # Window geometry
 WINDOW_WIDTH = 1366
@@ -194,11 +197,10 @@ UI_TEXT = {
     },
     "chip_frequency": {"zh": "频率", "en": "Frequency", "ja": "周波数"},
     "chip_dictionary": {"zh": "DBF字典", "en": "DBF Dictionary", "ja": "DBF辞書"},
-    "chip_pattern": {"zh": "方向图", "en": "Pattern", "ja": "パターン"},
+    "chip_pattern": {"zh": "通道辐相", "en": "Ch Amp/Phase", "ja": "チャネル振幅/位相"},
     "chip_virtual_channels": {"zh": "虚拟通道", "en": "Virtual", "ja": "仮想"},
     "chip_az_resolution": {"zh": "方位分辨率", "en": "Az Res", "ja": "方位分解能"},
     "chip_el_resolution": {"zh": "俯仰分辨率", "en": "El Res", "ja": "仰角分解能"},
-    "chip_peak_margin": {"zh": "峰值裕量", "en": "Peak Margin", "ja": "ピーク余裕"},
     "status_initial": {
         "zh": "拖动TX/RX通道调整物理阵列，松开后自动刷新虚拟阵列和响应。",
         "en": "Drag Tx/Rx channels in the physical array. Release to refresh the virtual array and responses.",
@@ -320,22 +322,19 @@ UI_TEXT = {
     "dbf_pause_compact": {"zh": "暂停", "en": "Pause", "ja": "一時停止"},
     "dbf_resume_compact": {"zh": "继续", "en": "Resume", "ja": "再開"},
     "dbf_stop_compact": {"zh": "停止", "en": "Stop", "ja": "停止"},
-    "pattern_ideal": {"zh": "方向图：理想", "en": "Patterns: ideal", "ja": "パターン：理想"},
-    "pattern_legacy": {
-        "zh": "方向图：旧版单元",
-        "en": "Patterns: legacy element",
-        "ja": "パターン：旧要素",
+    "pattern_ideal": {
+        "zh": "幅度:理想/相位:理想",
+        "en": "Amp:ideal/Phase:ideal",
+        "ja": "振幅:理想/位相:理想",
     },
-    "pattern_element_summary": {
-        "zh": "方向图：{name}",
-        "en": "Pattern: {name}",
-        "ja": "パターン：{name}",
+    "pattern_amp_phase_status": {
+        "zh": "幅度:{amplitude}/相位:{phase}",
+        "en": "Amp:{amplitude}/Phase:{phase}",
+        "ja": "振幅:{amplitude}/位相:{phase}",
     },
-    "pattern_summary": {
-        "zh": "方向图：{channels}通道 / {series}文件",
-        "en": "Patterns: {channels} ch / {series} files",
-        "ja": "パターン：{channels}ch / {series}ファイル",
-    },
+    "pattern_state_ideal": {"zh": "理想", "en": "ideal", "ja": "理想"},
+    "pattern_state_imported": {"zh": "导入", "en": "imported", "ja": "読込"},
+    "pattern_state_mixed": {"zh": "混合", "en": "mixed", "ja": "混在"},
     "overview_title": {"zh": "  阵列概览  ", "en": "  Array Overview  ", "ja": "  アレイ概要  "},
     "angle_eval_title": {"zh": "  测角评估  ", "en": "  Angle Evaluation  ", "ja": "  測角評価  "},
     "eval_tab_overview": {"zh": "总览", "en": "Overview", "ja": "概要"},
@@ -1452,10 +1451,13 @@ def _configure_axis_chrome(ax) -> None:  # noqa: ANN001
 def _style_legend(legend) -> None:  # noqa: ANN001
     if legend is None:
         return
+    legend.set_zorder(20)
     frame = legend.get_frame()
-    frame.set_facecolor(THEME["card_bg"])
-    frame.set_edgecolor(THEME["card_border"])
-    frame.set_alpha(0.92)
+    frame.set_facecolor("none")
+    frame.set_edgecolor("none")
+    frame.set_alpha(0.0)
+    for text in legend.get_texts():
+        text.set_color(THEME["text_primary"])
 
 
 def _new_response_hover_annotation(ax):  # noqa: ANN001
@@ -1474,7 +1476,7 @@ def _new_response_hover_annotation(ax):  # noqa: ANN001
         fontsize=8,
         color=THEME["text_primary"],
         annotation_clip=False,
-        zorder=30,
+        zorder=60,
     )
     annotation.set_clip_on(False)
     annotation.set_visible(False)
@@ -1897,6 +1899,8 @@ class VirtualArrayGui:
         self.dbf_display_db_radio: ttk.Radiobutton | None = None
         self.dbf_display_mag_radio: ttk.Radiobutton | None = None
         self.pattern_status = tk.StringVar(value=self._t("pattern_ideal"))
+        self.pattern_canvas: tk.Canvas | None = None
+        self.pattern_dot: int | None = None
         self.status = tk.StringVar(
             value=self._t("status_initial")
         )
@@ -1907,7 +1911,6 @@ class VirtualArrayGui:
             "chip_virtual_channels": tk.StringVar(value="N/A"),
             "chip_az_resolution": tk.StringVar(value="N/A"),
             "chip_el_resolution": tk.StringVar(value="N/A"),
-            "chip_peak_margin": tk.StringVar(value="N/A"),
         }
         self.header_title_label: ttk.Label | None = None
         self.header_subtitle_label: ttk.Label | None = None
@@ -2024,6 +2027,12 @@ class VirtualArrayGui:
             background=THEME["chip_bg"],
             foreground=THEME["accent"],
             font=(_fm, THEME["font_size_sm"], "bold"),
+        )
+        style.configure(
+            "HeaderChipPatternValue.TLabel",
+            background=THEME["chip_bg"],
+            foreground=THEME["accent"],
+            font=(_f, 8, "bold"),
         )
         style.configure(
             "AppLogo.TLabel",
@@ -2912,7 +2921,7 @@ class VirtualArrayGui:
             group = ttk.Frame(
                 controls,
                 style="ToolbarGroup.TFrame",
-                padding=(8, 4),
+                padding=(TOOLBAR_GROUP_PAD_X, TOOLBAR_GROUP_PAD_Y),
             )
             group.grid(row=0, column=column, sticky=sticky, padx=padx, pady=(0, 4))
             return group
@@ -2925,7 +2934,7 @@ class VirtualArrayGui:
         freq_entry = ttk.Entry(
             freq_group,
             textvariable=self.frequency_ghz,
-            width=8,
+            width=TOOLBAR_ENTRY_WIDTH,
             justify="right",
         )
         self.frequency_entry = freq_entry
@@ -2941,7 +2950,7 @@ class VirtualArrayGui:
         margin_entry = ttk.Entry(
             margin_group,
             textvariable=self.margin_db,
-            width=5,
+            width=TOOLBAR_ENTRY_WIDTH,
             justify="right",
         )
         self.margin_entry = margin_entry
@@ -2957,7 +2966,7 @@ class VirtualArrayGui:
         auto_tx_entry = ttk.Entry(
             auto_group,
             textvariable=self.auto_tx_count,
-            width=3,
+            width=TOOLBAR_ENTRY_WIDTH,
             justify="right",
         )
         auto_tx_entry.pack(side=tk.LEFT)
@@ -2968,7 +2977,7 @@ class VirtualArrayGui:
         auto_rx_entry = ttk.Entry(
             auto_group,
             textvariable=self.auto_rx_count,
-            width=3,
+            width=TOOLBAR_ENTRY_WIDTH,
             justify="right",
         )
         auto_rx_entry.pack(side=tk.LEFT)
@@ -3006,26 +3015,6 @@ class VirtualArrayGui:
             command=self.on_dbf_display_mode_changed,
         )
         self.dbf_display_mag_radio.pack(side=tk.LEFT)
-
-        pattern_group = toolbar_group(4, sticky="ew", padx=(0, 0))
-        # Pattern indicator and controls
-        self.pattern_canvas = tk.Canvas(
-            pattern_group,
-            width=12,
-            height=12,
-            highlightthickness=0,
-            bg=THEME["toolbar_group_bg"],
-        )
-        self.pattern_canvas.pack(side=tk.LEFT, padx=(0, 4))
-        self.pattern_dot = self.pattern_canvas.create_oval(
-            1, 1, 11, 11, fill=THEME["text_muted"], outline=""
-        )
-
-        ttk.Label(
-            pattern_group,
-            textvariable=self.pattern_status,
-            style="Muted.TLabel",
-        ).pack(side=tk.LEFT)
 
         ttk.Label(
             status_row,
@@ -3350,11 +3339,10 @@ class VirtualArrayGui:
         chip_specs = (
             ("chip_frequency", self.header_frequency_text, 96),
             ("chip_dictionary", self.header_dictionary_text, 150),
-            ("chip_pattern", self.header_pattern_text, 250),
+            ("chip_pattern", self.header_pattern_text, 190),
             ("chip_virtual_channels", self.header_kpi_texts["chip_virtual_channels"], 118),
             ("chip_az_resolution", self.header_kpi_texts["chip_az_resolution"], 116),
             ("chip_el_resolution", self.header_kpi_texts["chip_el_resolution"], 116),
-            ("chip_peak_margin", self.header_kpi_texts["chip_peak_margin"], 160),
         )
         for column, (label_key, value_var, min_width) in enumerate(chip_specs):
             self._build_header_chip(
@@ -3391,10 +3379,15 @@ class VirtualArrayGui:
             anchor="w",
         )
         label.grid(row=0, column=0, sticky="ew")
+        value_style = (
+            "HeaderChipPatternValue.TLabel"
+            if label_key == "chip_pattern"
+            else "HeaderChipValue.TLabel"
+        )
         ttk.Label(
             chip,
             textvariable=value_var,
-            style="HeaderChipValue.TLabel",
+            style=value_style,
             anchor="w",
             wraplength=max(72, min_width - 18),
         ).grid(row=1, column=0, sticky="ew", pady=(2, 0))
@@ -3414,16 +3407,7 @@ class VirtualArrayGui:
         self.header_dictionary_text.set(
             _dbf_dictionary_mode_label(self.dbf_dictionary.mode, self.language)
         )
-        self.header_pattern_text.set(self._compact_header_pattern_text(self.pattern_status.get()))
-
-    def _compact_header_pattern_text(self, value: str) -> str:
-        text = value.strip()
-        for separator in ("：", ":"):
-            if separator in text:
-                text = text.split(separator, 1)[1].strip()
-                break
-        limit = 34
-        return text if len(text) <= limit else f"{text[:31]}..."
+        self.header_pattern_text.set(self.pattern_status.get())
 
     def _set_default_workspace_sash(self) -> None:
         return
@@ -3912,17 +3896,6 @@ class VirtualArrayGui:
         self.header_kpi_texts["chip_virtual_channels"].set(values["row_virtual_channels"])
         self.header_kpi_texts["chip_az_resolution"].set(values["row_az_resolution"])
         self.header_kpi_texts["chip_el_resolution"].set(values["row_el_resolution"])
-        if self.language == LANGUAGE_ZH:
-            az_margin_label, el_margin_label = "方", "俯"
-        elif self.language == LANGUAGE_JA:
-            az_margin_label, el_margin_label = "方", "仰"
-        else:
-            az_margin_label, el_margin_label = "Az", "El"
-        az_margin = sec_values["row_az_margin"].replace(" dB", "dB")
-        el_margin = sec_values["row_el_margin"].replace(" dB", "dB")
-        self.header_kpi_texts["chip_peak_margin"].set(
-            f"{az_margin_label}{az_margin} / {el_margin_label}{el_margin}"
-        )
 
     # ── Array data ────────────────────────────────────────────────────
 
@@ -5812,8 +5785,8 @@ class VirtualArrayGui:
             "phase_e": 170,
         }
         for column in columns:
-            tree.heading(column, text=headings[column])
-            tree.column(column, width=widths[column], minwidth=70, anchor="w")
+            tree.heading(column, text=headings[column], anchor="center")
+            tree.column(column, width=widths[column], minwidth=70, anchor="center")
         tree.grid(row=0, column=0, sticky="nsew")
 
         scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=tree.yview)
@@ -6037,29 +6010,71 @@ class VirtualArrayGui:
         self.status.set(message)
 
     def _update_channel_pattern_status(self) -> None:
-        current_patterns = [
-            self.channel_patterns.pattern_for(channel_name)
-            for channel_name in self._all_pattern_channel_names()
-        ]
-        channels = sum(not pattern.is_empty() for pattern in current_patterns)
-        series = sum(pattern.series_count() for pattern in current_patterns)
-        if channels == 0:
-            if self.element_pattern is not None:
-                self.pattern_status.set(
-                    self._t("pattern_element_summary", name=self.element_pattern.name)
-                )
-                self.pattern_canvas.itemconfig(self.pattern_dot, fill=THEME["secondary_accent"])
-                self._refresh_workspace_header()
-                return
-            self.pattern_status.set(self._t("pattern_ideal"))
-            self.pattern_canvas.itemconfig(self.pattern_dot, fill=THEME["text_muted"])
-            self._refresh_workspace_header()
-            return
-        self.pattern_status.set(
-            self._t("pattern_summary", channels=channels, series=series)
+        physical_names = self._physical_channel_names()
+        virtual_names = self._virtual_channel_names()
+        amplitude_key = self._channel_pattern_state_key(
+            physical_names,
+            virtual_names,
+            PATTERN_KIND_AMPLITUDE,
         )
-        self.pattern_canvas.itemconfig(self.pattern_dot, fill=THEME["secondary_accent"])
+        phase_key = self._channel_pattern_state_key(
+            physical_names,
+            virtual_names,
+            PATTERN_KIND_PHASE,
+        )
+        self.pattern_status.set(
+            self._t(
+                "pattern_amp_phase_status",
+                amplitude=self._t(amplitude_key),
+                phase=self._t(phase_key),
+            )
+        )
+        if amplitude_key == "pattern_state_ideal" and phase_key == "pattern_state_ideal":
+            self._set_pattern_indicator(THEME["text_muted"])
+        else:
+            self._set_pattern_indicator(THEME["secondary_accent"])
         self._refresh_workspace_header()
+
+    def _channel_pattern_state_key(
+        self,
+        physical_names: list[str],
+        virtual_names: list[str],
+        kind: str,
+    ) -> str:
+        physical_count = self._configured_pattern_count(physical_names, kind)
+        virtual_count = self._configured_pattern_count(virtual_names, kind)
+        if physical_count == 0 and virtual_count == 0:
+            if kind == PATTERN_KIND_AMPLITUDE and self.element_pattern is not None:
+                return "pattern_state_imported"
+            return "pattern_state_ideal"
+
+        physical_full = bool(physical_names) and physical_count == len(physical_names)
+        virtual_full = bool(virtual_names) and virtual_count == len(virtual_names)
+        physical_whole = physical_count in (0, len(physical_names))
+        virtual_whole = virtual_count in (0, len(virtual_names))
+        if (physical_full or virtual_full) and physical_whole and virtual_whole:
+            return "pattern_state_imported"
+        return "pattern_state_mixed"
+
+    def _configured_pattern_count(self, channel_names: list[str], kind: str) -> int:
+        return sum(
+            self._pattern_has_kind(self.channel_patterns.pattern_for(channel_name), kind)
+            for channel_name in channel_names
+        )
+
+    @staticmethod
+    def _pattern_has_kind(pattern, kind: str) -> bool:  # noqa: ANN001
+        if kind == PATTERN_KIND_AMPLITUDE:
+            return (
+                pattern.amplitude_horizontal is not None
+                or pattern.amplitude_elevation is not None
+            )
+        return pattern.phase_horizontal is not None or pattern.phase_elevation is not None
+
+    def _set_pattern_indicator(self, color: str) -> None:
+        if self.pattern_canvas is None or self.pattern_dot is None:
+            return
+        self.pattern_canvas.itemconfig(self.pattern_dot, fill=color)
 
     def import_element_pattern(self) -> None:
         filename = filedialog.askopenfilename(
@@ -6090,9 +6105,7 @@ class VirtualArrayGui:
 
         pattern = confirmed_pattern
         self.element_pattern = pattern
-        self.pattern_status.set(self._t("pattern_element_summary", name=pattern.name))
-        self.pattern_canvas.itemconfig(self.pattern_dot, fill=THEME["secondary_accent"])
-        self._refresh_workspace_header()
+        self._update_channel_pattern_status()
         LOGGER.info("Imported element pattern from %s", filename)
         self.generate_virtual_array()
         self.status.set(self._t("element_pattern_loaded", name=pattern.name))
@@ -6103,9 +6116,7 @@ class VirtualArrayGui:
             return
         LOGGER.info("Cleared element pattern: %s", self.element_pattern.source_path)
         self.element_pattern = None
-        self.pattern_status.set(self._t("pattern_ideal"))
-        self.pattern_canvas.itemconfig(self.pattern_dot, fill=THEME["text_muted"])
-        self._refresh_workspace_header()
+        self._update_channel_pattern_status()
         self.generate_virtual_array()
         self.status.set(self._t("element_pattern_cleared"))
 
@@ -6586,7 +6597,7 @@ class VirtualArrayGui:
             edgecolors=THEME["focus"],
             linewidths=1.6,
             alpha=0.45,
-            zorder=4,
+            zorder=45,
             label="_nolegend_",
         )
         self.physical_hover_marker.set_visible(False)
@@ -6705,7 +6716,18 @@ class VirtualArrayGui:
                 zorder=6,
                 label="_nolegend_",
             )
-        _style_legend(self.physical_ax.legend(loc="upper right", framealpha=0.92))
+        _style_legend(
+            self.physical_ax.legend(
+                loc="upper right",
+                fontsize=8,
+                frameon=False,
+                markerscale=0.72,
+                borderpad=0.15,
+                labelspacing=0.25,
+                handlelength=1.0,
+                handletextpad=0.35,
+            )
+        )
         self.physical_ax.set_aspect("equal", adjustable="box", anchor="C")
         self.physical_hover_annotation = self.physical_ax.annotate(
             "",
@@ -6722,7 +6744,10 @@ class VirtualArrayGui:
             arrowprops={"arrowstyle": "->", "color": THEME["focus"], "linewidth": 0.8},
             fontsize=8,
             color=THEME["text_primary"],
+            annotation_clip=False,
+            zorder=60,
         )
+        self.physical_hover_annotation.set_clip_on(False)
         self.physical_hover_annotation.set_visible(False)
 
     def _draw_virtual_array(
@@ -6833,7 +6858,11 @@ class VirtualArrayGui:
             },
             arrowprops={"arrowstyle": "->", "color": THEME["focus"], "linewidth": 0.8},
             fontsize=8,
+            color=THEME["text_primary"],
+            annotation_clip=False,
+            zorder=60,
         )
+        self.virtual_hover_annotation.set_clip_on(False)
         self.virtual_hover_annotation.set_visible(False)
 
         self.virtual_ax.set_title(self._t("virtual_title"), fontsize=TITLE_SIZE, pad=8, loc="left",
@@ -7364,13 +7393,7 @@ class VirtualArrayGui:
                 try:
                     pattern = load_element_pattern(pattern_path)
                     self.element_pattern = pattern
-                    self.pattern_status.set(
-                        self._t("pattern_element_summary", name=pattern.name)
-                    )
-                    if getattr(self, "pattern_canvas", None) is not None:
-                        self.pattern_canvas.itemconfig(
-                            self.pattern_dot, fill=THEME["secondary_accent"]
-                        )
+                    self._update_channel_pattern_status()
                     LOGGER.info("Restored element pattern from %s", pattern_path)
                 except Exception:
                     LOGGER.warning("Failed to restore element pattern from %s", pattern_path)

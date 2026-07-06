@@ -31,6 +31,11 @@ Two GUI variants are provided:
 - Configurable DBF dictionary modes: ideal, phase-reversed, channel-pattern
   calibrated, and imported CSV/XLSX dictionary matrices with tabular preview.
 - HFSS channel-pattern CSV/XLSX import for per-channel amplitude and phase.
+- Header **Channel Amp/Phase** status reports amplitude and phase separately
+  as ideal, imported, or mixed; imported element patterns count as imported
+  amplitude.
+- Polished channel-pattern UI: centered channel table values, top-layer hover
+  tooltips, compact transparent Tx/Rx legend, and aligned bottom toolbar inputs.
 - Readable JSON layout import/export with optional evaluation metadata.
 - Local state persistence (last paths, frequency, window geometry, layout).
 - PyInstaller onedir packaging for Windows.
@@ -241,6 +246,8 @@ MIMO 阵列可视化工具 — 用于交互式编辑和评估 MIMO 发射/接收
 - 2D DBF 热图，方位/俯仰轴独立播放控制。
 - 可配置 DBF 字典模式：理想几何、反向相位、通道幅相校准、导入 CSV/XLSX 字典。
 - HFSS 通道方向图 CSV/XLSX 导入（幅度/相位）。
+- 顶部 **通道辐相** 状态分别显示幅度、相位为理想、导入或混合；导入单元方向图时幅度视为导入。
+- 通道方向图界面细节优化：通道表内容居中、悬停信息置顶、Tx/Rx 图例紧凑透明、底部工具条输入框对齐。
 - 可读的 JSON 布局导入/导出（含评估元数据）。
 - 本地状态持久化（最近路径、频率、窗口几何、布局）。
 - PyInstaller onedir Windows 打包。
@@ -328,6 +335,8 @@ MIMOアレイ可視化ツール — MIMO送信/受信アンテナアレイ配置
 - 2D DBF ヒートマップ（方位/仰角の独立再生）
 - 設定可能な DBF 辞書モード（理想幾何、逆位相、チャネル振幅/位相校正、CSV/XLSX 辞書読み込み）
 - HFSS チャネルパターン CSV/XLSX 読み込み（振幅/位相）
+- ヘッダーの **チャネル振幅/位相** ステータスで、振幅と位相をそれぞれ理想・読込・混在として表示。要素パターン読み込み時は振幅を読込扱いにします。
+- チャネルパターン UI を調整：表の値を中央揃え、ホバー情報を最前面表示、Tx/Rx 凡例を小さく透明化、下部ツールバー入力欄を整列。
 - 可読 JSON 配置の読み込み/書き出し（評価メタデータ付き）
 - ローカル状態の永続化
 - PyInstaller onedir Windows パッケージ

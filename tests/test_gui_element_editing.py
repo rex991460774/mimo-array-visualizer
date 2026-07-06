@@ -15,6 +15,7 @@ from virtual_array.gui import (
     ResponseChart,
     VirtualArrayGui,
     _build_auto_layout_elements,
+    _default_workspace_sash_position,
     _dbf_peak_index,
     _format_frequency_ghz,
     _format_margin_db,
@@ -181,6 +182,13 @@ def test_window_geometry_validation_accepts_tk_geometry_strings() -> None:
     assert _validated_window_geometry("1200x800") == "1200x800"
     assert _validated_window_geometry("0x800+0+0") is None
     assert _validated_window_geometry("not-geometry") is None
+
+
+def test_default_workspace_sash_position_uses_half_available_width() -> None:
+    assert _default_workspace_sash_position(1720) == 860
+    assert _default_workspace_sash_position(1280) == 640
+    assert _default_workspace_sash_position(2) == 1
+    assert _default_workspace_sash_position(1) is None
 
 
 def test_layout_snapshot_restore_round_trip_preserves_selection() -> None:

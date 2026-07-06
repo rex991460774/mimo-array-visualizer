@@ -137,6 +137,7 @@ RESPONSE_FIG_W = 6.8
 RESPONSE_FIG_H = 2.8
 PLOT_COLUMN_MIN_WIDTH = 430
 EVAL_PANEL_MIN_WIDTH = 370
+WORKSPACE_DEFAULT_PANE_WIDTH = WINDOW_WIDTH // 2
 DBF2D_CANVAS_SIZE = 345
 DBF2D_FIG_SIZE = DBF2D_CANVAS_SIZE / FIG_DPI
 
@@ -1197,6 +1198,12 @@ def _validated_window_geometry(value: object) -> str | None:
     width = int(match.group("width"))
     height = int(match.group("height"))
     return geometry if width > 0 and height > 0 else None
+
+
+def _default_workspace_sash_position(width: int) -> int | None:
+    if width <= 1:
+        return None
+    return max(1, min(width - 1, width // 2))
 
 
 def _json_number(value: float | None, digits: int = 6) -> float | int | None:
@@ -2652,7 +2659,7 @@ class VirtualArrayGui:
             self.workspace_pane,
             style="Panel.TFrame",
             padding=(10, 10, 5, 10),
-            width=max(PLOT_COLUMN_MIN_WIDTH * 2, WINDOW_WIDTH - EVAL_PANEL_MIN_WIDTH - 40),
+            width=WORKSPACE_DEFAULT_PANE_WIDTH,
             height=650,
         )
         plot_workspace.grid_propagate(False)
@@ -2685,14 +2692,14 @@ class VirtualArrayGui:
             self.workspace_pane,
             style="Panel.TFrame",
             padding=(5, 10, 10, 10),
-            width=EVAL_PANEL_MIN_WIDTH,
+            width=WORKSPACE_DEFAULT_PANE_WIDTH,
             height=650,
         )
         eval_info_frame.grid_propagate(False)
         eval_info_frame.grid_rowconfigure(0, weight=1)
         eval_info_frame.grid_columnconfigure(0, weight=1)
         self.workspace_pane.add(plot_workspace, weight=1)
-        self.workspace_pane.add(eval_info_frame, weight=0)
+        self.workspace_pane.add(eval_info_frame, weight=1)
         self._build_evaluation_panel(eval_info_frame)
         self.root.after_idle(self._set_default_workspace_sash)
         self.root.after(100, self._set_default_workspace_sash)
@@ -3171,11 +3178,9 @@ class VirtualArrayGui:
         if self.workspace_pane is None:
             return
         width = self.workspace_pane.winfo_width()
-        if width <= 1:
+        plot_width = _default_workspace_sash_position(width)
+        if plot_width is None:
             return
-        plot_width = max(PLOT_COLUMN_MIN_WIDTH * 2, width // 2)
-        if width - plot_width < EVAL_PANEL_MIN_WIDTH:
-            plot_width = max(PLOT_COLUMN_MIN_WIDTH * 2, width - EVAL_PANEL_MIN_WIDTH)
         try:
             self.workspace_pane.sashpos(0, plot_width)
         except tk.TclError:

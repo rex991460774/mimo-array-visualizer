@@ -93,7 +93,7 @@ GUI.
 
 | Skill | Reason |
 | --- | --- |
-| Full design-system component migration | The app is a Tkinter desktop tool with a custom ttk theme, so a wholesale Carbon or Material component migration would add churn without matching the current stack. |
+| Full design-system component migration | The app is now a PySide6 desktop tool with a retained ttk-style compatibility layer, so a wholesale Carbon or Material component migration would add churn without matching the current stack. |
 | Icon-library toolbar | The current project has no icon dependency, and the safest product-level improvement was to preserve text controls while improving placement, state, and spacing. |
 | Automated visual regression screenshots | The GUI can be instantiated and size-checked in Tk, but full screenshot comparison is not yet part of the test suite. |
 

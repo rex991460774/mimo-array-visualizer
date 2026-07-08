@@ -6,6 +6,11 @@ Desktop tool for interactively editing and evaluating MIMO Tx/Rx antenna array
 layouts. Computes virtual array geometry, 2D array factor, and radar-performance
 metrics (PSL, beamwidth, ISLR, grating lobes, elevation ambiguity).
 
+The desktop UI runs on **PySide6 / pyqtgraph**. The original Tk-style widget
+names are preserved behind a small Qt compatibility layer so the backend logic,
+layout structure, and plotting interaction code stay stable during the
+migration.
+
 Two GUI variants are provided:
 
 - **GUI.py** — Original layout: 2×2 plot grid + evaluation panel with draggable workspace splitter.

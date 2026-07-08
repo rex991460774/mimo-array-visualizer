@@ -5,18 +5,11 @@ import logging
 import math
 import re
 import sys
-import tkinter as tk
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
 
 import numpy as np
-from matplotlib import rcParams
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from matplotlib.figure import Figure
-from matplotlib.patches import Rectangle
-from matplotlib.widgets import Button as MplButton
 
 from .app_state import load_state, save_state, state_path
 from .dbf_dictionary import (
@@ -71,6 +64,8 @@ from .element_pattern import (
 from .geometry import AntennaArray, ArrayPoint
 from .grid import GRID_STEP, snap_to_grid
 from .logging_config import configure_logging, current_log_path, install_excepthook
+from .qt_plot import Figure, FigureCanvasTkAgg, MplButton, Rectangle, rcParams
+from .qt_tk import filedialog, messagebox, tk, ttk
 from .version import APP_VERSION
 
 
@@ -122,6 +117,10 @@ DBF_SCAN_INTERVAL_MS = 55
 DBF_DISPLAY_DB = "db"
 DBF_DISPLAY_MAGNITUDE = "magnitude"
 SUPPORTED_DBF_DISPLAY_MODES = (DBF_DISPLAY_DB, DBF_DISPLAY_MAGNITUDE)
+DBF_MAJOR_ANGLE_TICKS = np.arange(-80.0, 81.0, 20.0)
+DBF_MINOR_ANGLE_TICKS = np.arange(-90.0, 91.0, 10.0)
+DBF_DB_Y_TICKS = np.arange(-40.0, 1.0, 10.0)
+DBF_MAGNITUDE_Y_TICKS = np.linspace(0.0, 1.0, 6)
 CHANNEL_PATTERN_TARGET_PHYSICAL = "physical"
 CHANNEL_PATTERN_TARGET_VIRTUAL = "virtual"
 LANGUAGE_ZH = "zh"
@@ -1612,6 +1611,18 @@ def _axis_ticks_within(limits: tuple[float, float], step: float) -> np.ndarray:
     return np.arange(start, stop + step / 2.0, step)
 
 
+def _apply_dbf_angle_ticks(ax) -> None:  # noqa: ANN001
+    ax.set_xticks(DBF_MAJOR_ANGLE_TICKS)
+    ax.set_xticks(DBF_MINOR_ANGLE_TICKS, minor=True)
+
+
+def _apply_dbf_value_ticks(ax, display_mode: str) -> None:  # noqa: ANN001
+    if display_mode == DBF_DISPLAY_MAGNITUDE:
+        ax.set_yticks(DBF_MAGNITUDE_Y_TICKS)
+    else:
+        ax.set_yticks(DBF_DB_Y_TICKS)
+
+
 def _square_axis_limits(
     x_values: list[float] | np.ndarray,
     y_values: list[float] | np.ndarray,
@@ -1794,12 +1805,12 @@ def _dbf_peak_index(
 class VirtualArrayGui:
     """MIMO antenna virtual-array visualizer.
 
-    Layout (Tkinter grid):
+    Layout (Qt compatibility grid):
       ┌─────────────┬──────────────┬────────────────┐
       │  Physical   │  Virtual     │                │
       │  Array      │  Array       │  Array         │
       │  (Mpl Fig)  │  (Mpl Fig)   │  Evaluation    │
-      ├─────────────┼──────────────┤  (Tkinter)     │
+      ├─────────────┼──────────────┤  (Qt widgets)  │
       │  Azimuth    │  Elevation   │                │
       │  Response   │  Response    │                │
       │  (Mpl Fig)  │  (Mpl Fig)   │                │
@@ -2816,7 +2827,7 @@ class VirtualArrayGui:
         main_panel = ttk.Frame(root, style="Panel.TFrame", padding=(16, 12, 16, 10))
         main_panel.grid(row=2, column=0, columnspan=3, sticky="nsew")
         main_panel.grid_columnconfigure(0, weight=7)
-        main_panel.grid_columnconfigure(1, weight=2, minsize=300)
+        main_panel.grid_columnconfigure(1, weight=0, minsize=300)
         main_panel.grid_rowconfigure(0, weight=0)
         main_panel.grid_rowconfigure(1, weight=1)
 
@@ -3616,7 +3627,7 @@ class VirtualArrayGui:
             buttons_list.append(button)
             callbacks_list.append(cid)
 
-    # ── Tkinter Evaluation Panel ──────────────────────────────────────
+    # ── Qt-compatible Evaluation Panel ────────────────────────────────
 
     def _build_primary_metric_tile(
         self,
@@ -3704,7 +3715,7 @@ class VirtualArrayGui:
             self.secondary_value_labels[metric_key] = value_label
 
     def _build_evaluation_panel(self, parent: ttk.Frame) -> None:
-        """Build the Array Evaluation card using Tkinter native widgets."""
+        """Build the Array Evaluation card using Qt-compatible widgets."""
         self.eval_frame = ttk.Frame(parent, style="Card.TFrame", padding=(6, 4))
         self.eval_frame.grid(row=0, column=0, sticky="nsew")
         self.eval_frame.grid_rowconfigure(0, weight=1)
@@ -3852,7 +3863,7 @@ class VirtualArrayGui:
         return "MetricValue.TLabel"
 
     def _update_evaluation_panel(self, metrics: ArrayMetrics) -> None:
-        """Update the Tkinter evaluation panel with current metrics."""
+        """Update the Qt-compatible evaluation panel with current metrics."""
         utilization = (
             metrics.unique_count / metrics.virtual_count if metrics.virtual_count else 0.0
         )
@@ -4741,6 +4752,7 @@ class VirtualArrayGui:
         if frame_index is not None:
             self._set_dbf_progress(mode, frame_index, true_angle)
 
+        display_mode = self._current_dbf_display_mode()
         display_spectrum = self._dbf_display_values(spectrum_db)
         true_display_value = self._dbf_display_value(true_gain)
         peak_display_value = self._dbf_display_value(peak_gain)
@@ -4788,10 +4800,12 @@ class VirtualArrayGui:
             label=self._t("legend_peak"),
         )
         ax.set_xlim(DBF_SCAN_FOV)
-        if self._current_dbf_display_mode() == DBF_DISPLAY_MAGNITUDE:
+        _apply_dbf_angle_ticks(ax)
+        if display_mode == DBF_DISPLAY_MAGNITUDE:
             ax.set_ylim(-0.02, 1.04)
         else:
             ax.set_ylim(-40.0, 1.0)
+        _apply_dbf_value_ticks(ax, display_mode)
         ax.set_title(
             self._t("dbf_title", mode=mode_label),
             pad=6,
@@ -5152,6 +5166,9 @@ class VirtualArrayGui:
             colorbar.outline.set_linewidth(0.6)
             self.dbf2d_cbar_ax.set_facecolor(THEME["card_bg"])
         ax.set_aspect("auto")
+        ax.set_xlim(DBF_SCAN_FOV)
+        ax.set_ylim(DBF_SCAN_FOV)
+        _apply_dbf_angle_ticks(ax)
         ax.axvline(azimuth, color="#ffffff", linewidth=1.0, alpha=0.82)
         ax.axhline(elevation, color="#ffffff", linewidth=1.0, alpha=0.82)
         ax.scatter(
@@ -6911,7 +6928,7 @@ class VirtualArrayGui:
         # Info box in upper-left corner
         self.virtual_ax.text(
             0.01,
-            0.98,
+            0.91,
             self._t(
                 "virtual_info",
                 unique=metrics.unique_count,
@@ -6923,7 +6940,7 @@ class VirtualArrayGui:
             transform=self.virtual_ax.transAxes,
             ha="left",
             va="top",
-            fontsize=8.5,
+            fontsize=8.0,
             color=THEME["text_primary"],
             bbox={
                 "boxstyle": "round,pad=0.22",
@@ -6998,6 +7015,9 @@ class VirtualArrayGui:
             show_legend = True
         ax.set_xlim(response_cut.fov)
         ax.set_ylim(response_ylim)
+        ax.set_xticks(_axis_ticks_within(response_cut.fov, 20.0))
+        ax.set_xticks(_axis_ticks_within(response_cut.fov, 10.0), minor=True)
+        ax.set_yticks(_axis_ticks_within(response_ylim, 10.0))
         ax.axvspan(
             -response_cut.mainlobe_guard,
             response_cut.mainlobe_guard,
@@ -7407,6 +7427,51 @@ class VirtualArrayGui:
             self.root.state(window_state)
         except tk.TclError:
             LOGGER.warning("Failed to restore window state: %s", window_state)
+        self._schedule_layout_sync()
+
+    def _schedule_layout_sync(self) -> None:
+        for delay_ms in (0, 120, 350):
+            try:
+                self.root.after(delay_ms, self._sync_plot_layout_after_window_change)
+            except tk.TclError:
+                return
+
+    def _sync_plot_layout_after_window_change(self) -> None:
+        try:
+            self.root.update_idletasks()
+        except tk.TclError:
+            return
+
+        adjust_root_rows = getattr(self.root, "_adjust_root_overflow_rows", None)
+        if callable(adjust_root_rows):
+            try:
+                adjust_root_rows()
+            except Exception:
+                LOGGER.debug("Failed to adjust root rows after window change", exc_info=True)
+
+        try:
+            self._stabilize_default_workspace_sash()
+        except Exception:
+            LOGGER.debug("Failed to stabilize workspace sash after window change", exc_info=True)
+
+        canvases = (
+            getattr(self, "phys_canvas", None),
+            getattr(self, "virt_canvas", None),
+            getattr(getattr(self, "az_chart", None), "canvas", None),
+            getattr(getattr(self, "el_chart", None), "canvas", None),
+            getattr(self, "dbf2d_canvas", None),
+        )
+        for canvas in canvases:
+            if canvas is None:
+                continue
+            try:
+                canvas.figure.sync_equal_axis_layout(
+                    canvas.winfo_width(),
+                    canvas.winfo_height(),
+                )
+                canvas.draw_idle()
+            except Exception:
+                LOGGER.debug("Failed to sync plot canvas after window change", exc_info=True)
 
     def _window_state_config(self) -> dict[str, str]:
         self.root.update_idletasks()
@@ -7596,11 +7661,15 @@ class VirtualArrayGui:
                 and self.drag_start_snapshot != current_snapshot
             ):
                 self._push_undo_snapshot(self.drag_start_snapshot)
+            released_axis_limits = self.drag_axis_limits
             self.dragging = None
             self.drag_bounds = None
-            self.drag_axis_limits = None
             self.drag_start_snapshot = None
-            self.generate_virtual_array()
+            try:
+                self.drag_axis_limits = released_axis_limits
+                self.generate_virtual_array()
+            finally:
+                self.drag_axis_limits = None
 
     def on_arrow_key(self, event) -> str | None:
         if _event_widget_is_text_input(event):
@@ -7918,6 +7987,7 @@ def main() -> None:
     root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
     root.resizable(False, False)
     root.protocol("WM_DELETE_WINDOW", app.on_close)
+    app._schedule_layout_sync()
     try:
         root.mainloop()
     finally:

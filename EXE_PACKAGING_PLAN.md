@@ -6,7 +6,8 @@
 
 ## 方案选择：PyInstaller（推荐）
 
-Tkinter + Matplotlib 组合下支持最完善的打包工具。
+PySide6 + pyqtgraph 组合下继续使用 PyInstaller 打包；项目已在
+`MIMOArrayVisualizer.spec` 中显式包含 Qt 绑定与 pyqtgraph。
 
 | 工具 | 难度 | .exe 大小 | 启动速度 | 推荐度 |
 |------|------|-----------|----------|--------|
@@ -52,13 +53,14 @@ a = Analysis(
         'virtual_array.examples.case4_5tx7rx_sel',
         'openpyxl',
         'openpyxl.cell._writer',
+        'PySide6',
+        'pyqtgraph',
     ],
     datas=[
         ('src/virtual_array/examples/*.py', 'virtual_array/examples/'),  # 示例数据
         # 中文字体（按实际路径调整）
-        ('C:/Windows/Fonts/msyh.ttc', 'matplotlib/mpl-data/fonts/ttf/'),
     ],
-    excludes=['pytest', 'unittest', 'tkinter.test'],
+    excludes=['pytest', 'unittest'],
 )
 ```
 
@@ -69,7 +71,7 @@ a = Analysis(
 | `ModuleNotFoundError: virtual_array` | PyInstaller 不扫描 `-e` 安装路径 | 用 `--paths src` 或 spec 中 `pathex=['src']` |
 | `Reading XLSX ... requires openpyxl` | `openpyxl` 是动态导入，PyInstaller 可能漏收 | 在 spec 的 `hiddenimports` 加入 `openpyxl` 和 `openpyxl.cell._writer` |
 | 中文字体丢失 | Matplotlib 找不到 `Microsoft YaHei` | 把 `C:/Windows/Fonts/msyh.ttc` 打包进 datas |
-| exe 闪退 | Tkinter 报错后窗口销毁 | 先用 `--console` 版本测试 |
+| exe 闪退 | Qt 插件、Matplotlib 后端或资源路径未被打包 | 先用 `--console` 版本测试 |
 | 杀软误报 | 单文件模式解压行为触发 | 用 `--onedir`（文件夹模式），误报率极低 |
 
 ---

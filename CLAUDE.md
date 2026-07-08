@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MIMO Array Visualizer — a Python desktop application (Tkinter + embedded Matplotlib) for interactively editing and evaluating MIMO Tx/Rx antenna array layouts. Computes virtual array geometry, 2D array factor, and radar-performance metrics (PSL, beamwidth, ISLR, grating lobes, elevation ambiguity).
+MIMO Array Visualizer — a Python desktop application (PySide6 + pyqtgraph) for interactively editing and evaluating MIMO Tx/Rx antenna array layouts. Computes virtual array geometry, 2D array factor, and radar-performance metrics (PSL, beamwidth, ISLR, grating lobes, elevation ambiguity).
 
 ## Commands
 
@@ -41,7 +41,9 @@ MIMO Array Visualizer — a Python desktop application (Tkinter + embedded Matpl
 
 - **`element_pattern.py`** — `ElementPattern` frozen dataclass for antenna radiation patterns loaded from CSV/TSV. Auto-detects delimiter, angle column (theta/angle/azimuth/az/deg), and gain columns (gain/db/dbi/realized). Provides interpolated gain lookup and H/V axis swap.
 
-- **`gui.py`** — `VirtualArrayGui` class (~2300 lines). Layout: 2×2 Matplotlib figure grid (Physical, Virtual, Az Response, El Response) + Tkinter evaluation panel + controls bar. Uses `ResponseChart` dataclass to encapsulate per-axis chart state. Interactive: drag elements with snap-to-grid, add/delete Tx/Rx (max 16 each), hover tooltips, element-pattern preview dialog, JSON layout I/O.
+- **`gui.py`** — `VirtualArrayGui` class. Layout: 2×2 Matplotlib figure grid (Physical, Virtual, Az Response, El Response) + Qt-compatible evaluation panel + controls bar. Uses `ResponseChart` dataclass to encapsulate per-axis chart state. Interactive: drag elements with snap-to-grid, add/delete Tx/Rx (max 16 each), hover tooltips, element-pattern preview dialog, JSON layout I/O.
+- **`qt_tk.py`** — PySide6 compatibility layer that preserves the old `tk`/`ttk` surface while backing widgets, timers, dialogs, and file dialogs with Qt.
+- **`qt_plot.py`** — pyqtgraph-backed plotting compatibility layer for the GUI's former Matplotlib-style plotting calls.
 
 - **`plotting.py`** — Standalone matplotlib functions for CLI PNG export (not used by GUI).
 
@@ -59,7 +61,7 @@ AntennaArray → calculate_metrics_and_psf() → (af_db, azimuths, elevations, A
                                                   ↓
                             _draw_physical_array / _draw_virtual_array / _draw_response
                                                   ↓
-                            _update_evaluation_panel (Tkinter widgets)
+                            _update_evaluation_panel (Qt-compatible widgets)
 ```
 
 ## Conventions

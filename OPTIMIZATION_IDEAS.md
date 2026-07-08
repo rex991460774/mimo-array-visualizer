@@ -11,7 +11,7 @@
 |------|------|
 | **核心算法** | 扎实。天线阵列、虚拟阵列、阵列因子、波束指标计算准确 |
 | **数据模型** | 清晰。`geometry.py` 简洁精炼，类职责单一 |
-| **GUI 重建** | 已完成。Matplotlib 只管图、Tkinter 管文本面板，分工明确 |
+| **GUI 重建** | 进行中。pyqtgraph 负责 GUI 绘图，PySide6/Qt 负责桌面控件；旧 ttk 风格由兼容层承接 |
 | **测试** | 薄弱。仅 68 行，只测了 `geometry.py` 和 `snap_to_grid` |
 | **可扩展性** | 当前硬编码偏多，加新功能需要较多改动 |
 
@@ -25,7 +25,7 @@
 
 ```
 src/virtual_array/
-├── gui.py          (~400 行)  只用 Tkinter 布局和事件绑定
+├── gui.py          (~400 行)  只用 PySide6/Qt 兼容控件做布局和事件绑定
 ├── plots.py        (~400 行)  三个 Figure 的绘制逻辑
 ├── analysis.py     (~300 行)  阵列因子计算 + 指标提取（从 gui.py 迁出）
 ├── widgets.py      (~200 行)  Array Evaluation 面板构建
@@ -36,7 +36,7 @@ src/virtual_array/
 
 ### 1.2 提取 `analysis.py`
 
-把 `_calculate_metrics_and_psf()`、`_azimuth_cut_metrics()`、`_azimuth_first_sidelobe()`、`_evaluate_front_radar()` 等函数从 `gui.py` 移到一个独立模块。这些是纯计算逻辑，不依赖 Tkinter/Matplotlib，天然可单测。
+把 `_calculate_metrics_and_psf()`、`_azimuth_cut_metrics()`、`_azimuth_first_sidelobe()`、`_evaluate_front_radar()` 等函数从 `gui.py` 移到一个独立模块。这些是纯计算逻辑，不依赖 PySide6/pyqtgraph，天然可单测。
 
 ---
 
@@ -105,7 +105,7 @@ phase = π × [virtual_xy[:, 0] × (u - sin(θ_scan)×cos(φ_scan))
 
 ### 3.4 窗口状态记忆
 
-退出时保存窗口位置和大小到 `%APPDATA%/antenna-array/layout.ini`，下次启动恢复。用 `tkinter` 的 `winfo_geometry()` + `protocol("WM_DELETE_WINDOW")` 实现，不需要额外依赖。
+退出时保存窗口位置和大小到 `%APPDATA%/antenna-array/layout.ini`，下次启动恢复。当前通过 Qt 兼容层的 `winfo_geometry()` + `protocol("WM_DELETE_WINDOW")` 保持原状态读写逻辑。
 
 ### 3.5 标签重叠处理
 

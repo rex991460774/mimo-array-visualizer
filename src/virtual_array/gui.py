@@ -1530,6 +1530,61 @@ def _snap_to_grid_inside(value: float, low: float, high: float) -> float:
     return _clip_to_bounds(float(snapped), low, high)
 
 
+def _drag_axis_bounds_from_limits(
+    limits: tuple[tuple[float, float], tuple[float, float]],
+) -> tuple[float, float, float, float]:
+    x_limits, y_limits = limits
+    return (
+        _to_internal_half_lambda(x_limits[0]),
+        _to_internal_half_lambda(x_limits[1]),
+        _to_internal_half_lambda(y_limits[0]),
+        _to_internal_half_lambda(y_limits[1]),
+    )
+
+
+def _expanded_physical_drag_limits(
+    limits: tuple[tuple[float, float], tuple[float, float]],
+    internal_x: float,
+    internal_y: float,
+) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    x_limits, y_limits = limits
+    display_x = internal_x * DISPLAY_SCALE_LAMBDA
+    display_y = internal_y * DISPLAY_SCALE_LAMBDA
+    outside_x = display_x < x_limits[0] or display_x > x_limits[1]
+    outside_y = display_y < y_limits[0] or display_y > y_limits[1]
+    if not outside_x and not outside_y:
+        return None
+    x_values = np.array([x_limits[0], x_limits[1], display_x], dtype=float)
+    y_values = np.array([y_limits[0], y_limits[1], display_y], dtype=float)
+    minimum_span = max(
+        PHYSICAL_AXIS_MIN_SPAN_LAMBDA,
+        x_limits[1] - x_limits[0],
+        y_limits[1] - y_limits[0],
+    )
+    return _square_axis_limits(
+        x_values,
+        y_values,
+        minimum_span=minimum_span,
+        padding=PHYSICAL_AXIS_PADDING_LAMBDA,
+    )
+
+
+def _element_touches_drag_bounds(
+    element: EditableElement,
+    bounds: tuple[float, float, float, float] | None,
+) -> bool:
+    if bounds is None:
+        return False
+    min_x, max_x, min_y, max_y = bounds
+    tolerance = GRID_STEP * 0.5
+    return (
+        element.x <= min_x + tolerance
+        or element.x >= max_x - tolerance
+        or element.y <= min_y + tolerance
+        or element.y >= max_y - tolerance
+    )
+
+
 def _event_widget_is_text_input(event) -> bool:  # noqa: ANN001
     widget = getattr(event, "widget", None)
     if widget is None:
@@ -6724,10 +6779,9 @@ class VirtualArrayGui:
         )
         self.virtual_ax.set_aspect("equal", adjustable="box")
 
-        # Info box in upper-left corner
         self.virtual_ax.text(
-            0.01,
-            0.91,
+            0.98,
+            0.97,
             self._t(
                 "virtual_info",
                 unique=metrics.unique_count,
@@ -6737,15 +6791,16 @@ class VirtualArrayGui:
                 y=_format_mm(self.aperture_mm(metrics.y_aperture)),
             ),
             transform=self.virtual_ax.transAxes,
-            ha="left",
+            ha="right",
             va="top",
-            fontsize=8.0,
+            fontsize=7.8,
             color=THEME["text_primary"],
             bbox={
-                "boxstyle": "round,pad=0.22",
+                "boxstyle": "round,pad=0.18",
                 "facecolor": THEME["card_bg"],
                 "edgecolor": THEME["card_border"],
-                "alpha": 0.9,
+                "alpha": 0.92,
+                "linewidth": 0.5,
             },
         )
         if counts.max() > 1:
@@ -7357,12 +7412,7 @@ class VirtualArrayGui:
             x_limits = tuple(float(value) for value in self.physical_ax.get_xlim())
             y_limits = tuple(float(value) for value in self.physical_ax.get_ylim())
             self.drag_axis_limits = (x_limits, y_limits)
-            self.drag_bounds = (
-                _to_internal_half_lambda(x_limits[0]),
-                _to_internal_half_lambda(x_limits[1]),
-                _to_internal_half_lambda(y_limits[0]),
-                _to_internal_half_lambda(y_limits[1]),
-            )
+            self.drag_bounds = _drag_axis_bounds_from_limits(self.drag_axis_limits)
             self.selected_element = self.dragging
             self.status.set(
                 self._t(
@@ -7400,6 +7450,15 @@ class VirtualArrayGui:
             internal_x = _to_internal_half_lambda(float(display_x))
             internal_y = _to_internal_half_lambda(float(display_y))
             if self.drag_bounds is not None:
+                if self.drag_axis_limits is not None:
+                    expanded_limits = _expanded_physical_drag_limits(
+                        self.drag_axis_limits,
+                        internal_x,
+                        internal_y,
+                    )
+                    if expanded_limits is not None:
+                        self.drag_axis_limits = expanded_limits
+                        self.drag_bounds = _drag_axis_bounds_from_limits(expanded_limits)
                 min_x, max_x, min_y, max_y = self.drag_bounds
                 internal_x = _clip_to_bounds(internal_x, min_x, max_x)
                 internal_y = _clip_to_bounds(internal_y, min_y, max_y)
@@ -7460,7 +7519,11 @@ class VirtualArrayGui:
                 and self.drag_start_snapshot != current_snapshot
             ):
                 self._push_undo_snapshot(self.drag_start_snapshot)
-            released_axis_limits = self.drag_axis_limits
+            released_axis_limits = (
+                None
+                if _element_touches_drag_bounds(self.dragging, self.drag_bounds)
+                else self.drag_axis_limits
+            )
             self.dragging = None
             self.drag_bounds = None
             self.drag_start_snapshot = None

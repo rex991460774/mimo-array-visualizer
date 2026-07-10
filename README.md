@@ -6,15 +6,11 @@ Desktop tool for interactively editing and evaluating MIMO Tx/Rx antenna array
 layouts. Computes virtual array geometry, 2D array factor, and radar-performance
 metrics (PSL, beamwidth, ISLR, grating lobes, elevation ambiguity).
 
-The desktop UI runs on **PySide6 / pyqtgraph**. The original Tk-style widget
-names are preserved behind a small Qt compatibility layer so the backend logic,
-layout structure, and plotting interaction code stay stable during the
-migration.
-
-Two GUI variants are provided:
-
-- **GUI.py** — Original layout: 2×2 plot grid + evaluation panel with draggable workspace splitter.
-- **GUI_mod.py** — Refined layout: fixed 1366×768, three tab pages + side overview panel (4:1 split).
+The desktop UI is a native **PySide6 / pyqtgraph** application with a Fluent 2
+light theme. It has one maintained implementation, `virtual_array.gui`, and a
+resizable three-page workspace. `GUI.py`, `GUI_mod.py`, and the installed
+console command all start this same interface; `GUI_mod.py` remains only as a
+compatibility alias for existing shortcuts.
 
 ---
 
@@ -45,16 +41,22 @@ Two GUI variants are provided:
 - Local state persistence (last paths, frequency, window geometry, layout).
 - PyInstaller onedir packaging for Windows.
 
-### GUI_mod.py (Refined Layout)
+### Fluent 2 Desktop Interface
 
-- Fixed window: **1366 × 768**, non-resizable.
-- Three tab pages with consistent 4 px inner spacing:
+- Resizable window: **1366 × 768** default, **1100 × 650** minimum, clamped to
+  the available screen area when restored.
+- Three localized tab pages:
   - **Physical & Virtual** — Physical and virtual array side by side (1:1).
   - **1D DBF** — Azimuth and elevation response spectra side by side (1:1).
   - **2D DBF** — Full-tab 2D heatmap with playback controls.
-- Right-side **Overview** panel (4:1 tab-to-overview split):
+- Draggable workspace/overview splitter, with the side panel kept in a readable
+  280–360 px range:
   - Channel count, virtual channels, aperture, resolution.
   - Angle evaluation: no-fold range, max error, peak margin, cut reason.
+- Native Qt menus, dialogs, tables, status bar, keyboard focus, and standard
+  action icons, styled through one Fluent 2 token/QSS theme.
+- Neutral capability guidance replaces misleading flat spectra or heatmaps when
+  an array has no usable aperture in one or both axes.
 - Cross-platform Chinese font support (macOS / Windows / Linux).
 - OpenCode skills and ruff/pyright tooling preconfigured.
 
@@ -80,18 +82,20 @@ pip install -e ".[dev]"
 ### Run
 
 ```bash
-# Original GUI
+# Canonical launcher
 python GUI.py
 
-# Refined GUI
+# Compatibility alias; opens the same interface
 python GUI_mod.py
+
+# Installed console entry point
+mimo-array-visualizer
 ```
 
 Windows:
 
 ```powershell
-.\.venv\Scripts\python.exe GUI.py
-.\.venv\Scripts\python.exe GUI_mod.py
+.\scripts\run_gui.ps1
 ```
 
 If PowerShell blocks execution:
@@ -198,6 +202,13 @@ ruff format .
 .\scripts\build_exe.ps1
 ```
 
+Repeatable visual review (isolated state, three pages plus four dialogs):
+
+```bash
+python scripts/capture_ui_review.py --output-dir outputs/ui-review
+python scripts/capture_ui_review.py --output-dir outputs/ui-review-8t8r --skip-dialogs --auto-tx 8 --auto-rx 8
+```
+
 Entry points:
 
 ```bash
@@ -210,11 +221,10 @@ mimo-array-case4
 ## Project Structure
 
 ```
-GUI.py              → Launcher (original)
-GUI_mod.py          → Launcher (refined)
+GUI.py              → Canonical launcher for virtual_array.gui
+GUI_mod.py          → Compatibility alias for the same interface
 src/virtual_array/
-  gui.py            → Original GUI (~7700 lines)
-  gui_mod.py        → Refined GUI (1366×768 fixed, three-tab layout)
+  gui.py            → Single native PySide6 GUI (resizable, three-page layout)
   geometry.py       → ArrayPoint, VirtualPoint, AntennaArray
   analysis.py       → Metrics, PSF, DBF spectra
   element_pattern.py → ElementPattern, ChannelPatternSet
@@ -233,10 +243,9 @@ tests/              → pytest suite
 
 MIMO 阵列可视化工具 — 用于交互式编辑和评估 MIMO 发射/接收天线阵列布局的桌面应用。可计算虚拟阵列几何、2D 阵列因子以及雷达性能指标（旁瓣电平、波束宽度、ISLR、栅瓣、俯仰模糊）。
 
-提供两个 GUI 版本：
-
-- **GUI.py** — 原始布局：2×2 图形网格 + 可拖拽分割的评估面板。
-- **GUI_mod.py** — 重构布局：固定 1366×768，三子页 Notebook + 右侧概览面板（4:1）。
+桌面端采用原生 **PySide6 / pyqtgraph** 和 Fluent 2 浅色主题，并只维护
+`virtual_array.gui` 一套实现。`GUI.py`、`GUI_mod.py` 与安装后的控制台命令
+均打开同一个三页界面；`GUI_mod.py` 仅用于兼容已有快捷方式。
 
 ## 功能特性
 
@@ -251,22 +260,24 @@ MIMO 阵列可视化工具 — 用于交互式编辑和评估 MIMO 发射/接收
 - 2D DBF 热图，方位/俯仰轴独立播放控制。
 - 可配置 DBF 字典模式：理想几何、反向相位、通道幅相校准、导入 CSV/XLSX 字典。
 - HFSS 通道方向图 CSV/XLSX 导入（幅度/相位）。
-- 顶部 **通道辐相** 状态分别显示幅度、相位为理想、导入或混合；导入单元方向图时幅度视为导入。
+- 顶部 **通道幅相** 状态分别显示幅度、相位为理想、导入或混合；导入单元方向图时幅度视为导入。
 - 通道方向图界面细节优化：通道表内容居中、悬停信息置顶、Tx/Rx 图例紧凑透明、底部工具条输入框对齐。
 - 可读的 JSON 布局导入/导出（含评估元数据）。
 - 本地状态持久化（最近路径、频率、窗口几何、布局）。
 - PyInstaller onedir Windows 打包。
 
-### GUI_mod.py（重构版）
+### Fluent 2 桌面界面
 
-- 固定窗口：**1366 × 768**，不可缩放。
-- 三个子页面，统一 4 px 内间距：
+- 可缩放窗口：默认 **1366 × 768**，最小 **1100 × 650**；恢复窗口时自动限制在屏幕可用区域内。
+- 三个已本地化的子页面：
   - **Physical & Virtual** — 物理阵列与虚拟阵列左右并排（1:1）。
   - **1D DBF** — 方位与俯仰响应曲线左右并排（1:1）。
   - **2D DBF** — 全页 2D 热图及播放控件。
-- 右侧 **Overview** 概览面板（子页:概览 = 4:1）：
+- 主工作区与右侧 **Overview** 通过可拖动分隔条布局，侧栏保持 280–360 px 的可读宽度：
   - 通道数、虚拟通道、口径、分辨率。
   - 测角评估：不模糊范围、最大误差、竞争峰裕量、截断原因。
+- 原生 Qt 菜单、弹窗、表格、状态栏、键盘焦点和标准操作图标，统一由 Fluent 2 token/QSS 主题控制。
+- 阵列在某方向无有效孔径时显示中性能力提示，不再显示误导性的平直角谱或整片热图。
 - 跨平台中文字体（macOS / Windows / Linux）。
 - 预配置 OpenCode 技能和 ruff/pyright 工具。
 
@@ -291,8 +302,9 @@ pip install -e ".[dev]"
 ### 运行
 
 ```bash
-python GUI.py       # 原始版
-python GUI_mod.py   # 重构版
+python GUI.py       # 正式入口
+python GUI_mod.py   # 兼容别名，打开同一界面
+mimo-array-visualizer
 ```
 
 ## 快捷键
@@ -316,16 +328,20 @@ ruff check .          # 代码检查
 ruff format .         # 代码格式化
 ```
 
+可重复视觉验收（隔离状态，批量生成三页和四个弹窗）：
+
+```bash
+python scripts/capture_ui_review.py --output-dir outputs/ui-review
+python scripts/capture_ui_review.py --output-dir outputs/ui-review-8t8r --skip-dialogs --auto-tx 8 --auto-rx 8
+```
+
 ---
 
 # 日本語
 
 MIMOアレイ可視化ツール — MIMO送信/受信アンテナアレイ配置を対話的に編集・評価するデスクトップアプリです。仮想アレイ形状、2Dアレイファクタ、レーダ性能指標（PSL、ビーム幅、ISLR、グレーティングローブ、仰角曖昧性）を計算します。
 
-2 つの GUI バージョンを提供：
-
-- **GUI.py** — オリジナル版：2×2 プロットグリッド + 分割可能な評価パネル。
-- **GUI_mod.py** — 改良版：固定 1366×768、3 タブ Notebook + 右側概要パネル（4:1）。
+デスクトップ UI はネイティブ **PySide6 / pyqtgraph** と Fluent 2 のライトテーマを採用し、`virtual_array.gui` の 1 実装だけを保守します。`GUI.py`、`GUI_mod.py`、インストール済みコンソールコマンドはすべて同じ 3 ページ画面を起動し、`GUI_mod.py` は既存ショートカット用の互換エイリアスです。
 
 ## 機能
 
@@ -346,14 +362,16 @@ MIMOアレイ可視化ツール — MIMO送信/受信アンテナアレイ配置
 - ローカル状態の永続化
 - PyInstaller onedir Windows パッケージ
 
-### GUI_mod.py（改良版）
+### Fluent 2 デスクトップ UI
 
-- 固定ウィンドウ：**1366 × 768**、リサイズ不可
-- 3 タブ（統一 4 px 間隔）：
+- リサイズ可能：既定 **1366 × 768**、最小 **1100 × 650**。復元時は利用可能な画面領域内に収めます。
+- ローカライズ済みの 3 ページ：
   - **Physical & Virtual** — 物理/仮想アレイ左右 1:1
   - **1D DBF** — 方位/仰角応答スペクトル左右 1:1
-  - **2D DBF** — 全画面 2D ヒートマップ
-- 右側 **Overview** パネル（タブ:概要 = 4:1）
+  - **2D DBF** — タブ全体の 2D ヒートマップ
+- メイン領域と右側 **Overview** はドラッグ可能なスプリッターで構成し、側面パネルは 280–360 px の読みやすい幅を維持
+- ネイティブ Qt のメニュー、ダイアログ、テーブル、ステータスバー、キーボードフォーカス、標準アクションアイコンを単一の Fluent 2 token/QSS テーマで統一
+- 有効な開口がない軸では、誤解を招く平坦スペクトルやヒートマップの代わりに中立的な案内を表示
 - クロスプラットフォーム中国語フォント対応
 - OpenCode スキル・ruff/pyright ツール設定済み
 
@@ -363,8 +381,9 @@ MIMOアレイ可視化ツール — MIMO送信/受信アンテナアレイ配置
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-python GUI.py        # オリジナル版
-python GUI_mod.py    # 改良版
+python GUI.py        # 正式エントリ
+python GUI_mod.py    # 同じ画面を開く互換エイリアス
+mimo-array-visualizer
 ```
 
 ## 開発
@@ -373,4 +392,11 @@ python GUI_mod.py    # 改良版
 pytest tests/ -x -q   # テスト実行
 ruff check .          # リント
 ruff format .         # フォーマット
+```
+
+再現可能なビジュアル確認（状態を分離し、3 ページと 4 ダイアログを一括生成）：
+
+```bash
+python scripts/capture_ui_review.py --output-dir outputs/ui-review
+python scripts/capture_ui_review.py --output-dir outputs/ui-review-8t8r --skip-dialogs --auto-tx 8 --auto-rx 8
 ```

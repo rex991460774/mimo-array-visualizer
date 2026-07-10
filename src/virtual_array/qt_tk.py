@@ -102,19 +102,22 @@ def _screen_geometry_limit() -> QtCore.QSize | None:
     screens = app.screens()
     if not screens:
         return None
-    width = max(screen.geometry().width() for screen in screens)
-    height = max(screen.geometry().height() for screen in screens)
+    width = max(screen.availableGeometry().width() for screen in screens)
+    height = max(screen.availableGeometry().height() for screen in screens)
     return QtCore.QSize(width, height)
 
 
 def _tk_px(value: int | float) -> int:
-    """Convert Tk pixel units to Qt logical pixels on high-DPI screens."""
-    app = _ensure_app()
-    screen = app.primaryScreen()
-    ratio = screen.devicePixelRatio() if screen is not None else 1.0
-    if ratio <= 1.0:
-        return int(round(value))
-    return max(1, int(round(float(value) / ratio)))
+    """Return Qt logical pixels.
+
+    Qt already exposes device-independent logical coordinates when high-DPI
+    scaling is enabled.  Dividing by ``devicePixelRatio`` a second time made
+    the old compatibility UI shrink at 125%/150% Windows scaling (most
+    noticeably the header chips).  Keeping the logical value lets Qt perform
+    the only required conversion.
+    """
+
+    return max(1, int(round(float(value))))
 
 
 def _scrollbar_fractions(scrollbar: QtWidgets.QScrollBar) -> tuple[float, float]:
@@ -287,6 +290,10 @@ def _font_rules(font: Any) -> list[str]:
             italic = italic or "italic" in text
     elif isinstance(font, str):
         family = font
+    if family.lower().startswith("tkdefaultfont"):
+        family = _DEFAULT_FONT_FAMILY
+    elif family.lower().startswith("tkfixedfont"):
+        family = "Cascadia Mono"
     fallback_families = [
         family,
         "Microsoft YaHei",
@@ -334,6 +341,10 @@ def _font_from_config(font: Any) -> QtGui.QFont | None:
             italic = italic or "italic" in text
     elif isinstance(font, str):
         family = font
+    if family.lower().startswith("tkdefaultfont"):
+        family = _DEFAULT_FONT_FAMILY
+    elif family.lower().startswith("tkfixedfont"):
+        family = "Cascadia Mono"
     qt_font = QtGui.QFont(family)
     if hasattr(qt_font, "setFamilies"):
         qt_font.setFamilies(
@@ -471,11 +482,13 @@ def _style_rules(config: dict[str, Any], *, widget_kind: str) -> list[str]:
         if width == 0:
             color = "transparent"
         rules.append(f"border: {width}px solid {color};")
-        if widget_kind in {"button", "entry", "frame", "groupbox", "toolbutton"}:
-            rules.append("border-radius: 0px;")
+        if widget_kind in {"button", "entry", "toolbutton"}:
+            rules.append("border-radius: 6px;")
+        elif widget_kind in {"frame", "groupbox"}:
+            rules.append("border-radius: 8px;")
     elif widget_kind in {"button", "toolbutton"}:
         rules.append("border: 1px solid transparent;")
-        rules.append("border-radius: 0px;")
+        rules.append("border-radius: 6px;")
     return rules
 
 
@@ -499,27 +512,20 @@ def _effective_style_config(
         config = dict(config)
         left, _top, right, _bottom = _parse_padding(config.get("padding"))
         config["padding"] = (left, 6, right, 6)
-    elif (
-        style_name
-        in {
-            "HeaderChipName.TLabel",
-            "HeaderChipValue.TLabel",
-            "HeaderChipPatternValue.TLabel",
-        }
-        and str(config.get("background", "")).lower() == "#f8fbff"
-    ):
+    elif style_name in {
+        "HeaderChipName.TLabel",
+        "HeaderChipValue.TLabel",
+        "HeaderChipPatternValue.TLabel",
+    }:
         config = dict(config)
-        config["font"] = _font_config_with_size(config.get("font"), 7)
-    elif style_name == "HeaderTitle.TLabel":
         font = config.get("font")
+        size = 9
         if isinstance(font, tuple) and len(font) > 1:
             try:
-                size = int(font[1])
+                size = max(9, int(font[1]))
             except (TypeError, ValueError):
-                size = 0
-            if size >= 12:
-                config = dict(config)
-                config["font"] = _font_config_with_size(font, 10)
+                pass
+        config["font"] = _font_config_with_size(font, size)
     return config
 
 
@@ -1226,17 +1232,24 @@ class Tk(Widget):
     _default_style = "TFrame"
     _style_kind = "frame"
 
-    def __init__(self) -> None:
+    def __init__(self, window: QtWidgets.QMainWindow | None = None) -> None:
         self._app = _ensure_app()
-        self._window = _MainWindow(self)
-        central = QtWidgets.QWidget()
-        self._window.setCentralWidget(central)
+        self._window = window if window is not None else _MainWindow(self)
+        central = self._window.centralWidget()
+        if central is None:
+            central = QtWidgets.QWidget()
+            self._window.setCentralWidget(central)
         self._close_callback: Callable[[], Any] | None = None
         self._destroying = False
         self._pending_geometry_size: tuple[int, int] | None = None
         self._pending_resizable: tuple[bool, bool] | None = None
         super().__init__(central, None)
         self._qt = central
+        self._window._tk_owner = self  # type: ignore[attr-defined]
+        self._window_filter: _WindowEventFilter | None = None
+        if not isinstance(self._window, _MainWindow):
+            self._window_filter = _WindowEventFilter(self)
+            self._window.installEventFilter(self._window_filter)
 
     def title(self, text: str) -> None:
         self._window.setWindowTitle(text)
@@ -1258,11 +1271,14 @@ class Tk(Widget):
         if parsed is None:
             raise TclError(f"bad geometry specifier: {value}")
         width, height, x, y = parsed
-        screen_limit = _screen_geometry_limit()
-        if screen_limit is not None and height > screen_limit.height():
-            height = max(1, screen_limit.height() - 8)
-        if width <= self._window.width() and height <= self._window.height():
-            return value
+        screen = self._app.screenAt(QtGui.QCursor.pos()) or self._app.primaryScreen()
+        available = screen.availableGeometry() if screen is not None else QtCore.QRect()
+        if available.isValid():
+            width = min(width, max(1, available.width()))
+            height = min(height, max(1, available.height()))
+            if x is not None and y is not None:
+                x = min(max(x, available.left()), max(available.left(), available.right() - width + 1))
+                y = min(max(y, available.top()), max(available.top(), available.bottom() - height + 1))
         self._window.resize(width, height)
         self._pending_geometry_size = None if self._window.isVisible() else (width, height)
         if x is not None and y is not None:
@@ -1270,6 +1286,11 @@ class Tk(Widget):
         return value
 
     def minsize(self, width: int, height: int) -> None:
+        screen = self._window.screen() or self._app.primaryScreen()
+        available = screen.availableGeometry() if screen is not None else QtCore.QRect()
+        if available.isValid():
+            width = min(width, max(1, available.width()))
+            height = min(height, max(1, available.height()))
         self._window.setMinimumSize(width, height)
 
     def resizable(self, width: bool, height: bool) -> None:
@@ -1526,6 +1547,25 @@ class _MainWindow(QtWidgets.QMainWindow):
         event.accept()
 
 
+class _WindowEventFilter(QtCore.QObject):
+    """Give an externally supplied QMainWindow the same lifecycle hooks."""
+
+    def __init__(self, owner: Tk) -> None:
+        super().__init__(owner._window)
+        self.owner = owner
+
+    def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        if event.type() == QtCore.QEvent.Type.Resize:
+            QtCore.QTimer.singleShot(0, self.owner._adjust_root_overflow_rows)
+        elif event.type() == QtCore.QEvent.Type.Close and not self.owner._destroying:
+            if self.owner._close_callback is not None:
+                self.owner._close_callback()
+                if not self.owner._destroying:
+                    event.ignore()
+                    return True
+        return super().eventFilter(watched, event)
+
+
 class Toplevel(Widget):
     _winfo_class = "Toplevel"
     _default_style = "TFrame"
@@ -1691,8 +1731,13 @@ class Label(Widget):
         if self._style_name == "Toolbar.TLabel":
             config = _effective_style_config(self._style_name, self._default_style)
             label.setMinimumHeight(17 if _uses_tk_default_font(config) else 21)
-            label.setMinimumWidth(
-                max(label.minimumWidth(), _toolbar_label_min_width(label, config))
+            # Toolbar copy changes with the active locale.  A minimum captured
+            # from the first language made the command bar permanently wider
+            # even after a shorter translation was selected.
+            label.setMinimumWidth(0)
+            label.setSizePolicy(
+                QtWidgets.QSizePolicy.Policy.Preferred,
+                QtWidgets.QSizePolicy.Policy.Preferred,
             )
         if self._style_name == "Muted.TLabel":
             config = _effective_style_config(self._style_name, self._default_style)
@@ -2447,6 +2492,75 @@ class PanedWindow(Widget):
         self._qt.setSizes(sizes)
 
 
+class _TreeTableModel(QtCore.QAbstractTableModel):
+    """Small model backing the transitional Treeview API with QTableView."""
+
+    def __init__(self, owner: "Treeview") -> None:
+        super().__init__(owner._qt)
+        self.owner = owner
+
+    def rowCount(self, parent: QtCore.QModelIndex = QtCore.QModelIndex()) -> int:
+        return 0 if parent.isValid() else len(self.owner._rows)
+
+    def columnCount(self, parent: QtCore.QModelIndex = QtCore.QModelIndex()) -> int:
+        return 0 if parent.isValid() else len(self.owner._columns)
+
+    def data(self, index: QtCore.QModelIndex, role: int = QtCore.Qt.ItemDataRole.DisplayRole) -> Any:
+        if not index.isValid():
+            return None
+        row = index.row()
+        column = index.column()
+        if row >= len(self.owner._rows) or column >= len(self.owner._columns):
+            return None
+        value = self.owner._rows[row][column]
+        if role == QtCore.Qt.ItemDataRole.DisplayRole:
+            return value
+        if role == QtCore.Qt.ItemDataRole.ToolTipRole:
+            return value
+        if role == QtCore.Qt.ItemDataRole.TextAlignmentRole:
+            return self.owner._column_alignment(column)
+        item_id = self.owner._items[row]
+        tags = self.owner._item_tags.get(item_id, ())
+        if role in {
+            QtCore.Qt.ItemDataRole.BackgroundRole,
+            QtCore.Qt.ItemDataRole.ForegroundRole,
+        }:
+            style: dict[str, Any] = {}
+            for tag in tags:
+                style.update(self.owner._tag_styles.get(tag, {}))
+            key = (
+                "background"
+                if role == QtCore.Qt.ItemDataRole.BackgroundRole
+                else "foreground"
+            )
+            color = _as_color(style.get(key))
+            return QtGui.QBrush(QtGui.QColor(color)) if color else None
+        return None
+
+    def headerData(
+        self,
+        section: int,
+        orientation: QtCore.Qt.Orientation,
+        role: int = QtCore.Qt.ItemDataRole.DisplayRole,
+    ) -> Any:
+        if (
+            orientation == QtCore.Qt.Orientation.Horizontal
+            and role == QtCore.Qt.ItemDataRole.DisplayRole
+            and section < len(self.owner._columns)
+        ):
+            column = self.owner._columns[section]
+            return self.owner._headings.get(column, column)
+        return None
+
+    def flags(self, index: QtCore.QModelIndex) -> QtCore.Qt.ItemFlag:
+        if not index.isValid():
+            return QtCore.Qt.ItemFlag.NoItemFlags
+        return (
+            QtCore.Qt.ItemFlag.ItemIsEnabled
+            | QtCore.Qt.ItemFlag.ItemIsSelectable
+        )
+
+
 class Treeview(Widget):
     _winfo_class = "Treeview"
     _default_style = "Treeview"
@@ -2460,18 +2574,22 @@ class Treeview(Widget):
         height: int | None = None,
         **kwargs: Any,
     ) -> None:
-        table = QtWidgets.QTableWidget(_qt_parent(parent))
+        table = QtWidgets.QTableView(_qt_parent(parent))
         table.verticalHeader().setVisible(False)
         table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
         table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         super().__init__(table, parent, **kwargs)
         self._columns: list[str] = []
         self._items: list[str] = []
+        self._rows: list[list[str]] = []
         self._item_rows: dict[str, int] = {}
         self._headings: dict[str, str] = {}
         self._column_anchors: dict[str, str] = {}
         self._item_tags: dict[str, tuple[str, ...]] = {}
         self._tag_styles: dict[str, dict[str, Any]] = {}
+        self._model = _TreeTableModel(self)
+        table.setModel(self._model)
+        table.setAlternatingRowColors(False)
         self._sync_tree_dimensions()
         if height is not None:
             rowheight = table.verticalHeader().defaultSectionSize()
@@ -2486,7 +2604,7 @@ class Treeview(Widget):
             height = int(rowheight)
             self._qt.verticalHeader().setMinimumSectionSize(height)
             self._qt.verticalHeader().setDefaultSectionSize(height)
-            for row in range(self._qt.rowCount()):
+            for row in range(self._model.rowCount()):
                 self._qt.setRowHeight(row, height)
 
     def configure(self, **kwargs: Any) -> None:
@@ -2495,11 +2613,14 @@ class Treeview(Widget):
         yscrollcommand = kwargs.pop("yscrollcommand", None)
         xscrollcommand = kwargs.pop("xscrollcommand", None)
         if columns is not None:
+            self._model.beginResetModel()
             self._columns = list(columns)
-            self._qt.setColumnCount(len(self._columns))
-            self._qt.setHorizontalHeaderLabels(
-                [self._headings.get(column, column) for column in self._columns]
-            )
+            width = len(self._columns)
+            self._rows = [
+                (row[:width] + [""] * max(0, width - len(row)))
+                for row in self._rows
+            ]
+            self._model.endResetModel()
         if yscrollcommand is not None:
             _connect_scroll_command(self._qt.verticalScrollBar(), yscrollcommand)
             self._qt.setVerticalScrollBarPolicy(
@@ -2516,7 +2637,11 @@ class Treeview(Widget):
         self._headings[column] = text
         if column in self._columns:
             index = self._columns.index(column)
-            self._qt.setHorizontalHeaderItem(index, QtWidgets.QTableWidgetItem(text))
+            self._model.headerDataChanged.emit(
+                QtCore.Qt.Orientation.Horizontal,
+                index,
+                index,
+            )
 
     def column(
         self,
@@ -2542,10 +2667,12 @@ class Treeview(Widget):
             else QtWidgets.QHeaderView.ResizeMode.Interactive
         )
         self._qt.horizontalHeader().setSectionResizeMode(index, mode)
-        for row in range(self._qt.rowCount()):
-            item = self._qt.item(row, index)
-            if item is not None:
-                item.setTextAlignment(self._column_alignment(index))
+        if self._model.rowCount():
+            self._model.dataChanged.emit(
+                self._model.index(0, index),
+                self._model.index(self._model.rowCount() - 1, index),
+                [QtCore.Qt.ItemDataRole.TextAlignmentRole],
+            )
 
     def _column_alignment(self, index: int) -> QtCore.Qt.AlignmentFlag:
         column = self._columns[index] if index < len(self._columns) else ""
@@ -2561,31 +2688,34 @@ class Treeview(Widget):
         **_: Any,
     ) -> str:
         item_id = iid or f"I{next(_ITEM_IDS)}"
-        row = self._qt.rowCount()
-        self._qt.insertRow(row)
-        self._sync_tree_dimensions()
+        row = len(self._rows)
+        self._model.beginInsertRows(QtCore.QModelIndex(), row, row)
         self._items.append(item_id)
         self._item_rows[item_id] = row
         self._item_tags[item_id] = tuple(str(tag) for tag in tags)
-        for col, value in enumerate(values):
-            item = QtWidgets.QTableWidgetItem(str(value))
-            item.setTextAlignment(self._column_alignment(col))
-            self._apply_item_tags(item, self._item_tags[item_id])
-            self._qt.setItem(row, col, item)
+        row_values = [str(value) for value in values[: len(self._columns)]]
+        row_values.extend([""] * (len(self._columns) - len(row_values)))
+        self._rows.append(row_values)
+        self._model.endInsertRows()
+        self._sync_tree_dimensions()
         return item_id
 
     def delete(self, *items: str) -> None:
         if not items:
             return
-        for item_id in list(items):
-            row = self._item_rows.pop(item_id, None)
-            if row is None:
-                continue
-            self._qt.removeRow(row)
-            if item_id in self._items:
-                self._items.remove(item_id)
+        removed = set(items)
+        self._model.beginResetModel()
+        kept = [
+            (item_id, row)
+            for item_id, row in zip(self._items, self._rows)
+            if item_id not in removed
+        ]
+        self._items = [item_id for item_id, _row in kept]
+        self._rows = [row for _item_id, row in kept]
+        for item_id in removed:
             self._item_tags.pop(item_id, None)
-            self._rebuild_rows()
+        self._rebuild_rows()
+        self._model.endResetModel()
 
     def _rebuild_rows(self) -> None:
         self._item_rows = {item_id: index for index, item_id in enumerate(self._items)}
@@ -2611,28 +2741,18 @@ class Treeview(Widget):
 
     def tag_configure(self, tag: str, **kwargs: Any) -> None:
         self._tag_styles.setdefault(tag, {}).update(kwargs)
-        for item_id, row in self._item_rows.items():
-            tags = self._item_tags.get(item_id, ())
-            if tag not in tags:
-                continue
-            for column in range(self._qt.columnCount()):
-                item = self._qt.item(row, column)
-                if item is not None:
-                    self._apply_item_tags(item, tags)
-
-    def _apply_item_tags(
-        self,
-        item: QtWidgets.QTableWidgetItem,
-        tags: tuple[str, ...],
-    ) -> None:
-        for tag in tags:
-            style = self._tag_styles.get(tag, {})
-            bg = _as_color(style.get("background"))
-            fg = _as_color(style.get("foreground"))
-            if bg:
-                item.setBackground(QtGui.QBrush(QtGui.QColor(bg)))
-            if fg:
-                item.setForeground(QtGui.QBrush(QtGui.QColor(fg)))
+        if self._model.rowCount() and self._model.columnCount():
+            self._model.dataChanged.emit(
+                self._model.index(0, 0),
+                self._model.index(
+                    self._model.rowCount() - 1,
+                    self._model.columnCount() - 1,
+                ),
+                [
+                    QtCore.Qt.ItemDataRole.BackgroundRole,
+                    QtCore.Qt.ItemDataRole.ForegroundRole,
+                ],
+            )
 
     def yview(self, *args: Any) -> tuple[float, float] | None:
         return _scrollbar_view(self._qt.verticalScrollBar(), *args)

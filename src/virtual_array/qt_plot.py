@@ -8,8 +8,6 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from .qt_tk import BOTH, Widget, _as_color, _qt_parent, _set_cursor
-
 
 pg.setConfigOptions(antialias=True)
 
@@ -45,6 +43,56 @@ _COMPACT_COLORBAR_MIN_WIDTH = 83
 _COLORBAR_TOP_COMPENSATION = -2
 _COLORBAR_BOTTOM_COMPENSATION = 3
 _WIDE_COLORBAR_BOTTOM_COMPENSATION = 12
+
+
+def _qt_parent(parent: Any) -> QtWidgets.QWidget | None:
+    """Resolve either a native Qt parent or a transitional Tk-style wrapper."""
+    if parent is None:
+        return None
+    if isinstance(parent, QtWidgets.QWidget):
+        return parent
+    candidate = getattr(parent, "_qt", None)
+    return candidate if isinstance(candidate, QtWidgets.QWidget) else None
+
+
+def _as_color(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _cursor_shape(name: str | None) -> QtCore.Qt.CursorShape:
+    return {
+        "hand2": QtCore.Qt.CursorShape.PointingHandCursor,
+        "pointinghand": QtCore.Qt.CursorShape.PointingHandCursor,
+        "fleur": QtCore.Qt.CursorShape.SizeAllCursor,
+        "size_all": QtCore.Qt.CursorShape.SizeAllCursor,
+        "sb_h_double_arrow": QtCore.Qt.CursorShape.SizeHorCursor,
+        "size_hor": QtCore.Qt.CursorShape.SizeHorCursor,
+        "sb_v_double_arrow": QtCore.Qt.CursorShape.SizeVerCursor,
+        "size_ver": QtCore.Qt.CursorShape.SizeVerCursor,
+        "cross": QtCore.Qt.CursorShape.CrossCursor,
+        "crosshair": QtCore.Qt.CursorShape.CrossCursor,
+    }.get(name or "", QtCore.Qt.CursorShape.ArrowCursor)
+
+
+def _set_cursor(widget: QtWidgets.QWidget, name: str | None) -> None:
+    if name:
+        widget.setCursor(QtGui.QCursor(_cursor_shape(name)))
+    else:
+        widget.unsetCursor()
+
+
+def _parse_pad_pair(value: Any) -> tuple[int, int]:
+    if value is None:
+        return (0, 0)
+    if isinstance(value, (int, float)):
+        size = int(value)
+        return (size, size)
+    if isinstance(value, (tuple, list)):
+        if len(value) == 2:
+            return (int(value[0]), int(value[1]))
+        if len(value) == 4:
+            return (int(value[0]), int(value[2]))
+    return (0, 0)
 
 
 def _is_no_color(value: Any) -> bool:
@@ -1334,7 +1382,13 @@ class Figure:
             )
         target_w = max(80, min(target_w_limit, int(round(content_h * ratio * width_scale))))
         target_h = max(80, min(target_h_limit, int(round(content_w / ratio * height_scale))))
-        axis.widget.setFixedSize(target_w, target_h)
+        # Keep an equal-aspect plot visually bounded without turning its current
+        # render size into a hard window minimum.  ``setFixedSize`` made the
+        # top-level window refuse the documented 1100x650 compact viewport
+        # after the first layout pass, especially on high-DPI displays.
+        axis.widget.setMinimumSize(1, 1)
+        axis.widget.setMaximumSize(target_w, target_h)
+        axis.widget.resize(target_w, target_h)
         axis.plot_item.layout.setContentsMargins(*plot_margins)
         axis.widget.updateGeometry()
         self.widget.layout().invalidate()
@@ -1366,16 +1420,35 @@ class Figure:
         return _Colorbar(cax)
 
 
-class FigureCanvasTkAgg(QtWidgets.QWidget):
+class FigureCanvasQt(QtWidgets.QWidget):
+    """Native Qt canvas with a small, temporary Tk geometry compatibility API.
+
+    New callers should pass a ``QWidget`` as ``parent`` and add this canvas to a
+    Qt layout normally.  ``master``, ``get_tk_widget()``, ``grid()`` and
+    ``pack()`` remain available so the legacy GUI can migrate incrementally.
+    """
+
     _winfo_class = "Canvas"
 
-    def __init__(self, figure: Figure, master: Any = None) -> None:
-        super().__init__(_qt_parent(master))
+    def __init__(
+        self,
+        figure: Figure,
+        parent: Any = None,
+        *,
+        master: Any | None = None,
+    ) -> None:
+        if parent is not None and master is not None and parent is not master:
+            raise TypeError("pass either parent or master, not both")
+        owner = parent if parent is not None else master
+        qt_parent = _qt_parent(owner)
+        if owner is not None and qt_parent is None:
+            raise TypeError("parent must be a QWidget or expose a QWidget through '_qt'")
+        super().__init__(qt_parent)
         self.figure = figure
         self._qt = self
         self._qt._tk_wrapper = self  # type: ignore[attr-defined]
-        self._parent = master
-        self._children: list[Widget] = []
+        self._parent = owner
+        self._children: list[Any] = []
         self._grid_layout = None
         self._pack_layout = None
         self._layout_kind = None
@@ -1405,13 +1478,13 @@ class FigureCanvasTkAgg(QtWidgets.QWidget):
         figure.widget.setMouseTracking(True)
         figure.widget.installEventFilter(self)
         self._install_axis_event_filters()
-        if master is not None and hasattr(master, "_children"):
-            master._children.append(self)  # type: ignore[arg-type]
+        if owner is not None and hasattr(owner, "_children"):
+            owner._children.append(self)  # type: ignore[arg-type]
 
-    def get_tk_widget(self) -> "FigureCanvasTkAgg":
+    def get_tk_widget(self) -> "FigureCanvasQt":
         return self
 
-    def winfo_children(self) -> list[Widget]:
+    def winfo_children(self) -> list[Any]:
         return list(self._children)
 
     def winfo_class(self) -> str:
@@ -1461,11 +1534,160 @@ class FigureCanvasTkAgg(QtWidgets.QWidget):
 
     config = configure
 
-    def grid(self, *args: Any, **kwargs: Any) -> None:
-        Widget.grid(self, *args, **kwargs)  # type: ignore[arg-type]
+    def _compat_grid_layout(self) -> QtWidgets.QGridLayout:
+        if self._parent is None:
+            raise RuntimeError("grid() requires a parent; use a native Qt layout for new code")
+        ensure_layout = getattr(self._parent, "_ensure_grid_layout", None)
+        if callable(ensure_layout):
+            layout = ensure_layout()
+            if isinstance(layout, QtWidgets.QGridLayout):
+                return layout
+        parent = _qt_parent(self._parent)
+        if parent is None:
+            raise TypeError("grid() parent is not backed by QWidget")
+        layout = parent.layout()
+        if layout is None:
+            layout = QtWidgets.QGridLayout(parent)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(0)
+        if not isinstance(layout, QtWidgets.QGridLayout):
+            raise TypeError("grid() requires a QGridLayout; use layout.addWidget(canvas) instead")
+        return layout
 
-    def pack(self, *args: Any, **kwargs: Any) -> None:
-        Widget.pack(self, *args, **kwargs)  # type: ignore[arg-type]
+    def _compat_pack_layout(self, side: str | None) -> QtWidgets.QBoxLayout:
+        if self._parent is None:
+            raise RuntimeError("pack() requires a parent; use a native Qt layout for new code")
+        ensure_layout = getattr(self._parent, "_ensure_pack_layout", None)
+        if callable(ensure_layout):
+            layout = ensure_layout(side)
+            if isinstance(layout, QtWidgets.QBoxLayout):
+                return layout
+        parent = _qt_parent(self._parent)
+        if parent is None:
+            raise TypeError("pack() parent is not backed by QWidget")
+        layout = parent.layout()
+        if layout is None:
+            if side in {"left", "right"}:
+                layout = QtWidgets.QHBoxLayout(parent)
+            else:
+                layout = QtWidgets.QVBoxLayout(parent)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(0)
+        if not isinstance(layout, QtWidgets.QBoxLayout):
+            raise TypeError("pack() requires a QBoxLayout; use layout.addWidget(canvas) instead")
+        return layout
+
+    def grid(
+        self,
+        row: int = 0,
+        column: int = 0,
+        rowspan: int = 1,
+        columnspan: int = 1,
+        sticky: str | None = None,
+        padx: Any = None,
+        pady: Any = None,
+        **_kwargs: Any,
+    ) -> None:
+        """Place the canvas using the legacy Tk-style grid contract."""
+        if self._parent is None:
+            return
+        layout = self._compat_grid_layout()
+        pad_left, pad_right = _parse_pad_pair(padx)
+        pad_top, pad_bottom = _parse_pad_pair(pady)
+        if pad_left or pad_right:
+            layout.setHorizontalSpacing(
+                max(0, layout.horizontalSpacing(), pad_left + pad_right)
+            )
+        if pad_top or pad_bottom:
+            layout.setVerticalSpacing(max(0, layout.verticalSpacing(), pad_top + pad_bottom))
+
+        alignment = QtCore.Qt.AlignmentFlag(0)
+        sticky = sticky or ""
+        if "w" in sticky and "e" not in sticky:
+            alignment |= QtCore.Qt.AlignmentFlag.AlignLeft
+        elif "e" in sticky and "w" not in sticky:
+            alignment |= QtCore.Qt.AlignmentFlag.AlignRight
+        elif "w" not in sticky and "e" not in sticky:
+            alignment |= QtCore.Qt.AlignmentFlag.AlignHCenter
+        if "n" in sticky and "s" not in sticky:
+            alignment |= QtCore.Qt.AlignmentFlag.AlignTop
+        elif "s" in sticky and "n" not in sticky:
+            alignment |= QtCore.Qt.AlignmentFlag.AlignBottom
+        elif "n" not in sticky and "s" not in sticky:
+            alignment |= QtCore.Qt.AlignmentFlag.AlignVCenter
+
+        if alignment:
+            layout.addWidget(self, row, column, rowspan, columnspan, alignment)
+        else:
+            layout.addWidget(self, row, column, rowspan, columnspan)
+
+        parent = self._parent
+        if hasattr(parent, "_grid_max_row"):
+            parent._grid_max_row = max(parent._grid_max_row, row + rowspan - 1)
+        if hasattr(parent, "_grid_max_column"):
+            parent._grid_max_column = max(parent._grid_max_column, column + columnspan - 1)
+        sync_grid = getattr(parent, "_sync_grid_slack", None)
+        if callable(sync_grid):
+            sync_grid()
+
+    def pack(
+        self,
+        side: str | None = None,
+        fill: str | None = None,
+        expand: bool = False,
+        padx: Any = None,
+        pady: Any = None,
+        anchor: str | None = None,
+        **_kwargs: Any,
+    ) -> None:
+        """Place the canvas using the legacy Tk-style pack contract."""
+        del anchor  # Kept for signature compatibility; the prior adapter ignored it too.
+        if self._parent is None:
+            return
+        layout = self._compat_pack_layout(side)
+        stretch = 1 if expand else 0
+        pad_left, pad_right = _parse_pad_pair(padx)
+        pad_top, pad_bottom = _parse_pad_pair(pady)
+        is_horizontal = layout.direction() in {
+            QtWidgets.QBoxLayout.Direction.LeftToRight,
+            QtWidgets.QBoxLayout.Direction.RightToLeft,
+        }
+        before_pad = pad_left if is_horizontal else pad_top
+        after_pad = pad_right if is_horizontal else pad_bottom
+        if before_pad:
+            layout.addSpacing(before_pad)
+        alignment = QtCore.Qt.AlignmentFlag(0)
+        if is_horizontal and fill != "both":
+            alignment |= QtCore.Qt.AlignmentFlag.AlignVCenter
+        elif not is_horizontal and fill not in {"x", "both"}:
+            alignment |= QtCore.Qt.AlignmentFlag.AlignHCenter
+        if alignment:
+            layout.addWidget(self, stretch, alignment)
+        else:
+            layout.addWidget(self, stretch)
+        if after_pad:
+            layout.addSpacing(after_pad)
+
+        if fill in {"x", "both"} or expand:
+            if is_horizontal:
+                horizontal_policy = QtWidgets.QSizePolicy.Policy.Expanding
+                vertical_policy = (
+                    QtWidgets.QSizePolicy.Policy.Expanding
+                    if fill == "both"
+                    else QtWidgets.QSizePolicy.Policy.Preferred
+                )
+            else:
+                horizontal_policy = (
+                    QtWidgets.QSizePolicy.Policy.Expanding
+                    if fill in {"x", "both"}
+                    else QtWidgets.QSizePolicy.Policy.Preferred
+                )
+                vertical_policy = (
+                    QtWidgets.QSizePolicy.Policy.Expanding
+                    if expand or fill == "both"
+                    else QtWidgets.QSizePolicy.Policy.Preferred
+                )
+            self.setSizePolicy(horizontal_policy, vertical_policy)
 
     def draw_idle(self) -> None:
         self.update()
@@ -1606,6 +1828,10 @@ class FigureCanvasTkAgg(QtWidgets.QWidget):
 
     def winfo_class(self) -> str:
         return self._winfo_class
+
+
+# Transitional import compatibility.  New code should use FigureCanvasQt.
+FigureCanvasTkAgg = FigureCanvasQt
 
 
 class MplButton:

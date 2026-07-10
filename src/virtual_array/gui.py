@@ -1,14 +1,18 @@
+"""Canonical native PySide6 GUI for the MIMO Array Visualizer."""
+
 from __future__ import annotations
 
 import json
 import logging
 import math
 import re
+import sys
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from .app_state import load_state, save_state, state_path
 from .dbf_dictionary import (
@@ -63,6 +67,7 @@ from .element_pattern import (
 from .geometry import AntennaArray, ArrayPoint
 from .grid import GRID_STEP, snap_to_grid
 from .logging_config import configure_logging, current_log_path, install_excepthook
+from .native_theme import TOKENS, apply_native_theme, mark_primary
 from .qt_plot import Figure, FigureCanvasTkAgg, MplButton, Rectangle, rcParams
 from .qt_tk import filedialog, messagebox, tk, ttk
 from .version import APP_VERSION
@@ -70,7 +75,28 @@ from .version import APP_VERSION
 
 LOGGER = logging.getLogger(__name__)
 
-rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "SimSun", "DejaVu Sans"]
+
+def _resource_path(*parts: str) -> Path:
+    if hasattr(sys, "_MEIPASS"):
+        return Path(getattr(sys, "_MEIPASS")) / "virtual_array" / Path(*parts)
+    return Path(__file__).resolve().parent / Path(*parts)
+
+
+APP_LOGO_UI_PATH = _resource_path("assets", "mimo_array_logo_48.png")
+APP_LOGO_PNG_PATH = _resource_path("assets", "mimo_array_logo_256.png")
+APP_LOGO_ICO_PATH = _resource_path("assets", "mimo_array_logo.ico")
+APP_LOGO_ICNS_PATH = _resource_path("assets", "mimo_array_logo.icns")
+
+rcParams["font.sans-serif"] = [
+    "PingFang SC",
+    "Heiti SC",
+    "STHeiti",
+    "Microsoft YaHei",
+    "SimHei",
+    "WenQuanYi Micro Hei",
+    "Noto Sans CJK SC",
+    "DejaVu Sans",
+]
 rcParams["axes.unicode_minus"] = False
 
 # ── Global constants ──────────────────────────────────────────────────
@@ -119,15 +145,15 @@ DISPLAY_GRID_STEP_LAMBDA = 0.5
 PHYSICAL_MAJOR_GRID_STEP_LAMBDA = 1.0
 PHYSICAL_AXIS_MIN_SPAN_LAMBDA = 4.0
 PHYSICAL_AXIS_PADDING_LAMBDA = 2.0
-TOOLBAR_ENTRY_WIDTH = 7
-TOOLBAR_GROUP_PAD_X = 8
-TOOLBAR_GROUP_PAD_Y = 5
+TOOLBAR_ENTRY_WIDTH = 6
+TOOLBAR_GROUP_PAD_X = 6
+TOOLBAR_GROUP_PAD_Y = 4
 
 # Window geometry
-WINDOW_WIDTH = 1720
-WINDOW_HEIGHT = 1060
-WINDOW_MIN_WIDTH = 1280
-WINDOW_MIN_HEIGHT = 860
+WINDOW_WIDTH = 1366
+WINDOW_HEIGHT = 768
+WINDOW_MIN_WIDTH = 1100
+WINDOW_MIN_HEIGHT = 650
 WINDOW_GEOMETRY_RE = re.compile(
     r"^(?P<width>\d+)x(?P<height>\d+)(?:(?P<x>[+-]\d+)(?P<y>[+-]\d+))?$"
 )
@@ -136,16 +162,16 @@ WINDOW_GEOMETRY_RE = re.compile(
 FIG_DPI = 100
 
 # Figure sizes (inches → pixels at FIG_DPI)
-PHYS_FIG_W = 6.8
-PHYS_FIG_H = 3.2
-VIRT_FIG_W = 6.8
-VIRT_FIG_H = 3.2
-RESPONSE_FIG_W = 6.8
-RESPONSE_FIG_H = 2.8
-PLOT_COLUMN_MIN_WIDTH = 430
-EVAL_PANEL_MIN_WIDTH = 370
+PHYS_FIG_W = 5.8
+PHYS_FIG_H = 2.8
+VIRT_FIG_W = 5.8
+VIRT_FIG_H = 4.3
+RESPONSE_FIG_W = 5.8
+RESPONSE_FIG_H = 4.0
+PLOT_COLUMN_MIN_WIDTH = 450
+EVAL_PANEL_MIN_WIDTH = 380
 WORKSPACE_DEFAULT_PANE_WIDTH = WINDOW_WIDTH // 2
-DBF2D_CANVAS_SIZE = 345
+DBF2D_CANVAS_SIZE = 310
 DBF2D_FIG_SIZE = DBF2D_CANVAS_SIZE / FIG_DPI
 
 NOTE_STYLES = {
@@ -171,6 +197,38 @@ UI_TEXT = {
         "zh": "阵列布局、虚拟孔径、响应曲线与DBF扫描",
         "en": "Array layout, virtual aperture, response curves, and DBF scan",
         "ja": "アレイ配置、仮想開口、応答曲線、DBFスキャン",
+    },
+    "main_tab_physical_virtual": {
+        "zh": "物理与虚拟阵列",
+        "en": "Physical & Virtual",
+        "ja": "物理・仮想アレイ",
+    },
+    "main_tab_1d": {"zh": "1D DBF", "en": "1D DBF", "ja": "1D DBF"},
+    "main_tab_2d": {"zh": "2D DBF", "en": "2D DBF", "ja": "2D DBF"},
+    "empty_azimuth_title": {
+        "zh": "当前阵列没有方位孔径",
+        "en": "No azimuth aperture in the current array",
+        "ja": "現在のアレイに方位開口がありません",
+    },
+    "empty_elevation_title": {
+        "zh": "当前阵列没有俯仰孔径",
+        "en": "No elevation aperture in the current array",
+        "ja": "現在のアレイに仰角開口がありません",
+    },
+    "empty_2d_title": {
+        "zh": "当前阵列不具备完整 2D 测角能力",
+        "en": "The current array has no complete 2D angle capability",
+        "ja": "現在のアレイは完全な 2D 測角に対応していません",
+    },
+    "empty_array_body": {
+        "zh": "请增加 TX/RX 通道、拉开阵元间距，或使用底部的自动排阵。",
+        "en": "Add Tx/Rx channels, spread the elements, or use Auto Array below.",
+        "ja": "Tx/Rx チャネルを追加するか、素子間隔を広げるか、自動配置を使用してください。",
+    },
+    "empty_2d_body": {
+        "zh": "方位和俯仰均需要有效孔径；只有一个方向可用时，请切换到 1D DBF。",
+        "en": "Both axes need aperture. If only one axis is available, use 1D DBF.",
+        "ja": "両軸に開口が必要です。一方向のみ有効な場合は 1D DBF を使用してください。",
     },
     "chip_frequency": {"zh": "频率", "en": "Frequency", "ja": "周波数"},
     "chip_dictionary": {"zh": "DBF字典", "en": "DBF Dictionary", "ja": "DBF辞書"},
@@ -288,8 +346,8 @@ UI_TEXT = {
     "language_en": {"zh": "英文", "en": "English", "ja": "英語"},
     "language_ja": {"zh": "日语", "en": "Japanese", "ja": "日本語"},
     "freq_label": {"zh": "频率(GHz)", "en": "Freq (GHz)", "ja": "周波数(GHz)"},
-    "margin_label": {"zh": "竞争峰裕量(dB)", "en": "Peak margin (dB)", "ja": "競合ピーク余裕(dB)"},
-    "auto_label": {"zh": "自动排阵", "en": "Auto Array", "ja": "自動配置"},
+    "margin_label": {"zh": "竞争峰裕量(dB)", "en": "Margin (dB)", "ja": "ピーク余裕(dB)"},
+    "auto_label": {"zh": "自动排阵", "en": "Auto", "ja": "自動配置"},
     "auto_apply": {"zh": "应用阵列", "en": "Apply Array", "ja": "配置を適用"},
     "physical_add_tx": {"zh": "+TX", "en": "+TX", "ja": "+TX"},
     "physical_add_rx": {"zh": "+RX", "en": "+RX", "ja": "+RX"},
@@ -425,9 +483,9 @@ UI_TEXT = {
     },
     "dbf2d_colorbar_label": {"zh": "相关系数(dB)", "en": "Correlation (dB)", "ja": "相関係数(dB)"},
     "dbf2d_colorbar_label_mag": {"zh": "相关系数模值", "en": "Correlation magnitude", "ja": "相関係数振幅"},
-    "dbf_display_label": {"zh": "DBF显示", "en": "DBF Display", "ja": "DBF表示"},
+    "dbf_display_label": {"zh": "DBF显示", "en": "DBF", "ja": "DBF表示"},
     "dbf_display_db": {"zh": "dB", "en": "dB", "ja": "dB"},
-    "dbf_display_magnitude": {"zh": "模值", "en": "Magnitude", "ja": "振幅"},
+    "dbf_display_magnitude": {"zh": "模值", "en": "Mag.", "ja": "振幅"},
     "dbf_display_changed": {
         "zh": "DBF显示已切换为{mode}。",
         "en": "DBF display switched to {mode}.",
@@ -632,6 +690,15 @@ UI_TEXT = {
     "metric_max_error": {"zh": "最大误差", "en": "Max Error", "ja": "最大誤差"},
     "metric_peak_margin": {"zh": "竞争峰裕量", "en": "Peak Margin", "ja": "競合ピーク余裕"},
     "metric_cut_reason": {"zh": "截断原因", "en": "Cut Reason", "ja": "打切り理由"},
+    "metric_value_no_competitor": {"zh": "无竞争峰", "en": "No competitor", "ja": "競合ピークなし"},
+    "metric_value_unavailable": {"zh": "不可用", "en": "Unavailable", "ja": "利用不可"},
+    "cut_reason_peak_blurred": {"zh": "峰模糊", "en": "Peak blurred", "ja": "ピーク曖昧"},
+    "cut_reason_data_boundary": {"zh": "边界", "en": "Data boundary", "ja": "データ境界"},
+    "cut_reason_boundary_limited": {"zh": "边界受限", "en": "Boundary limited", "ja": "境界制限"},
+    "cut_reason_error_jump": {"zh": "误差跳变", "en": "Error jump", "ja": "誤差ジャンプ"},
+    "cut_reason_unreliable": {"zh": "谱不可靠", "en": "Unreliable spectrum", "ja": "スペクトル不安定"},
+    "cut_reason_normal": {"zh": "正常", "en": "Normal", "ja": "正常"},
+    "cut_reason_pair": {"zh": "负:{negative} / 正:{positive}", "en": "Neg: {negative} / Pos: {positive}", "ja": "負:{negative} / 正:{positive}"},
     "undo_empty": {"zh": "没有可撤销的操作。", "en": "Nothing to undo.", "ja": "元に戻す操作はありません。"},
     "undo_done": {"zh": "已撤销阵列编辑。", "en": "Undid layout edit.", "ja": "アレイ編集を元に戻しました。"},
     "redo_empty": {"zh": "没有可重做的操作。", "en": "Nothing to redo.", "ja": "やり直す操作はありません。"},
@@ -818,86 +885,87 @@ ANGLE_EVAL_GROUPS = (
 # ── Theme ─────────────────────────────────────────────────────────────
 THEME = {
     # Base
-    "bg": "#eef3f8",
-    "card_bg": "#ffffff",
-    "metric_bg": "#f8fbff",
-    "panel_bg": "#f5f8fc",
-    "panel_alt_bg": "#edf3f8",
-    "card_border": "#d7e0ea",
-    "metric_border": "#cfdbe7",
-    "status_bar_bg": "#f7fafc",
-    "toolbar_group_bg": "#ffffff",
+    "bg": TOKENS.canvas,
+    "card_bg": TOKENS.surface,
+    "metric_bg": "#f7fbff",
+    "panel_bg": "#f3f8fd",
+    "panel_alt_bg": "#e7f0fb",
+    "card_border": "#d6e4f2",
+    "metric_border": "#d4e2f0",
+    "status_bar_bg": "#f7fbff",
+    "toolbar_group_bg": "#f9fcff",
     "input_bg": "#ffffff",
-    "disabled_bg": "#edf2f7",
-    "app_menu_bg": "#171a16",
-    "app_menu_hover": "#2b2f2c",
-    "app_menu_text": "#a5aaa3",
-    "app_menu_text_active": "#f3f4f1",
-    "header_bg": "#101722",
-    "header_panel_bg": "#172233",
-    "header_border": "#253449",
-    "chip_bg": "#1d2b3c",
-    "chip_border": "#2f4157",
+    "disabled_bg": "#ecf2f8",
+    "app_menu_bg": "#fbfdff",
+    "app_menu_hover": "#eaf3ff",
+    "app_menu_text": "#4f5f70",
+    "app_menu_text_active": "#0f6cbd",
+    "header_bg": "#f5faff",
+    "header_panel_bg": "#fbfdff",
+    "header_border": "#d7e5f3",
+    "chip_bg": "#f8fbff",
+    "chip_border": "#d6e4f2",
+    "app_logo_bg": "#0078d4",
     # Accent
-    "accent": "#0f172a",
-    "accent_hover": "#1f2937",
-    "accent_pressed": "#020617",
-    "accent_light": "#e0f2fe",
-    "secondary_accent": "#0f9f9a",
-    "secondary_light": "#d5fbf6",
-    "danger": "#e11d48",
-    "danger_hover": "#f43f5e",
-    "danger_pressed": "#be123c",
-    "danger_light": "#fff1f3",
-    "danger_border": "#fecdd8",
-    "warning": "#b7791f",
-    "warning_light": "#fffbeb",
-    "success": "#047857",
-    "success_light": "#ecfdf5",
+    "accent": "#0078d4",
+    "accent_hover": "#106ebe",
+    "accent_pressed": "#005a9e",
+    "accent_light": "#dff1ff",
+    "secondary_accent": "#3a96dd",
+    "secondary_light": "#e5f3ff",
+    "danger": "#c50f1f",
+    "danger_hover": "#d13438",
+    "danger_pressed": "#a4262c",
+    "danger_light": "#fde7e9",
+    "danger_border": "#f3b6bd",
+    "warning": "#8a5a00",
+    "warning_light": "#fff4ce",
+    "success": "#0f7b0f",
+    "success_light": "#dff6dd",
     # Text
-    "text_primary": "#111827",
-    "text_secondary": "#526070",
-    "text_muted": "#8793a2",
+    "text_primary": TOKENS.text,
+    "text_secondary": TOKENS.text_secondary,
+    "text_muted": TOKENS.text_secondary,
     "text_inverse": "#ffffff",
-    "text_inverse_muted": "#a9b6c7",
+    "text_inverse_muted": "#d7ecff",
     # Typography
-    "font_family": "Segoe UI",
-    "font_family_mono": "Cascadia Code",
+    "font_family": "Microsoft YaHei UI",
+    "font_family_mono": "Cascadia Mono",
     "font_size_sm": 9,
     "font_size_base": 10,
     "font_size_lg": 13,
     # Matplotlib
-    "plot_bg": "#fbfdff",
-    "grid_color": "#d7e1ec",
-    "grid_major_color": "#b7c6d6",
-    "grid_minor_color": "#edf2f8",
+    "plot_bg": "#f9fcff",
+    "grid_color": "#d5e3f1",
+    "grid_major_color": "#a9c8e8",
+    "grid_minor_color": "#edf5fd",
     "grid_alpha": 0.34,
     "axis_spine": "#c9d4e0",
     "tx_color": "#f05261",
     "tx_edge": "#9f1239",
-    "rx_color": "#2563eb",
-    "rx_edge": "#1d4ed8",
-    "selection": "#0891b2",
-    "selection_fill": "#cffafe",
-    "hover_fill": "#ecfeff",
-    "response_line": "#0ea5e9",
+    "rx_color": "#0f6cbd",
+    "rx_edge": "#0b5cab",
+    "selection": "#0078d4",
+    "selection_fill": "#dff1ff",
+    "hover_fill": "#eef7ff",
+    "response_line": "#0078d4",
     "response_secondary_line": "#64748b",
     "sidelobe": "#f59e0b",
     # MplButton
     "mpl_btn_bg": "#ffffff",
-    "mpl_btn_hover": "#eef4ff",
+    "mpl_btn_hover": "#eaf3ff",
     "mpl_btn_text": "#171717",
     "mpl_btn_border": "#d9dde3",
     # ttk buttons
     "button_bg": "#ffffff",
-    "button_hover": "#f0f7ff",
-    "button_pressed": "#e0f2fe",
-    "button_border": "#cbd7e3",
+    "button_hover": "#eaf3ff",
+    "button_pressed": "#dff1ff",
+    "button_border": TOKENS.control_border,
     "dialog_button_hover": "#f0f1ee",
     "dialog_button_pressed": "#e5e7e2",
-    "menu_hover": "#e0f2fe",
-    "focus": "#0891b2",
-    "focus_soft": "#a5f3fc",
+    "menu_hover": "#eaf3ff",
+    "focus": "#0078d4",
+    "focus_soft": "#8ecdf8",
 }
 
 
@@ -946,6 +1014,7 @@ class ResponseChart:
     true_angle: float | None = None
     buttons: list = None
     button_callbacks: list = None
+    empty_overlay: _EmptyStateOverlay | None = None  # type: ignore[name-defined]
 
     def __post_init__(self) -> None:
         if self.hover_db is None:
@@ -956,6 +1025,87 @@ class ResponseChart:
             self.buttons = []
         if self.button_callbacks is None:
             self.button_callbacks = []
+
+
+class _DebouncedResizeFilter(QtCore.QObject):
+    """Coalesce resize storms before asking the plots to relayout."""
+
+    def __init__(self, parent: QtCore.QObject, callback) -> None:
+        super().__init__(parent)
+        self._timer = QtCore.QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(100)
+        self._timer.timeout.connect(callback)
+
+    def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        if event.type() == QtCore.QEvent.Type.Resize:
+            self._timer.start()
+        return super().eventFilter(watched, event)
+
+
+class _EmptyStateOverlay(QtWidgets.QFrame):
+    """Neutral, accessible capability message layered over a plot canvas."""
+
+    def __init__(self, host: QtWidgets.QWidget) -> None:
+        super().__init__(host)
+        self._host = host
+        self.setObjectName("plotEmptyState")
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet(
+            "#plotEmptyState {"
+            f"background: {TOKENS.surface_subtle};"
+            f"border: 1px solid {TOKENS.border};"
+            f"border-radius: {TOKENS.card_radius}px;"
+            "}"
+            "#plotEmptyState QLabel {"
+            "background: transparent;"
+            "border: 0;"
+            "}"
+        )
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(34, 26, 34, 26)
+        layout.setSpacing(8)
+        layout.addStretch(1)
+        icon_label = QtWidgets.QLabel(self)
+        icon = self.style().standardIcon(
+            QtWidgets.QStyle.StandardPixmap.SP_MessageBoxInformation
+        )
+        icon_label.setPixmap(icon.pixmap(30, 30))
+        icon_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(icon_label)
+        self.title_label = QtWidgets.QLabel(self)
+        title_font = self.title_label.font()
+        title_font.setPointSize(12)
+        title_font.setBold(True)
+        self.title_label.setFont(title_font)
+        self.title_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.title_label.setWordWrap(True)
+        layout.addWidget(self.title_label)
+        self.body_label = QtWidgets.QLabel(self)
+        self.body_label.setStyleSheet(f"color: {TOKENS.text_secondary};")
+        self.body_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.body_label.setWordWrap(True)
+        layout.addWidget(self.body_label)
+        layout.addStretch(1)
+        self.setAccessibleName("Plot capability message")
+        self._host.installEventFilter(self)
+        self.setGeometry(self._host.rect())
+        self.hide()
+
+    def set_content(self, title: str, body: str) -> None:
+        self.title_label.setText(title)
+        self.body_label.setText(body)
+        self.setAccessibleDescription(f"{title}. {body}")
+
+    def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        if watched is self._host and event.type() == QtCore.QEvent.Type.Resize:
+            self.setGeometry(self._host.rect())
+        return super().eventFilter(watched, event)
+
+    def show_overlay(self, visible: bool) -> None:
+        self.setVisible(visible)
+        if visible:
+            self.raise_()
 
 
 def _response_cut_for_mode(
@@ -1112,17 +1262,24 @@ def _format_angle_range(metrics: DbfAngleMetrics | None) -> str:
     )
 
 
-def _format_peak_margin(value: float | None) -> str:
+def _format_peak_margin(
+    value: float | None,
+    language: str = LANGUAGE_ZH,
+) -> str:
     if value is None:
         return "N/A"
     if np.isposinf(value):
-        return "无竞争峰"
+        return _text_for_language("metric_value_no_competitor", language)
     if not np.isfinite(value):
         return "N/A"
     return f"{value:.1f} dB"
 
 
-def _format_axis_angle_metrics(metrics: DbfAngleMetrics | None, field: str) -> str:
+def _format_axis_angle_metrics(
+    metrics: DbfAngleMetrics | None,
+    field: str,
+    language: str = LANGUAGE_ZH,
+) -> str:
     if metrics is None:
         return "N/A"
     if field == "no_fold_error":
@@ -1137,8 +1294,8 @@ def _format_axis_angle_metrics(metrics: DbfAngleMetrics | None, field: str) -> s
                 or metrics.positive_cut_reason in {"边界受限", "谱不可靠"}
             )
         ):
-            return "不可用"
-        return _format_peak_margin(metrics.min_peak_margin_db)
+            return _text_for_language("metric_value_unavailable", language)
+        return _format_peak_margin(metrics.min_peak_margin_db, language)
     raise ValueError(f"Unknown DBF angle metric field: {field!r}")
 
 
@@ -1314,6 +1471,23 @@ def _style_toplevel(window: tk.Toplevel) -> None:
     window.configure(bg=THEME["bg"])
 
 
+def _set_window_icon(root: tk.Tk) -> None:
+    if sys.platform == "win32" and APP_LOGO_ICO_PATH.exists():
+        try:
+            root.iconbitmap(default=str(APP_LOGO_ICO_PATH))
+        except tk.TclError:
+            LOGGER.warning("Failed to apply Windows ICO icon: %s", APP_LOGO_ICO_PATH, exc_info=True)
+    if not APP_LOGO_PNG_PATH.exists():
+        LOGGER.warning("Application icon PNG is missing: %s", APP_LOGO_PNG_PATH)
+        return
+    try:
+        icon_image = tk.PhotoImage(file=str(APP_LOGO_PNG_PATH))
+        root.iconphoto(True, icon_image)
+        root._mav_app_icon_image = icon_image  # type: ignore[attr-defined]
+    except tk.TclError:
+        LOGGER.warning("Failed to apply Tk PNG icon: %s", APP_LOGO_PNG_PATH, exc_info=True)
+
+
 def _style_popup_menu(menu: tk.Menu) -> None:
     try:
         menu.configure(
@@ -1404,7 +1578,7 @@ def _configure_axis_chrome(ax) -> None:  # noqa: ANN001
     for spine in ax.spines.values():
         spine.set_color(THEME["axis_spine"])
         spine.set_linewidth(0.8)
-    ax.tick_params(colors=THEME["text_secondary"], labelsize=8, width=0.8)
+    ax.tick_params(colors=THEME["text_secondary"], labelsize=9, width=0.8)
 
 
 def _style_legend(legend) -> None:  # noqa: ANN001
@@ -1432,7 +1606,7 @@ def _new_response_hover_annotation(ax):  # noqa: ANN001
             "alpha": 1.0,
             "linewidth": 0.8,
         },
-        fontsize=8,
+        fontsize=9,
         color=THEME["text_primary"],
         annotation_clip=False,
         zorder=60,
@@ -1707,22 +1881,40 @@ def _ambiguity_level_label(value: str) -> str:
     return labels.get(value, value)
 
 
-def _angle_cut_reason_summary(metrics: DbfAngleMetrics | None) -> str:
+def _angle_cut_reason_summary(
+    metrics: DbfAngleMetrics | None,
+    language: str = LANGUAGE_ZH,
+) -> str:
     if metrics is None:
         return "N/A"
-    reason_labels = {
-        "竞争峰模糊": "峰模糊",
-        "到达数据边界": "边界",
-        "边界受限": "边界受限",
-        "误差跳变": "误差跳变",
-        "谱不可靠": "谱不可靠",
-        "正常": "正常",
+    reason_keys = {
+        "竞争峰模糊": "cut_reason_peak_blurred",
+        "到达数据边界": "cut_reason_data_boundary",
+        "边界受限": "cut_reason_boundary_limited",
+        "误差跳变": "cut_reason_error_jump",
+        "谱不可靠": "cut_reason_unreliable",
+        "正常": "cut_reason_normal",
     }
-    negative = reason_labels.get(metrics.negative_cut_reason, metrics.negative_cut_reason) or "N/A"
-    positive = reason_labels.get(metrics.positive_cut_reason, metrics.positive_cut_reason) or "N/A"
+    negative_key = reason_keys.get(metrics.negative_cut_reason)
+    positive_key = reason_keys.get(metrics.positive_cut_reason)
+    negative = (
+        _text_for_language(negative_key, language)
+        if negative_key is not None
+        else metrics.negative_cut_reason
+    ) or "N/A"
+    positive = (
+        _text_for_language(positive_key, language)
+        if positive_key is not None
+        else metrics.positive_cut_reason
+    ) or "N/A"
     if negative == positive:
         return negative
-    return f"负:{negative} / 正:{positive}"
+    return _text_for_language(
+        "cut_reason_pair",
+        language,
+        negative=negative,
+        positive=positive,
+    )
 
 
 def _legacy_note_key(note: str) -> str:
@@ -1818,27 +2010,19 @@ def _dbf_peak_index(
 #  Main GUI class
 # ═══════════════════════════════════════════════════════════════════════
 class VirtualArrayGui:
-    """MIMO antenna virtual-array visualizer.
-
-    Layout (Qt compatibility grid):
-      ┌─────────────┬──────────────┬────────────────┐
-      │  Physical   │  Virtual     │                │
-      │  Array      │  Array       │  Array         │
-      │  (Mpl Fig)  │  (Mpl Fig)   │  Evaluation    │
-      ├─────────────┼──────────────┤  (Qt widgets)  │
-      │  Azimuth    │  Elevation   │                │
-      │  Response   │  Response    │                │
-      │  (Mpl Fig)  │  (Mpl Fig)   │                │
-      ├─────────────┴──────────────┴────────────────┤
-      │              Controls (buttons)             │
-      └─────────────────────────────────────────────┘
-    """
+    """Controller for the native three-page PySide6 workspace."""
 
     def _t(self, key: str, **kwargs) -> str:
         return _text_for_language(key, getattr(self, "language", LANGUAGE_ZH), **kwargs)
 
-    def __init__(self, root: tk.Tk) -> None:
+    def __init__(self, window: QtWidgets.QMainWindow | tk.Tk) -> None:
+        if isinstance(window, tk.Tk):
+            root = window
+        else:
+            existing_root = getattr(window, "_tk_owner", None)
+            root = existing_root if isinstance(existing_root, tk.Tk) else tk.Tk(window)
         self.root = root
+        apply_native_theme(root._app)
         self.language = LANGUAGE_ZH
         self.language_var = tk.StringVar(value=LANGUAGE_LABELS[self.language])
         self.root.title(self._t("app_title", version=APP_VERSION))
@@ -1892,22 +2076,36 @@ class VirtualArrayGui:
         self.dbf2d_ax = None
         self.dbf2d_cbar_ax = None
         self.dbf2d_canvas: FigureCanvasTkAgg | None = None
+        self.dbf2d_empty_overlay: _EmptyStateOverlay | None = None
         self.dbf2d_hover_annotation = None
         self.dbf2d_hover_marker = None
         self.dbf2d_hover_azimuths = np.empty(0, dtype=float)
         self.dbf2d_hover_elevations = np.empty(0, dtype=float)
         self.dbf2d_hover_db = np.empty((0, 0), dtype=float)
-        self.workspace_pane: ttk.PanedWindow | None = None
-        self.eval_notebook: ttk.Notebook | None = None
+        self.current_metrics: ArrayMetrics | None = None
+        self.main_notebook: ttk.Notebook | None = None
+        self.main_tab_buttons: dict[int, ttk.Button] = {}
+        self.main_tab_label_keys = {
+            0: "main_tab_physical_virtual",
+            1: "main_tab_1d",
+            2: "main_tab_2d",
+        }
         self.config_menu_button: ttk.Menubutton | None = None
         self.language_menu_button: ttk.Menubutton | None = None
         self.edit_menu_button: ttk.Menubutton | None = None
         self.help_menu_button: ttk.Menubutton | None = None
+        self.app_logo_image: tk.PhotoImage | None = None
+        self.app_brand_label: ttk.Label | None = None
         self.config_menu: tk.Menu | None = None
         self.language_menu: tk.Menu | None = None
         self.edit_menu: tk.Menu | None = None
         self.help_menu: tk.Menu | None = None
-        self.eval_summary_tab: ttk.Frame | None = None
+        self.native_menu_bar: QtWidgets.QMenuBar | None = None
+        self.native_menus: dict[str, QtWidgets.QMenu] = {}
+        self.native_actions: dict[str, QtGui.QAction] = {}
+        self.native_language_actions: dict[str, QtGui.QAction] = {}
+        self.native_status_bar: QtWidgets.QStatusBar | None = None
+        self.workspace_splitter: QtWidgets.QSplitter | None = None
 
         self.element_pattern: ElementPattern | None = None
         self.channel_patterns = ChannelPatternSet()
@@ -1945,13 +2143,15 @@ class VirtualArrayGui:
         self.last_valid_margin_db = DBF_AMBIGUITY_MARGIN_DB
         self.margin_db = tk.StringVar(value=_format_margin_db(DBF_AMBIGUITY_MARGIN_DB))
         self.margin_entry: ttk.Entry | None = None
+        self._restored_active_tab = 0
+        self._restored_splitter_sizes: list[int] | None = None
         self._load_local_state()
         self._sync_auto_count_inputs()
 
         # ── Build the grid layout ─────────────────────────────────
         root.grid_rowconfigure(0, weight=0)  # Codex-style menu
         root.grid_rowconfigure(1, weight=0)  # Workspace header
-        root.grid_rowconfigure(2, weight=1, minsize=650)  # Draggable workspace
+        root.grid_rowconfigure(2, weight=1, minsize=400)
         root.grid_rowconfigure(3, weight=0)  # Controls
         root.grid_columnconfigure(0, weight=1, minsize=PLOT_COLUMN_MIN_WIDTH * 2)
         root.grid_columnconfigure(1, weight=0)
@@ -1982,7 +2182,7 @@ class VirtualArrayGui:
             "PlotPanel.TFrame",
             background=THEME["card_bg"],
             bordercolor=THEME["card_border"],
-            lightcolor=THEME["card_bg"],
+            lightcolor="#ffffff",
             darkcolor=THEME["card_border"],
             relief="solid",
             borderwidth=1,
@@ -1997,7 +2197,7 @@ class VirtualArrayGui:
             "HeaderChip.TFrame",
             background=THEME["chip_bg"],
             bordercolor=THEME["chip_border"],
-            lightcolor=THEME["chip_bg"],
+            lightcolor="#ffffff",
             darkcolor=THEME["chip_border"],
             relief="solid",
             borderwidth=1,
@@ -2005,9 +2205,7 @@ class VirtualArrayGui:
         style.configure(
             "ToolbarGroup.TFrame",
             background=THEME["toolbar_group_bg"],
-            bordercolor=THEME["card_border"],
-            lightcolor=THEME["toolbar_group_bg"],
-            darkcolor=THEME["card_border"],
+            borderwidth=0,
         )
         style.configure("ChartFooter.TFrame", background=THEME["panel_alt_bg"])
         style.configure("Status.TFrame", background=THEME["status_bar_bg"])
@@ -2034,32 +2232,56 @@ class VirtualArrayGui:
         style.configure(
             "HeaderTitle.TLabel",
             background=THEME["header_bg"],
-            foreground=THEME["text_inverse"],
-            font=(_f, 12, "bold"),
+            foreground=THEME["text_primary"],
+            font=(_f, 15, "bold"),
         )
         style.configure(
             "HeaderSubtitle.TLabel",
             background=THEME["header_bg"],
-            foreground=THEME["text_inverse_muted"],
+            foreground=THEME["text_secondary"],
             font=(_f, THEME["font_size_sm"]),
         )
         style.configure(
             "HeaderChipName.TLabel",
             background=THEME["chip_bg"],
-            foreground=THEME["text_inverse_muted"],
-            font=(_f, 8, "bold"),
+            foreground=THEME["text_secondary"],
+            font=(_f, THEME["font_size_sm"], "bold"),
         )
         style.configure(
             "HeaderChipValue.TLabel",
             background=THEME["chip_bg"],
-            foreground=THEME["text_inverse"],
+            foreground=THEME["accent"],
             font=(_fm, THEME["font_size_sm"], "bold"),
         )
         style.configure(
             "HeaderChipPatternValue.TLabel",
             background=THEME["chip_bg"],
-            foreground=THEME["text_inverse"],
-            font=(_f, 8, "bold"),
+            foreground=THEME["accent"],
+            font=(_f, THEME["font_size_sm"], "bold"),
+        )
+        style.configure(
+            "HeaderLogo.TLabel",
+            background=THEME["header_bg"],
+            padding=(0, 0),
+        )
+        style.configure(
+            "AppLogo.TLabel",
+            background=THEME["app_menu_bg"],
+            foreground=THEME["accent"],
+            font=(_f, 13, "bold"),
+            padding=(0, 0),
+        )
+        style.configure(
+            "AppBrand.TLabel",
+            background=THEME["app_menu_bg"],
+            foreground=THEME["text_primary"],
+            font=(_f, 13, "bold"),
+        )
+        style.configure(
+            "AppSeparator.TLabel",
+            background=THEME["app_menu_bg"],
+            foreground=THEME["card_border"],
+            font=(_f, THEME["font_size_lg"]),
         )
         style.configure(
             "Muted.TLabel",
@@ -2107,7 +2329,7 @@ class VirtualArrayGui:
             "Metric.TFrame",
             background=THEME["metric_bg"],
             bordercolor=THEME["metric_border"],
-            lightcolor=THEME["metric_bg"],
+            lightcolor="#ffffff",
             darkcolor=THEME["metric_border"],
             relief="solid",
             borderwidth=1,
@@ -2128,6 +2350,12 @@ class VirtualArrayGui:
             "MetricValue.TLabel",
             background=THEME["metric_bg"],
             foreground=THEME["text_primary"],
+            font=(_fm, THEME["font_size_sm"], "bold"),
+        )
+        style.configure(
+            "MetricValueMuted.TLabel",
+            background=THEME["metric_bg"],
+            foreground=THEME["text_muted"],
             font=(_fm, THEME["font_size_sm"], "bold"),
         )
         style.configure(
@@ -2387,6 +2615,32 @@ class VirtualArrayGui:
             darkcolor=[("pressed", THEME["button_pressed"]), ("active", THEME["button_hover"])],
         )
         style.configure(
+            "ToolbarPrimary.TButton",
+            **{**compact_button_base, "padding": (14, 5)},
+            font=(_f, THEME["font_size_sm"], "bold"),
+            background=THEME["accent"],
+            foreground=THEME["text_inverse"],
+            bordercolor=THEME["accent"],
+            lightcolor=THEME["accent"],
+            darkcolor=THEME["accent_pressed"],
+        )
+        style.map(
+            "ToolbarPrimary.TButton",
+            background=[
+                ("disabled", "#9ca3af"),
+                ("pressed", THEME["accent_pressed"]),
+                ("active", THEME["accent_hover"]),
+            ],
+            foreground=[("disabled", "#f8fafc"), ("active", THEME["text_inverse"])],
+            bordercolor=[
+                ("disabled", THEME["button_border"]),
+                ("focus", THEME["focus"]),
+                ("active", THEME["accent_hover"]),
+            ],
+            lightcolor=[("pressed", THEME["accent_pressed"]), ("active", THEME["accent_hover"])],
+            darkcolor=[("pressed", THEME["accent_pressed"]), ("active", THEME["accent_hover"])],
+        )
+        style.configure(
             "CompactDanger.TButton",
             **compact_button_base,
             font=(_f, THEME["font_size_sm"], "bold"),
@@ -2431,7 +2685,7 @@ class VirtualArrayGui:
         )
         style.configure(
             "TopMenu.TMenubutton",
-            padding=(14, 5),
+            padding=(14, 7),
             relief="flat",
             borderwidth=0,
             font=(_f, THEME["font_size_base"], "bold"),
@@ -2713,89 +2967,191 @@ class VirtualArrayGui:
         )
         style.configure(
             "Eval.TNotebook",
-            background=THEME["card_bg"],
+            background=THEME["panel_bg"],
             borderwidth=0,
-            tabmargins=(0, 0, 0, 0),
+            tabmargins=(4, 0, 4, 0),
+        )
+        style.configure(
+            "Workspace.TNotebook",
+            background=THEME["panel_bg"],
+            borderwidth=0,
+            tabmargins=(0, 0, 0, 6),
+        )
+        style.configure(
+            "Workspace.TNotebook.Tab",
+            background=THEME["panel_bg"],
+            foreground=THEME["text_secondary"],
+            font=(_f, THEME["font_size_base"], "bold"),
+            padding=(18, 8),
+            bordercolor=THEME["panel_bg"],
+            lightcolor=THEME["panel_bg"],
+            darkcolor=THEME["panel_bg"],
+        )
+        style.map(
+            "Workspace.TNotebook.Tab",
+            background=[
+                ("selected", THEME["accent_light"]),
+                ("active", THEME["button_hover"]),
+            ],
+            foreground=[
+                ("selected", THEME["accent_pressed"]),
+                ("active", THEME["text_primary"]),
+            ],
+            bordercolor=[
+                ("selected", THEME["focus_soft"]),
+                ("active", THEME["focus_soft"]),
+            ],
         )
         style.configure(
             "Eval.TNotebook.Tab",
-            background=THEME["panel_alt_bg"],
+            background=THEME["panel_bg"],
             foreground=THEME["text_secondary"],
             font=(_f, THEME["font_size_sm"], "bold"),
-            padding=(10, 6),
+            padding=(14, 8),
+            bordercolor=THEME["panel_bg"],
+            lightcolor=THEME["panel_bg"],
+            darkcolor=THEME["panel_bg"],
         )
         style.map(
             "Eval.TNotebook.Tab",
             background=[
-                ("selected", THEME["card_bg"]),
+                ("selected", THEME["accent_light"]),
                 ("active", THEME["button_hover"]),
             ],
             foreground=[
-                ("selected", THEME["text_primary"]),
+                ("selected", THEME["accent_pressed"]),
                 ("active", THEME["text_primary"]),
             ],
+            bordercolor=[
+                ("selected", THEME["focus_soft"]),
+                ("active", THEME["focus_soft"]),
+            ],
+        )
+        style.configure(
+            "WorkspaceTab.TButton",
+            padding=(18, 8),
+            relief="flat",
+            borderwidth=0,
+            font=(_f, THEME["font_size_base"], "bold"),
+            background=THEME["panel_bg"],
+            foreground=THEME["text_secondary"],
+            bordercolor=THEME["panel_bg"],
+            lightcolor=THEME["panel_bg"],
+            darkcolor=THEME["panel_bg"],
+        )
+        style.map(
+            "WorkspaceTab.TButton",
+            background=[
+                ("pressed", THEME["button_pressed"]),
+                ("active", THEME["button_hover"]),
+            ],
+            foreground=[("active", THEME["text_primary"])],
+        )
+        style.configure(
+            "WorkspaceTabSelected.TButton",
+            padding=(18, 8),
+            relief="flat",
+            borderwidth=0,
+            font=(_f, THEME["font_size_base"], "bold"),
+            background=THEME["accent_light"],
+            foreground=THEME["accent_pressed"],
+            bordercolor=THEME["accent_light"],
+            lightcolor=THEME["accent_light"],
+            darkcolor=THEME["accent_light"],
+        )
+        style.map(
+            "WorkspaceTabSelected.TButton",
+            background=[
+                ("pressed", THEME["accent_light"]),
+                ("active", THEME["accent_light"]),
+            ],
+            foreground=[("active", THEME["accent_pressed"])],
         )
 
         self._build_app_menu(root)
         self._build_workspace_header(root)
 
-        # ── Row 1: draggable plot workspace + evaluation panel ────
-        self.workspace_pane = ttk.PanedWindow(
-            root,
+        # ── Row 2: Main notebook with 3 sub-pages ──────────────────
+        # ── Row 2: notebook (left) + overview panel (right) 4:1 ──
+        main_panel = ttk.Frame(root, style="Panel.TFrame", padding=(16, 12, 16, 10))
+        main_panel.grid(row=2, column=0, columnspan=3, sticky="nsew")
+        main_panel.grid_columnconfigure(0, weight=1)
+        main_panel.grid_rowconfigure(0, weight=1)
+
+        workspace_pane = ttk.PanedWindow(
+            main_panel,
             orient=tk.HORIZONTAL,
             style="Workspace.TPanedwindow",
         )
-        self.workspace_pane.grid(row=2, column=0, columnspan=3, sticky="nsew")
+        workspace_pane.grid(row=0, column=0, sticky="nsew")
+        self.workspace_splitter = workspace_pane._qt
+        self.workspace_splitter.setChildrenCollapsible(False)
+        self.workspace_splitter.setHandleWidth(8)
 
-        plot_workspace = ttk.Frame(
-            self.workspace_pane,
+        workspace_content = ttk.Frame(workspace_pane, style="Panel.TFrame")
+        workspace_content.grid_rowconfigure(0, weight=1)
+        workspace_content.grid_columnconfigure(0, weight=1)
+
+        self.main_notebook = ttk.Notebook(workspace_content, style="Workspace.TNotebook")
+        self.main_notebook.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        self.main_notebook.bind("<<NotebookTabChanged>>", self._on_main_tab_changed, add="+")
+        self.main_notebook._qt.tabBar().setAccessibleName("Workspace pages")
+
+        overview_panel = ttk.Frame(
+            workspace_pane,
             style="Panel.TFrame",
-            padding=(10, 10, 5, 10),
-            width=WORKSPACE_DEFAULT_PANE_WIDTH,
-            height=650,
+            padding=(0, 2, 0, 2),
+            width=312,
         )
-        plot_workspace.grid_propagate(False)
-        plot_workspace.grid_rowconfigure(0, weight=1, minsize=280, uniform="plot_rows")
-        plot_workspace.grid_rowconfigure(1, weight=1, minsize=280, uniform="plot_rows")
-        plot_workspace.grid_columnconfigure(0, weight=1, uniform="plot")
-        plot_workspace.grid_columnconfigure(1, weight=1, uniform="plot")
+        overview_panel.grid_rowconfigure(0, weight=1)
+        overview_panel.grid_columnconfigure(0, weight=1)
+        overview_panel._qt.setMinimumWidth(280)
+        overview_panel._qt.setMaximumWidth(360)
+        workspace_content._qt.setMinimumWidth(720)
+        workspace_pane.add(workspace_content, weight=4)
+        workspace_pane.add(overview_panel, weight=1)
+        self._build_evaluation_panel(overview_panel)
+        self.root.after_idle(self._restore_workspace_splitter)
 
-        left_frame = ttk.Frame(
-            plot_workspace,
-            style="PlotPanel.TFrame",
-            padding=(10, 10, 10, 8),
-        )
-        left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=(0, 5))
-        left_frame.grid_rowconfigure(0, weight=0)
-        left_frame.grid_rowconfigure(1, weight=1)
-        left_frame.grid_columnconfigure(0, weight=1)
-        self._build_physical_toolbar(left_frame)
+        # ── Tab 1: Physical Array + Virtual Array (1:1) ──────────
+        tab1 = ttk.Frame(self.main_notebook, style="Panel.TFrame")
+        self.main_notebook.add(tab1, text=self._t("main_tab_physical_virtual"))
+        tab1.grid_columnconfigure(0, weight=1)
+        tab1.grid_columnconfigure(1, weight=1)
+        tab1.grid_rowconfigure(0, weight=1)
 
-        right_frame = ttk.Frame(
-            plot_workspace,
-            style="PlotPanel.TFrame",
-            padding=(10, 10, 10, 8),
-        )
-        right_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0), pady=(0, 5))
-        right_frame.grid_rowconfigure(0, weight=1)
-        right_frame.grid_columnconfigure(0, weight=1)
+        phys_frame = ttk.Frame(tab1, style="PlotPanel.TFrame", padding=(8, 6, 2, 6))
+        phys_frame.grid(row=0, column=0, sticky="nsew")
+        phys_frame.grid_rowconfigure(0, weight=0)
+        phys_frame.grid_rowconfigure(1, weight=1)
+        phys_frame.grid_columnconfigure(0, weight=1)
+        self._build_physical_toolbar(phys_frame)
 
-        eval_info_frame = ttk.Frame(
-            self.workspace_pane,
-            style="Panel.TFrame",
-            padding=(5, 10, 10, 10),
-            width=WORKSPACE_DEFAULT_PANE_WIDTH,
-            height=650,
+        virt_frame = ttk.Frame(tab1, style="PlotPanel.TFrame", padding=(2, 6, 8, 6))
+        virt_frame.grid(row=0, column=1, sticky="nsew")
+        virt_frame.grid_rowconfigure(0, weight=1)
+        virt_frame.grid_columnconfigure(0, weight=1)
+
+        # ── Tab 2: 1D DBF (Azimuth + Elevation) ──────────────────
+        tab2 = ttk.Frame(self.main_notebook, style="Panel.TFrame")
+        self.main_notebook.add(tab2, text=self._t("main_tab_1d"))
+        tab2.grid_columnconfigure(0, weight=1, uniform="dbf_col")
+        tab2.grid_columnconfigure(1, weight=1, uniform="dbf_col")
+        tab2.grid_rowconfigure(0, weight=1)
+
+        self.az_chart = self._build_response_chart(
+            tab2, row=0, col=0, padding=(8, 6, 2, 6), mode="azimuth"
         )
-        eval_info_frame.grid_propagate(False)
-        eval_info_frame.grid_rowconfigure(0, weight=1)
-        eval_info_frame.grid_columnconfigure(0, weight=1)
-        self.workspace_pane.add(plot_workspace, weight=1)
-        self.workspace_pane.add(eval_info_frame, weight=1)
-        self._build_evaluation_panel(eval_info_frame)
-        self.root.after_idle(self._set_default_workspace_sash)
-        self.root.after(100, self._set_default_workspace_sash)
-        self.root.after(300, self._stabilize_default_workspace_sash)
+        self.el_chart = self._build_response_chart(
+            tab2, row=0, col=1, padding=(2, 6, 8, 6), mode="elevation"
+        )
+
+        # ── Tab 3: 2D DBF ─────────────────────────────────────────
+        tab3 = ttk.Frame(self.main_notebook, style="Panel.TFrame")
+        self.main_notebook.add(tab3, text=self._t("main_tab_2d"))
+        dbf2d_frame = self._build_dbf2d_widget(tab3)
+        dbf2d_frame.pack(fill=tk.BOTH, expand=True)
+        self._select_main_tab(self._restored_active_tab)
 
         # Physical Array figure
         self.phys_fig = Figure(figsize=(PHYS_FIG_W, PHYS_FIG_H), dpi=FIG_DPI)
@@ -2803,7 +3159,7 @@ class VirtualArrayGui:
         self.physical_ax = self.phys_fig.add_subplot(111)
         self.physical_ax.set_facecolor(THEME["plot_bg"])
         self.phys_fig.subplots_adjust(top=0.87, left=0.10, right=0.97, bottom=0.17)
-        self.phys_canvas = FigureCanvasTkAgg(self.phys_fig, master=left_frame)
+        self.phys_canvas = FigureCanvasTkAgg(self.phys_fig, master=phys_frame)
         phys_widget = self.phys_canvas.get_tk_widget()
         _style_canvas_widget(phys_widget)
         phys_widget.grid(row=1, column=0, sticky="nsew")
@@ -2813,26 +3169,16 @@ class VirtualArrayGui:
         self.virt_fig.set_facecolor(THEME["card_bg"])
         self.virtual_ax = self.virt_fig.add_subplot(111)
         self.virtual_ax.set_facecolor(THEME["plot_bg"])
-        self.virt_canvas = FigureCanvasTkAgg(self.virt_fig, master=right_frame)
+        self.virt_canvas = FigureCanvasTkAgg(self.virt_fig, master=virt_frame)
         virt_widget = self.virt_canvas.get_tk_widget()
         _style_canvas_widget(virt_widget)
         virt_widget.grid(row=0, column=0, sticky="nsew")
 
-        # ── Bottom row: Azimuth Response + Elevation Response ─────
-        self.az_chart = self._build_response_chart(
-            plot_workspace, row=1, col=0, padding=(6, 3, 3, 6), mode="azimuth"
-        )
-        self.el_chart = self._build_response_chart(
-            plot_workspace, row=1, col=1, padding=(3, 3, 6, 6), mode="elevation"
-        )
-
         # ── Row 2: Controls ───────────────────────────────────────
         controls_outer = ttk.Frame(root, style="Status.TFrame")
         controls_outer.grid(row=3, column=0, columnspan=3, sticky="ew")
-        controls = ttk.Frame(controls_outer, style="Status.TFrame", padding=(12, 8, 12, 4))
+        controls = ttk.Frame(controls_outer, style="Status.TFrame", padding=(12, 8, 12, 8))
         controls.pack(fill=tk.X)
-        status_row = ttk.Frame(controls_outer, style="Status.TFrame", padding=(12, 0, 12, 8))
-        status_row.pack(fill=tk.X)
 
         controls.grid_rowconfigure(0, minsize=42)
         controls.grid_columnconfigure(4, weight=1)
@@ -2841,14 +3187,12 @@ class VirtualArrayGui:
             column: int,
             *,
             sticky: str = "nsew",
-            padx: tuple[int, int] = (0, 8),
+            padx: tuple[int, int] = (0, 4),
         ) -> ttk.Frame:
             group = ttk.Frame(
                 controls,
                 style="ToolbarGroup.TFrame",
                 padding=(TOOLBAR_GROUP_PAD_X, TOOLBAR_GROUP_PAD_Y),
-                borderwidth=1,
-                relief="solid",
             )
             group.grid(row=0, column=column, sticky=sticky, padx=padx, pady=(0, 4))
             return group
@@ -2916,9 +3260,18 @@ class VirtualArrayGui:
             auto_group,
             text=self._t("auto_apply"),
             command=self.apply_auto_array_layout,
-            style="Large.TButton",
+            style="ToolbarPrimary.TButton",
+            width=10,
         )
         self.auto_apply_button.pack(side=tk.LEFT)
+        mark_primary(self.auto_apply_button._qt)
+        self.auto_apply_button._qt.setIcon(
+            self.root._window.style().standardIcon(
+                QtWidgets.QStyle.StandardPixmap.SP_DialogApplyButton
+            )
+        )
+        self.auto_apply_button._qt.setFixedWidth(116)
+        self.auto_apply_button._qt.setAccessibleName(self._t("auto_apply"))
 
         display_group = toolbar_group(3)
         self.dbf_display_label = ttk.Label(
@@ -2941,12 +3294,6 @@ class VirtualArrayGui:
             command=self.on_dbf_display_mode_changed,
         )
         self.dbf_display_mag_radio.pack(side=tk.LEFT)
-
-        ttk.Label(
-            status_row,
-            textvariable=self.status,
-            style="Status.TLabel",
-        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # ── Event bindings ────────────────────────────────────────
         # Physical array: press, motion, release (drag + hover)
@@ -2995,44 +3342,183 @@ class VirtualArrayGui:
         _apply_interactive_cursors(self.root)
         self._refresh_language_texts()
         self.generate_virtual_array()
+        self._resize_filter = _DebouncedResizeFilter(
+            self.root._window,
+            self._sync_plot_layout_after_window_change,
+        )
+        self.root._window.installEventFilter(self._resize_filter)
 
     # ── Response chart helpers ──────────────────────────────────────────
 
+    def _load_logo_image(self, path: Path) -> tk.PhotoImage | None:
+        try:
+            return tk.PhotoImage(file=str(path))
+        except tk.TclError:
+            LOGGER.warning("Failed to load logo image: %s", path, exc_info=True)
+            return None
+
     def _build_app_menu(self, parent: tk.Widget) -> None:
-        menu_bar = ttk.Frame(parent, style="AppMenu.TFrame", padding=(6, 2, 8, 2))
-        menu_bar.grid(row=0, column=0, columnspan=3, sticky="ew")
-        menu_bar.grid_columnconfigure(5, weight=1)
+        window = getattr(parent, "_window", None)
+        if not isinstance(window, QtWidgets.QMainWindow):
+            raise TypeError("The Fluent workspace requires a native QMainWindow")
 
-        ttk.Label(
-            menu_bar,
-            text=">",
-            style="AppMenuArrow.TLabel",
-            anchor="center",
-            width=1,
-        ).grid(row=0, column=0, sticky="w", padx=(0, 6))
+        menu_bar = QtWidgets.QMenuBar(window)
+        menu_bar.setObjectName("fluentAppMenu")
+        menu_bar.setNativeMenuBar(False)
+        menu_bar.setMinimumHeight(40)
+        window.setMenuBar(menu_bar)
+        self.native_menu_bar = menu_bar
 
-        menu_specs = (
-            ("config_menu_button", "config_menu", "menu_file", 1),
-            ("edit_menu_button", "edit_menu", "menu_edit", 2),
-            ("language_menu_button", "language_menu", "menu_view", 3),
-            ("help_menu_button", "help_menu", "menu_help", 4),
-        )
-        for button_attr, menu_attr, label_key, column in menu_specs:
-            button = ttk.Menubutton(
-                menu_bar,
-                text=self._t(label_key),
-                style="TopMenu.TMenubutton",
-                width=5,
+        brand_widget = QtWidgets.QWidget(menu_bar)
+        brand_layout = QtWidgets.QHBoxLayout(brand_widget)
+        brand_layout.setContentsMargins(4, 0, 12, 0)
+        brand_layout.setSpacing(8)
+        logo = QtWidgets.QLabel(brand_widget)
+        pixmap = QtGui.QPixmap(str(APP_LOGO_UI_PATH))
+        if not pixmap.isNull():
+            logo.setPixmap(
+                pixmap.scaled(
+                    38,
+                    38,
+                    QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                    QtCore.Qt.TransformationMode.SmoothTransformation,
+                )
             )
-            button.grid(row=0, column=column, sticky="w", padx=(0, 6))
-            menu = _build_popup_menu(button)
-            button.configure(menu=menu)
-            setattr(self, button_attr, button)
-            setattr(self, menu_attr, menu)
+        else:
+            logo.setText("MAV")
+        logo.setFixedSize(40, 40)
+        logo.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        logo.setAccessibleName("MAV")
+        brand_layout.addWidget(logo)
+        brand_label = QtWidgets.QLabel(self._t("app_name"), brand_widget)
+        brand_font = brand_label.font()
+        brand_font.setPointSize(11)
+        brand_font.setBold(True)
+        brand_label.setFont(brand_font)
+        brand_layout.addWidget(brand_label)
+        brand_action = QtWidgets.QWidgetAction(menu_bar)
+        brand_action.setDefaultWidget(brand_widget)
+        menu_bar.addAction(brand_action)
+        menu_bar.addSeparator()
+        self._native_brand_label = brand_label
 
+        for key in ("menu_file", "menu_edit", "menu_view", "menu_help"):
+            self.native_menus[key] = menu_bar.addMenu(self._t(key))
+
+        style = window.style()
+
+        def add_action(
+            menu_key: str,
+            text_key: str,
+            callback,
+            *,
+            icon: QtWidgets.QStyle.StandardPixmap | None = None,
+            shortcut: QtGui.QKeySequence | QtGui.QKeySequence.StandardKey | None = None,
+        ) -> QtGui.QAction:
+            action = QtGui.QAction(self._t(text_key), window)
+            if icon is not None:
+                action.setIcon(style.standardIcon(icon))
+            if shortcut is not None:
+                action.setShortcut(shortcut)
+            action.triggered.connect(lambda _checked=False, cb=callback: cb())
+            self.native_menus[menu_key].addAction(action)
+            self.native_actions[text_key] = action
+            return action
+
+        add_action(
+            "menu_file",
+            "menu_import_layout",
+            self.import_layout_config,
+            icon=QtWidgets.QStyle.StandardPixmap.SP_DialogOpenButton,
+            shortcut=QtGui.QKeySequence.StandardKey.Open,
+        )
+        add_action(
+            "menu_file",
+            "menu_export_layout",
+            self.export_layout_config,
+            icon=QtWidgets.QStyle.StandardPixmap.SP_DialogSaveButton,
+            shortcut=QtGui.QKeySequence.StandardKey.Save,
+        )
+        add_action(
+            "menu_edit",
+            "menu_undo",
+            self.undo_layout_change,
+            icon=QtWidgets.QStyle.StandardPixmap.SP_ArrowBack,
+            shortcut=QtGui.QKeySequence.StandardKey.Undo,
+        )
+        add_action(
+            "menu_edit",
+            "menu_redo",
+            self.redo_layout_change,
+            icon=QtWidgets.QStyle.StandardPixmap.SP_ArrowForward,
+            shortcut=QtGui.QKeySequence.StandardKey.Redo,
+        )
+        self.native_menus["menu_edit"].addSeparator()
+        add_action(
+            "menu_edit",
+            "menu_channel_patterns",
+            self.open_channel_patterns_dialog,
+            icon=QtWidgets.QStyle.StandardPixmap.SP_FileDialogDetailedView,
+        )
+        add_action(
+            "menu_edit",
+            "menu_dbf_dictionary",
+            self.open_dbf_dictionary_dialog,
+            icon=QtWidgets.QStyle.StandardPixmap.SP_FileDialogContentsView,
+        )
+
+        language_group = QtGui.QActionGroup(window)
+        language_group.setExclusive(True)
+        for language, label_key in (
+            (LANGUAGE_ZH, "language_zh"),
+            (LANGUAGE_EN, "language_en"),
+            (LANGUAGE_JA, "language_ja"),
+        ):
+            action = QtGui.QAction(self._t(label_key), window)
+            action.setCheckable(True)
+            action.setChecked(language == self.language)
+            action.triggered.connect(
+                lambda _checked=False, lang=language: self.set_language(lang)
+            )
+            language_group.addAction(action)
+            self.native_menus["menu_view"].addAction(action)
+            self.native_language_actions[language] = action
+            self.native_actions[label_key] = action
+
+        add_action(
+            "menu_help",
+            "menu_user_manual",
+            self._show_user_manual_dialog,
+            icon=QtWidgets.QStyle.StandardPixmap.SP_MessageBoxQuestion,
+        )
+        self.native_menus["menu_help"].addSeparator()
+        add_action(
+            "menu_help",
+            "menu_about",
+            self._show_about_dialog,
+            icon=QtWidgets.QStyle.StandardPixmap.SP_MessageBoxInformation,
+        )
+
+        status_bar = QtWidgets.QStatusBar(window)
+        status_bar.setObjectName("fluentStatusBar")
+        status_bar.setSizeGripEnabled(True)
+        window.setStatusBar(status_bar)
+        self.native_status_bar = status_bar
+        self.status._connect(lambda value: status_bar.showMessage(str(value)))
         self._refresh_app_menus()
 
     def _refresh_app_menus(self) -> None:
+        if self.native_menu_bar is not None:
+            self._native_brand_label.setText(self._t("app_name"))
+            for key, menu in self.native_menus.items():
+                menu.setTitle(self._t(key))
+            for key, action in self.native_actions.items():
+                action.setText(self._t(key))
+            for language, action in self.native_language_actions.items():
+                action.setChecked(language == self.language)
+            return
+        if self.app_brand_label is not None:
+            self.app_brand_label.configure(text=self._t("app_name"))
         if self.config_menu_button is not None:
             self.config_menu_button.configure(text=self._t("menu_file"))
         if self.edit_menu_button is not None:
@@ -3103,58 +3589,42 @@ class VirtualArrayGui:
             _style_popup_menu(self.help_menu)
 
     def _show_user_manual_dialog(self) -> None:
-        dialog = tk.Toplevel(self.root)
-        _style_toplevel(dialog)
-        dialog.title(self._t("manual_title"))
-        dialog.geometry("760x620")
-        dialog.minsize(620, 480)
-        dialog.transient(self.root)
-
-        frame = ttk.Frame(dialog, style="Dialog.TFrame", padding=(14, 12))
-        frame.pack(fill=tk.BOTH, expand=True)
-        frame.grid_rowconfigure(1, weight=1)
-        frame.grid_columnconfigure(0, weight=1)
-
-        ttk.Label(
-            frame,
-            text=self._t("manual_title"),
-            style="CardHeader.TLabel",
-            background=THEME["bg"],
-        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
-
-        text = tk.Text(
-            frame,
-            wrap=tk.WORD,
-            height=24,
-            relief=tk.SOLID,
-            borderwidth=1,
-            bg=THEME["card_bg"],
-            fg=THEME["text_primary"],
-            insertbackground=THEME["text_primary"],
-            selectbackground=THEME["selection_fill"],
-            selectforeground=THEME["text_primary"],
-            font=(THEME["font_family"], THEME["font_size_base"]),
-            padx=12,
-            pady=10,
+        dialog = QtWidgets.QDialog(self.root._window)
+        dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.setWindowTitle(self._t("manual_title"))
+        dialog.resize(760, 620)
+        dialog.setMinimumSize(620, 480)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+        title = QtWidgets.QLabel(self._t("manual_title"), dialog)
+        title_font = title.font()
+        title_font.setPointSize(14)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        layout.addWidget(title)
+        browser = QtWidgets.QTextBrowser(dialog)
+        browser.setPlainText(self._t("manual_body"))
+        browser.setOpenExternalLinks(False)
+        browser.setAccessibleName(self._t("manual_title"))
+        layout.addWidget(browser, 1)
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Close,
+            parent=dialog,
         )
-        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=text.yview)
-        text.configure(yscrollcommand=scrollbar.set)
-        text.grid(row=1, column=0, sticky="nsew")
-        scrollbar.grid(row=1, column=1, sticky="ns")
-        text.insert("1.0", self._t("manual_body"))
-        text.configure(state=tk.DISABLED)
-
-        ttk.Button(
-            frame,
-            text=self._t("element_pattern_cancel_button"),
-            command=dialog.destroy,
-            style="Large.TButton",
-        ).grid(row=2, column=0, columnspan=2, sticky="e", pady=(10, 0))
-        _apply_interactive_cursors(dialog)
+        buttons.rejected.connect(dialog.close)
+        buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Close).setText(
+            self._t("done")
+        )
+        layout.addWidget(buttons)
+        self._manual_dialog = dialog
+        dialog.destroyed.connect(lambda: setattr(self, "_manual_dialog", None))
+        dialog.show()
 
     def _show_about_dialog(self) -> None:
         log_path = current_log_path()
-        messagebox.showinfo(
+        QtWidgets.QMessageBox.information(
+            self.root._window,
             self._t("about_title"),
             self._t(
                 "about_message",
@@ -3163,15 +3633,83 @@ class VirtualArrayGui:
             ),
         )
 
+    def _build_main_tab_strip(
+        self,
+        parent: ttk.Frame,
+        tabs: tuple[tuple[int, str], ...],
+    ) -> None:
+        self.main_tab_buttons.clear()
+        for column, (index, label_key) in enumerate(tabs):
+            button = ttk.Button(
+                parent,
+                text=self._t(label_key),
+                style="WorkspaceTabSelected.TButton" if index == 0 else "WorkspaceTab.TButton",
+                command=lambda tab_index=index: self._select_main_tab(tab_index),
+                width=18,
+            )
+            button.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 4, 0))
+            parent.grid_columnconfigure(column, weight=0)
+            self.main_tab_buttons[index] = button
+
+    def _select_main_tab(self, index: int) -> None:
+        if self.main_notebook is None:
+            return
+        try:
+            self.main_notebook.select(index)
+        except tk.TclError:
+            return
+        self._sync_main_tab_styles(index)
+
+    def _on_main_tab_changed(self, _event: tk.Event | None = None) -> None:
+        if self.main_notebook is None:
+            return
+        try:
+            selected = self.main_notebook.index(self.main_notebook.select())
+        except tk.TclError:
+            return
+        self._sync_main_tab_styles(selected)
+
+    def _sync_main_tab_styles(self, selected: int) -> None:
+        for index, button in self.main_tab_buttons.items():
+            button.configure(
+                style="WorkspaceTabSelected.TButton"
+                if index == selected
+                else "WorkspaceTab.TButton"
+            )
+
     def _build_workspace_header(self, parent: tk.Widget) -> None:
-        header = ttk.Frame(parent, style="Header.TFrame", padding=(10, 5, 10, 5))
+        header = ttk.Frame(parent, style="Header.TFrame", padding=(18, 12, 18, 10))
         header.grid(row=1, column=0, columnspan=3, sticky="ew")
         header.grid_columnconfigure(0, weight=0)
-        header.grid_columnconfigure(1, weight=1)
+        header.grid_columnconfigure(1, weight=0)
+        header.grid_columnconfigure(2, weight=1)
+
+        self.app_logo_image = self._load_logo_image(APP_LOGO_PNG_PATH)
+        logo_label = ttk.Label(
+            header,
+            image=self.app_logo_image,
+            style="HeaderLogo.TLabel",
+        )
+        logo_label.grid(row=0, column=0, sticky="w", padx=(0, 10))
+        logo_label._qt.setFixedSize(48, 48)
+        logo_label._qt.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        logo_label._qt.setAccessibleName("MAV")
+        if self.app_logo_image is not None and not self.app_logo_image.pixmap.isNull():
+            pixel_ratio = max(1.0, logo_label._qt.devicePixelRatioF())
+            physical_size = max(40, round(40 * pixel_ratio))
+            logo_pixmap = self.app_logo_image.pixmap.scaled(
+                physical_size,
+                physical_size,
+                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.SmoothTransformation,
+            )
+            logo_pixmap.setDevicePixelRatio(pixel_ratio)
+            logo_label._qt.setPixmap(logo_pixmap)
 
         title_group = ttk.Frame(header, style="Header.TFrame")
-        title_group.grid(row=0, column=0, sticky="w", padx=(0, 12))
+        title_group.grid(row=0, column=1, sticky="w", padx=(0, 18))
         title_group.grid_columnconfigure(0, weight=1)
+        title_group._qt.setMaximumWidth(300)
         self.header_title_label = ttk.Label(
             title_group,
             text=self._t("app_name"),
@@ -3179,24 +3717,34 @@ class VirtualArrayGui:
             anchor="w",
         )
         self.header_title_label.grid(row=0, column=0, sticky="ew")
+        self.header_subtitle_label = ttk.Label(
+            title_group,
+            text="",
+            style="HeaderSubtitle.TLabel",
+            anchor="w",
+        )
+        self.header_subtitle_label.grid(row=1, column=0, sticky="ew", pady=(2, 0))
+        self.header_subtitle_label._qt.setMinimumWidth(0)
+        self.header_subtitle_label._qt.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored,
+            QtWidgets.QSizePolicy.Policy.Preferred,
+        )
+        self._set_header_subtitle_text()
 
         chip_row = ttk.Frame(header, style="Header.TFrame")
-        chip_row.grid(row=0, column=1, sticky="w")
+        chip_row.grid(row=0, column=2, sticky="ew")
         chip_specs = (
-            ("chip_frequency", self.header_frequency_text, 8),
-            ("chip_dictionary", self.header_dictionary_text, 13),
-            ("chip_pattern", self.header_pattern_text, 18),
-            ("chip_virtual_channels", self.header_kpi_texts["chip_virtual_channels"], 11),
-            ("chip_az_resolution", self.header_kpi_texts["chip_az_resolution"], 8),
-            ("chip_el_resolution", self.header_kpi_texts["chip_el_resolution"], 8),
+            ("chip_frequency", self.header_frequency_text, 96),
+            ("chip_dictionary", self.header_dictionary_text, 150),
+            ("chip_pattern", self.header_pattern_text, 190),
         )
-        for column, (label_key, value_var, value_width) in enumerate(chip_specs):
+        for column, (label_key, value_var, min_width) in enumerate(chip_specs):
             self._build_header_chip(
                 chip_row,
                 column,
                 label_key,
                 value_var,
-                value_width=value_width,
+                min_width=min_width,
                 compact=True,
             )
 
@@ -3207,15 +3755,17 @@ class VirtualArrayGui:
         label_key: str,
         value_var: tk.StringVar,
         *,
-        value_width: int = 20,
+        min_width: int = 160,
         compact: bool = False,
     ) -> None:
+        parent.grid_columnconfigure(column, minsize=min_width)
         chip = ttk.Frame(
             parent,
             style="HeaderChip.TFrame",
             padding=(6, 3) if compact else (8, 5),
         )
-        chip.grid(row=0, column=column, sticky="w", padx=(0 if column == 0 else 6, 0))
+        chip.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 6, 0))
+        chip.grid_columnconfigure(0, weight=1)
         label = ttk.Label(
             chip,
             text=self._t(label_key),
@@ -3228,18 +3778,46 @@ class VirtualArrayGui:
             if label_key == "chip_pattern"
             else "HeaderChipValue.TLabel"
         )
-        ttk.Label(
+        value_label = ttk.Label(
             chip,
             textvariable=value_var,
             style=value_style,
             anchor="w",
-            width=value_width,
-        ).grid(row=1, column=0, sticky="ew", pady=(2, 0))
+        )
+        value_label.grid(row=1, column=0, sticky="ew", pady=(2, 0))
+        value_label._qt.setWordWrap(False)
+
+        def sync_tooltip(value: object) -> None:
+            full_text = str(value)
+            value_label._qt.setToolTip(full_text)
+            available = max(72, min_width - 18)
+            value_label._qt.setText(
+                value_label._qt.fontMetrics().elidedText(
+                    full_text,
+                    QtCore.Qt.TextElideMode.ElideRight,
+                    available,
+                )
+            )
+
+        value_var._connect(sync_tooltip)
         self.header_chip_labels[label_key] = label
+
+    def _restore_workspace_splitter(self) -> None:
+        splitter = self.workspace_splitter
+        if splitter is None:
+            return
+        sizes = self._restored_splitter_sizes
+        if sizes is not None and len(sizes) == 2 and all(size > 0 for size in sizes):
+            splitter.setSizes(sizes)
+            return
+        total = max(splitter.width(), WINDOW_WIDTH - 32)
+        splitter.setSizes([max(720, total - 312), 312])
 
     def _refresh_workspace_header(self) -> None:
         if self.header_title_label is not None:
             self.header_title_label.configure(text=self._t("app_name"))
+        if self.header_subtitle_label is not None:
+            self._set_header_subtitle_text()
         for key, label in self.header_chip_labels.items():
             label.configure(text=self._t(key))
 
@@ -3251,42 +3829,38 @@ class VirtualArrayGui:
         )
         self.header_pattern_text.set(self.pattern_status.get())
 
+    def _set_header_subtitle_text(self) -> None:
+        if self.header_subtitle_label is None:
+            return
+        full_text = self._t("app_subtitle")
+        label = self.header_subtitle_label._qt
+        label.setToolTip(full_text)
+        label.setText(
+            label.fontMetrics().elidedText(
+                full_text,
+                QtCore.Qt.TextElideMode.ElideRight,
+                296,
+            )
+        )
+
     def _set_default_workspace_sash(self) -> None:
-        if self.workspace_pane is None:
-            return
-        width = self.workspace_pane.winfo_width()
-        plot_width = _default_workspace_sash_position(width)
-        if plot_width is None:
-            return
-        try:
-            self.workspace_pane.sashpos(0, plot_width)
-        except tk.TclError:
-            return
+        return
 
     def _stabilize_default_workspace_sash(self) -> None:
-        if self.workspace_pane is None:
-            return
-        try:
-            self.root.update_idletasks()
-        except tk.TclError:
-            return
-        self._set_default_workspace_sash()
+        return
 
     def _bind_keyboard_shortcuts(self) -> None:
-        for sequence in ("<Control-z>", "<Control-Z>"):
-            self.root.bind(sequence, self.undo_layout_change)
-        for sequence in ("<Control-y>", "<Control-Y>", "<Control-Shift-Z>", "<Control-Shift-z>"):
-            self.root.bind(sequence, self.redo_layout_change)
-        self.root.bind("<Control-s>", self.on_save_shortcut)
-        self.root.bind("<Control-S>", self.on_save_shortcut)
-        self.root.bind("<Control-o>", self.on_import_shortcut)
-        self.root.bind("<Control-O>", self.on_import_shortcut)
         self.root.bind("<Control-g>", self.on_refresh_shortcut)
         self.root.bind("<Control-G>", self.on_refresh_shortcut)
         self.root.bind("<Control-r>", self.on_refresh_shortcut)
         self.root.bind("<Control-R>", self.on_refresh_shortcut)
         self.root.bind("<Control-f>", self.on_focus_frequency_shortcut)
         self.root.bind("<Control-F>", self.on_focus_frequency_shortcut)
+        for index in range(3):
+            self.root.bind(
+                f"<Control-{index + 1}>",
+                lambda _event=None, tab_index=index: self._select_main_tab(tab_index),
+            )
         self.root.bind("<Escape>", self.on_escape_key)
 
     def set_language(self, language: str) -> None:
@@ -3301,6 +3875,15 @@ class VirtualArrayGui:
     def _refresh_language_texts(self) -> None:
         self.root.title(self._t("app_title", version=APP_VERSION))
         self._refresh_app_menus()
+        for index, label_key in self.main_tab_label_keys.items():
+            button = self.main_tab_buttons.get(index)
+            if button is not None:
+                button.configure(text=self._t(label_key))
+        if self.main_notebook is not None:
+            for index, page in enumerate(self.main_notebook.tabs()):
+                label_key = self.main_tab_label_keys.get(index)
+                if label_key is not None:
+                    self.main_notebook.tab(page, text=self._t(label_key))
         if getattr(self, "freq_toolbar_label", None) is not None:
             self.freq_toolbar_label.configure(text=self._t("freq_label"))
         if getattr(self, "margin_toolbar_label", None) is not None:
@@ -3329,9 +3912,6 @@ class VirtualArrayGui:
         ):
                 button.label.set_text(self._t(key))
         if getattr(self, "eval_frame", None) is not None:
-            if self.eval_notebook is not None:
-                self.eval_notebook.tab(self.eval_summary_tab, text=self._t("eval_tab_overview"))
-                self.eval_notebook.tab(self.dbf2d_frame, text=self._t("eval_tab_dbf2d"))
             self.overview_frame.configure(text=self._t("overview_title"))
             self.angle_eval_frame.configure(text=self._t("angle_eval_title"))
             for key, label in self.primary_name_labels.items():
@@ -3358,8 +3938,7 @@ class VirtualArrayGui:
             row=row,
             column=col,
             sticky="nsew",
-            padx=(0, 5) if col == 0 else (5, 0),
-            pady=(5, 0),
+            pady=(2, 0),
         )
         frame.grid_rowconfigure(0, weight=1)
         frame.grid_rowconfigure(1, weight=0)
@@ -3410,7 +3989,16 @@ class VirtualArrayGui:
         )
         stop_button.grid(row=0, column=2, sticky="e")
         stop_button.configure(state=tk.DISABLED)
-        return ResponseChart(
+        native_style = self.root._window.style()
+        play_button._qt.setIcon(
+            native_style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MediaPlay)
+        )
+        stop_button._qt.setIcon(
+            native_style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MediaStop)
+        )
+        play_button._qt.setAccessibleName(self._t("dbf_play_compact"))
+        stop_button._qt.setAccessibleName(self._t("dbf_stop_compact"))
+        chart = ResponseChart(
             fig=fig,
             ax=ax,
             canvas=canvas,
@@ -3418,6 +4006,8 @@ class VirtualArrayGui:
             play_button=play_button,
             stop_button=stop_button,
         )
+        chart.empty_overlay = _EmptyStateOverlay(canvas)
+        return chart
 
     def _build_physical_toolbar(self, parent: ttk.Frame) -> None:
         toolbar = ttk.Frame(parent, style="Card.TFrame", padding=(0, 0, 0, 6))
@@ -3468,7 +4058,7 @@ class VirtualArrayGui:
                 color=THEME["mpl_btn_bg"],
                 hovercolor=THEME["mpl_btn_hover"],
             )
-            button.label.set_fontsize(8.5)
+            button.label.set_fontsize(9)
             button.label.set_color(THEME["mpl_btn_text"])
             button.label.set_fontweight("bold")
             button.label.set_horizontalalignment("center")
@@ -3484,35 +4074,34 @@ class VirtualArrayGui:
         parent: ttk.Frame,
         key: str,
         row: int,
-        column: int,
     ) -> None:
-        tile = ttk.Frame(parent, style="Metric.TFrame", padding=(7, 5))
+        tile = ttk.Frame(parent, style="Metric.TFrame", padding=(7, 3))
         tile.grid(
             row=row,
-            column=column,
+            column=0,
             sticky="nsew",
-            padx=(0 if column == 0 else 4, 0 if column == 1 else 4),
-            pady=(0, 6),
+            pady=(0, 2),
         )
         tile.grid_columnconfigure(0, weight=1)
+        tile.grid_columnconfigure(1, weight=0)
         name_label = ttk.Label(
             tile,
             text=self._t(key),
             style="MetricName.TLabel",
             anchor="w",
             justify=tk.LEFT,
-            wraplength=142,
+            wraplength=150,
         )
-        name_label.grid(row=0, column=0, sticky="ew")
+        name_label.grid(row=0, column=0, sticky="w", padx=(0, 2))
         value_label = ttk.Label(
             tile,
             text="",
             style="MetricValue.TLabel",
-            anchor="w",
-            justify=tk.LEFT,
-            wraplength=142,
+            anchor="e",
+            justify=tk.RIGHT,
+            wraplength=90,
         )
-        value_label.grid(row=1, column=0, sticky="ew", pady=(2, 0))
+        value_label.grid(row=0, column=1, sticky="e")
         self.primary_name_labels[key] = name_label
         self.primary_value_labels[key] = value_label
 
@@ -3521,16 +4110,16 @@ class VirtualArrayGui:
         parent: ttk.Frame,
         axis_key: str,
         metric_specs: tuple[tuple[str, str], ...],
-        column: int,
+        row: int,
     ) -> None:
-        group = ttk.Frame(parent, style="Metric.TFrame", padding=(7, 5))
+        group = ttk.Frame(parent, style="Metric.TFrame", padding=(7, 3))
         group.grid(
-            row=0,
-            column=column,
+            row=row,
+            column=0,
             sticky="nsew",
-            padx=(0 if column == 0 else 4, 0 if column == 1 else 4),
+            pady=(0, 2),
         )
-        group.grid_columnconfigure(0, weight=0, minsize=72)
+        group.grid_columnconfigure(0, weight=0, minsize=60)
         group.grid_columnconfigure(1, weight=1, minsize=150)
         title = ttk.Label(
             group,
@@ -3538,7 +4127,7 @@ class VirtualArrayGui:
             style="MetricSection.TLabel",
             anchor="w",
         )
-        title.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 3))
+        title.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 1))
         self.secondary_name_labels[f"{axis_key}_section"] = title
         self.secondary_name_label_keys[f"{axis_key}_section"] = axis_key
 
@@ -3551,7 +4140,7 @@ class VirtualArrayGui:
                 justify=tk.LEFT,
                 wraplength=0,
             )
-            name_label.grid(row=row, column=0, sticky="w", pady=(0, 1), padx=(0, 8))
+            name_label.grid(row=row, column=0, sticky="w", padx=(0, 2))
             value_label = ttk.Label(
                 group,
                 text="",
@@ -3560,39 +4149,19 @@ class VirtualArrayGui:
                 justify=tk.RIGHT,
                 wraplength=260,
             )
-            value_label.grid(row=row, column=1, sticky="ew", pady=(0, 1))
+            value_label.grid(row=row, column=1, sticky="e")
             self.secondary_name_labels[metric_key] = name_label
             self.secondary_name_label_keys[metric_key] = label_key
             self.secondary_value_labels[metric_key] = value_label
 
     def _build_evaluation_panel(self, parent: ttk.Frame) -> None:
         """Build the Array Evaluation card using Qt-compatible widgets."""
-        self.eval_frame = ttk.Frame(parent, style="Card.TFrame", padding=(8, 6))
+        self.eval_frame = ttk.Frame(parent, style="Card.TFrame", padding=(6, 2))
         self.eval_frame.grid(row=0, column=0, sticky="nsew")
-        self.eval_frame.grid_rowconfigure(0, weight=1)
+        self.eval_frame.grid_rowconfigure(0, weight=0)
+        self.eval_frame.grid_rowconfigure(1, weight=0)
+        self.eval_frame.grid_rowconfigure(2, weight=1)
         self.eval_frame.grid_columnconfigure(0, weight=1)
-
-        self.eval_notebook = ttk.Notebook(self.eval_frame, style="Eval.TNotebook")
-        self.eval_notebook.grid(row=0, column=0, sticky="nsew")
-
-        self.eval_summary_tab = ttk.Frame(
-            self.eval_notebook,
-            style="Card.TFrame",
-            padding=(7, 8),
-        )
-        self.eval_summary_tab.grid_columnconfigure(0, weight=1)
-        self.eval_notebook.add(self.eval_summary_tab, text=self._t("eval_tab_overview"))
-
-        # PRIMARY section
-        self.overview_frame = ttk.LabelFrame(
-            self.eval_summary_tab,
-            text=self._t("overview_title"),
-            padding=(7, 6),
-            style="TLabelframe",
-        )
-        self.overview_frame.grid(row=0, column=0, sticky="ew", pady=(0, 6))
-        for column in range(2):
-            self.overview_frame.grid_columnconfigure(column, weight=1, uniform="overview_metrics")
 
         self.primary_name_labels: dict[str, ttk.Label] = {}
         self.secondary_name_labels: dict[str, ttk.Label] = {}
@@ -3600,45 +4169,46 @@ class VirtualArrayGui:
         self.primary_value_labels: dict[str, ttk.Label] = {}
         self.secondary_value_labels: dict[str, ttk.Label] = {}
 
+        # PRIMARY section
+        self.overview_frame = ttk.LabelFrame(
+            self.eval_frame,
+            text=self._t("overview_title"),
+            padding=(6, 2),
+            style="TLabelframe",
+        )
+        self.overview_frame.grid(row=0, column=0, sticky="ew", pady=(0, 2))
+        self.overview_frame.grid_columnconfigure(0, weight=1)
+
         for i, key in enumerate(PRIMARY_EVAL_ROWS):
-            row = i // 2
-            column = i % 2
-            self._build_primary_metric_tile(self.overview_frame, key, row, column)
+            self._build_primary_metric_tile(self.overview_frame, key, i)
 
         # SECONDARY section
         self.angle_eval_frame = ttk.LabelFrame(
-            self.eval_summary_tab,
+            self.eval_frame,
             text=self._t("angle_eval_title"),
-            padding=(7, 6),
+            padding=(6, 2),
             style="TLabelframe",
         )
         self.angle_eval_frame.grid(row=1, column=0, sticky="ew")
-        for column in range(2):
-            self.angle_eval_frame.grid_columnconfigure(column, weight=1, uniform="angle_metrics")
+        self.angle_eval_frame.grid_columnconfigure(0, weight=1)
 
-        for column, (axis_key, metric_specs) in enumerate(ANGLE_EVAL_GROUPS):
+        for i, (axis_key, metric_specs) in enumerate(ANGLE_EVAL_GROUPS):
             self._build_angle_metric_group(
                 self.angle_eval_frame,
                 axis_key,
                 metric_specs,
-                column,
+                i,
             )
 
-        self._build_dbf2d_panel()
-        if self.eval_notebook is not None and self.dbf2d_frame is not None:
-            self.eval_notebook.select(self.dbf2d_frame)
-
-    def _build_dbf2d_panel(self) -> None:
-        if self.eval_notebook is None:
-            return
-        self.dbf2d_frame = ttk.Frame(
-            self.eval_notebook,
-            style="Card.TFrame",
-            padding=(8, 8),
+    def _build_dbf2d_widget(self, parent: tk.Widget) -> ttk.Frame:
+        dbf2d_frame = ttk.Frame(
+            parent,
+            style="PlotPanel.TFrame",
+            padding=(2, 6, 8, 6),
         )
-        self.eval_notebook.add(self.dbf2d_frame, text=self._t("eval_tab_dbf2d"))
-        self.dbf2d_frame.grid_columnconfigure(0, weight=1)
-        self.dbf2d_frame.grid_rowconfigure(0, weight=1)
+        dbf2d_frame.grid_columnconfigure(0, weight=1)
+        dbf2d_frame.grid_rowconfigure(0, weight=1)
+        self.dbf2d_frame = dbf2d_frame
 
         self.dbf2d_fig = Figure(figsize=(DBF2D_FIG_SIZE, DBF2D_FIG_SIZE), dpi=FIG_DPI)
         self.dbf2d_fig.set_facecolor(THEME["card_bg"])
@@ -3648,13 +4218,13 @@ class VirtualArrayGui:
         self.dbf2d_canvas = FigureCanvasTkAgg(self.dbf2d_fig, master=self.dbf2d_frame)
         dbf2d_widget = self.dbf2d_canvas.get_tk_widget()
         _style_canvas_widget(dbf2d_widget)
-        dbf2d_widget.configure(width=DBF2D_CANVAS_SIZE, height=DBF2D_CANVAS_SIZE)
         dbf2d_widget.grid(row=0, column=0, sticky="nsew")
+        self.dbf2d_empty_overlay = _EmptyStateOverlay(dbf2d_widget)
 
         button_row = ttk.Frame(self.dbf2d_frame, style="Card.TFrame")
         button_row.grid(row=1, column=0, sticky="ew", pady=(5, 0))
-        for column in range(3):
-            button_row.grid_columnconfigure(column, weight=1, uniform="dbf2d_buttons")
+        for col in range(3):
+            button_row.grid_columnconfigure(col, weight=1, uniform="dbf2d_buttons")
         self.dbf2d_az_button = ttk.Button(
             button_row,
             text=self._t("dbf2d_play_az"),
@@ -3680,6 +4250,14 @@ class VirtualArrayGui:
         )
         self.dbf2d_stop_button.grid(row=0, column=2, sticky="ew", padx=(4, 0))
         self.dbf2d_stop_button.configure(state=tk.DISABLED)
+        native_style = self.root._window.style()
+        for button in (self.dbf2d_az_button, self.dbf2d_el_button):
+            button._qt.setIcon(
+                native_style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MediaPlay)
+            )
+        self.dbf2d_stop_button._qt.setIcon(
+            native_style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MediaStop)
+        )
 
         self.dbf2d_status_label = ttk.Label(
             self.dbf2d_frame,
@@ -3690,15 +4268,38 @@ class VirtualArrayGui:
         )
         self.dbf2d_status_label.grid(row=2, column=0, sticky="ew", pady=(4, 0))
 
+        return dbf2d_frame
+
+    def _build_dbf2d_panel(self, parent=None) -> None:  # noqa: ANN001
+        if parent is None:
+            parent = getattr(self, "eval_notebook", None)
+        if parent is None:
+            return
+        is_notebook = isinstance(parent, ttk.Notebook)
+        is_pane = isinstance(parent, ttk.PanedWindow)
+        dbf2d_frame = self._build_dbf2d_widget(parent)
+        dbf2d_frame.configure(
+            style="Card.TFrame" if is_notebook else "PlotPanel.TFrame",
+            padding=(2, 6, 8, 6),
+        )
+        if is_notebook:
+            parent.add(dbf2d_frame, text=self._t("eval_tab_dbf2d"))
+        elif is_pane:
+            parent.add(dbf2d_frame, weight=1)
+
     def _metric_value_style(self, key: str, value: str) -> str:
-        if value in {"不可用"}:
-            return "MetricValueRisk.TLabel"
+        unavailable_values = {
+            self._t("metric_value_unavailable"),
+            "N/A",
+        }
+        if value in unavailable_values:
+            return "MetricValueMuted.TLabel"
         if value == "N/A":
-            return "MetricValue.TLabel"
+            return "MetricValueMuted.TLabel"
         if key == "row_virtual_channels":
             return "MetricValueGood.TLabel" if "(100%)" in value else "MetricValueWarn.TLabel"
         if key.endswith("_margin"):
-            if value == "无竞争峰":
+            if value == self._t("metric_value_no_competitor"):
                 return "MetricValueGood.TLabel"
             match = re.match(r"^\s*(-?\d+(?:\.\d+)?)", value)
             if match is not None:
@@ -3709,9 +4310,19 @@ class VirtualArrayGui:
                     else "MetricValueWarn.TLabel"
                 )
         if key.endswith("_cut"):
-            if value in {"正常", "到达数据边界"}:
+            if value in {
+                self._t("cut_reason_normal"),
+                self._t("cut_reason_data_boundary"),
+            }:
                 return "MetricValueGood.TLabel"
-            if "谱不可靠" in value or "竞争峰模糊" in value or "不可用" in value:
+            if any(
+                marker in value
+                for marker in (
+                    self._t("cut_reason_unreliable"),
+                    self._t("cut_reason_peak_blurred"),
+                    self._t("metric_value_unavailable"),
+                )
+            ):
                 return "MetricValueRisk.TLabel"
             return "MetricValueWarn.TLabel"
         return "MetricValue.TLabel"
@@ -3743,13 +4354,29 @@ class VirtualArrayGui:
         # SECONDARY values
         sec_values = {
             "row_az_no_fold": _format_angle_range(az_dbf_metrics),
-            "row_az_no_fold_error": _format_axis_angle_metrics(az_dbf_metrics, "no_fold_error"),
-            "row_az_margin": _format_axis_angle_metrics(az_dbf_metrics, "margin"),
-            "row_az_cut": _angle_cut_reason_summary(az_dbf_metrics),
+            "row_az_no_fold_error": _format_axis_angle_metrics(
+                az_dbf_metrics,
+                "no_fold_error",
+                self.language,
+            ),
+            "row_az_margin": _format_axis_angle_metrics(
+                az_dbf_metrics,
+                "margin",
+                self.language,
+            ),
+            "row_az_cut": _angle_cut_reason_summary(az_dbf_metrics, self.language),
             "row_el_no_fold": _format_angle_range(el_dbf_metrics),
-            "row_el_no_fold_error": _format_axis_angle_metrics(el_dbf_metrics, "no_fold_error"),
-            "row_el_margin": _format_axis_angle_metrics(el_dbf_metrics, "margin"),
-            "row_el_cut": _angle_cut_reason_summary(el_dbf_metrics),
+            "row_el_no_fold_error": _format_axis_angle_metrics(
+                el_dbf_metrics,
+                "no_fold_error",
+                self.language,
+            ),
+            "row_el_margin": _format_axis_angle_metrics(
+                el_dbf_metrics,
+                "margin",
+                self.language,
+            ),
+            "row_el_cut": _angle_cut_reason_summary(el_dbf_metrics, self.language),
         }
         for key, val in sec_values.items():
             if key in self.secondary_value_labels:
@@ -4700,7 +5327,7 @@ class VirtualArrayGui:
                 "linewidth": 0.7,
             },
         )
-        _style_legend(ax.legend(loc="lower right", fontsize=7, framealpha=0.92))
+        _style_legend(ax.legend(loc="lower right", fontsize=9, framealpha=0.92))
 
         chart.hover_db = spectrum_db
         chart.hover_angles = scan_angles
@@ -4954,6 +5581,19 @@ class VirtualArrayGui:
     def _draw_dbf2d_heatmap(self) -> None:
         if self.dbf2d_ax is None or self.dbf2d_canvas is None:
             return
+        metrics = self.current_metrics
+        if metrics is not None and (
+            metrics.azimuth_resolution is None
+            or metrics.elevation_resolution is None
+        ):
+            self.dbf2d_hover_azimuths = np.empty(0, dtype=float)
+            self.dbf2d_hover_elevations = np.empty(0, dtype=float)
+            self.dbf2d_hover_db = np.empty((0, 0), dtype=float)
+            self.dbf2d_ax.clear()
+            if self.dbf2d_cbar_ax is not None:
+                self.dbf2d_cbar_ax.clear()
+            self.dbf2d_canvas.draw_idle()
+            return
         azimuth, elevation = self._current_dbf2d_angles()
         scan_azimuths, scan_elevations, spectrum_db = dbf_2d_spectrum(
             self.current_array(),
@@ -5008,10 +5648,10 @@ class VirtualArrayGui:
             colorbar.set_label(
                 self._dbf_display_colorbar_label(),
                 color=THEME["text_secondary"],
-                fontsize=7.5,
+                fontsize=9,
             )
             colorbar.ax.tick_params(
-                labelsize=7,
+                labelsize=9,
                 colors=THEME["text_secondary"],
                 length=2.5,
                 width=0.6,
@@ -5050,7 +5690,7 @@ class VirtualArrayGui:
             transform=ax.transAxes,
             ha="right",
             va="bottom",
-            fontsize=7.5,
+            fontsize=9,
             color=THEME["text_secondary"],
             bbox={
                 "boxstyle": "round,pad=0.18",
@@ -5068,7 +5708,7 @@ class VirtualArrayGui:
             ha="left",
             va="center",
             rotation=90,
-            fontsize=7.5,
+            fontsize=9,
             color=THEME["text_secondary"],
             bbox={
                 "boxstyle": "round,pad=0.18",
@@ -5091,14 +5731,14 @@ class VirtualArrayGui:
             transform=ax.transAxes,
             ha="left",
             va="top",
-            fontsize=7.5,
-            color=THEME["text_inverse"],
+            fontsize=9,
+            color=THEME["text_primary"],
             bbox={
                 "boxstyle": "round,pad=0.25",
-                "facecolor": "#111827",
-                "edgecolor": "#111827",
-                "alpha": 0.74,
-                "linewidth": 0.0,
+                "facecolor": THEME["panel_alt_bg"],
+                "edgecolor": THEME["card_border"],
+                "alpha": 0.96,
+                "linewidth": 0.8,
             },
         )
         ax.text(
@@ -5112,14 +5752,14 @@ class VirtualArrayGui:
             transform=ax.transAxes,
             ha="right",
             va="top",
-            fontsize=7.5,
-            color=THEME["text_inverse"],
+            fontsize=9,
+            color=THEME["accent_pressed"],
             bbox={
                 "boxstyle": "round,pad=0.25",
-                "facecolor": THEME["secondary_accent"],
-                "edgecolor": THEME["secondary_accent"],
-                "alpha": 0.82,
-                "linewidth": 0.0,
+                "facecolor": THEME["accent_light"],
+                "edgecolor": THEME["focus_soft"],
+                "alpha": 0.96,
+                "linewidth": 0.8,
             },
         )
         self.dbf2d_hover_annotation = _new_response_hover_annotation(ax)
@@ -5147,7 +5787,7 @@ class VirtualArrayGui:
 
         root_frame = ttk.Frame(dialog, style="Dialog.TFrame", padding=12)
         root_frame.pack(fill=tk.BOTH, expand=True)
-        root_frame.grid_columnconfigure(0, weight=0, minsize=380)
+        root_frame.grid_columnconfigure(0, weight=0, minsize=330)
         root_frame.grid_columnconfigure(1, weight=1)
         root_frame.grid_rowconfigure(0, weight=1)
 
@@ -5243,7 +5883,12 @@ class VirtualArrayGui:
 
         ttk.Separator(mode_frame).grid(row=mode_row, column=0, columnspan=2, sticky="ew", pady=8)
         mode_row += 1
-        ttk.Label(mode_frame, textvariable=az_file_var, style="Muted.TLabel").grid(
+        az_file_label = ttk.Label(
+            mode_frame,
+            textvariable=az_file_var,
+            style="Muted.TLabel",
+        )
+        az_file_label.grid(
             row=mode_row, column=0, columnspan=2, sticky="ew", pady=(0, 3)
         )
         mode_row += 1
@@ -5260,7 +5905,12 @@ class VirtualArrayGui:
             style="DialogButton.TButton",
         ).grid(row=mode_row, column=1, sticky="ew", padx=(6, 0), pady=(0, 4))
         mode_row += 1
-        ttk.Label(mode_frame, textvariable=el_file_var, style="Muted.TLabel").grid(
+        el_file_label = ttk.Label(
+            mode_frame,
+            textvariable=el_file_var,
+            style="Muted.TLabel",
+        )
+        el_file_label.grid(
             row=mode_row, column=0, columnspan=2, sticky="ew", pady=(3, 3)
         )
         mode_row += 1
@@ -5342,6 +5992,8 @@ class VirtualArrayGui:
             wraplength=680,
         )
         quality_status.grid(row=2, column=0, sticky="ew", pady=(4, 0))
+        quality_status._qt.setWordWrap(True)
+        quality_status._qt.setMinimumHeight(54)
 
         button_row = ttk.Frame(root_frame, style="Dialog.TFrame")
         button_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
@@ -5360,20 +6012,29 @@ class VirtualArrayGui:
 
             az_file = table_label(custom_holder["azimuth"])
             el_file = table_label(custom_holder["elevation"])
-            az_file_var.set(
-                self._t(
-                    "dbf_dict_file_status",
-                    axis=_dbf_short_label("azimuth", self.language),
-                    file=az_file,
-                )
+            az_text = self._t(
+                "dbf_dict_file_status",
+                axis=_dbf_short_label("azimuth", self.language),
+                file=az_file,
             )
-            el_file_var.set(
-                self._t(
-                    "dbf_dict_file_status",
-                    axis=_dbf_short_label("elevation", self.language),
-                    file=el_file,
-                )
+            el_text = self._t(
+                "dbf_dict_file_status",
+                axis=_dbf_short_label("elevation", self.language),
+                file=el_file,
             )
+            for variable, label, full_text in (
+                (az_file_var, az_file_label, az_text),
+                (el_file_var, el_file_label, el_text),
+            ):
+                variable.set(full_text)
+                label._qt.setToolTip(full_text)
+                label._qt.setText(
+                    label._qt.fontMetrics().elidedText(
+                        full_text,
+                        QtCore.Qt.TextElideMode.ElideMiddle,
+                        285,
+                    )
+                )
 
         def current_config(require_complete: bool = False) -> DbfDictionaryConfig:
             mode = mode_var.get()
@@ -5402,17 +6063,42 @@ class VirtualArrayGui:
                 text=self._t("dbf_dict_quality_unavailable"),
                 foreground=THEME["text_secondary"],
             )
+            quality_status._qt.setStyleSheet(
+                f"background:{TOKENS.surface_subtle}; color:{TOKENS.text_secondary};"
+                f"border:1px solid {TOKENS.border}; border-radius:6px; padding:8px;"
+            )
 
         def update_quality_status(report: DbfDictionaryQualityReport) -> None:
-            if report.severity == DBF_DICTIONARY_QUALITY_DANGER:
+            capability_limited = (
+                report.channel_count <= 1
+                or mode_var.get()
+                in {
+                    DBF_DICT_IDEAL,
+                    DBF_DICT_IDEAL_REVERSED,
+                    DBF_DICT_CHANNEL_PATTERN,
+                }
+            )
+            if (
+                report.severity == DBF_DICTIONARY_QUALITY_DANGER
+                and not capability_limited
+            ):
                 text_key = "dbf_dict_quality_danger"
                 color = THEME["danger"]
-            elif report.severity == DBF_DICTIONARY_QUALITY_WARNING:
+                fill = TOKENS.danger_fill
+                border = "#d99aa2"
+            elif report.severity in {
+                DBF_DICTIONARY_QUALITY_WARNING,
+                DBF_DICTIONARY_QUALITY_DANGER,
+            }:
                 text_key = "dbf_dict_quality_warning"
                 color = THEME["warning"]
+                fill = TOKENS.warning_fill
+                border = "#c9a94f"
             else:
                 text_key = "dbf_dict_quality_ok"
                 color = THEME["success"]
+                fill = "#edf8ed"
+                border = "#82b882"
             quality_status.configure(
                 text=self._t(
                     text_key,
@@ -5424,6 +6110,10 @@ class VirtualArrayGui:
                     zeros=report.zero_norm_rows,
                 ),
                 foreground=color,
+            )
+            quality_status._qt.setStyleSheet(
+                f"background:{fill}; color:{color}; border:1px solid {border};"
+                "border-radius:6px; padding:8px;"
             )
 
         def redraw_preview() -> None:
@@ -5448,6 +6138,19 @@ class VirtualArrayGui:
                 for column in columns[1:]:
                     matrix_tree.heading(column, text=column)
                     matrix_tree.column(column, width=72, anchor="e", stretch=False)
+                header = matrix_tree._qt.horizontalHeader()
+                header.setSectionResizeMode(
+                    0, QtWidgets.QHeaderView.ResizeMode.ResizeToContents
+                )
+                for section in range(1, len(columns)):
+                    header.setSectionResizeMode(
+                        section,
+                        (
+                            QtWidgets.QHeaderView.ResizeMode.Stretch
+                            if len(columns) <= 5
+                            else QtWidgets.QHeaderView.ResizeMode.Interactive
+                        ),
+                    )
                 for angle, row_values in zip(angles, phase):
                     matrix_tree.insert(
                         "",
@@ -5541,18 +6244,35 @@ class VirtualArrayGui:
             )
             dialog.destroy()
 
-        ttk.Button(
-            button_row,
-            text=self._t("dbf_dict_apply"),
-            command=apply_dictionary,
-            style="DialogButton.TButton",
-        ).grid(row=0, column=1, sticky="e", padx=(8, 0))
-        ttk.Button(
-            button_row,
-            text=self._t("done"),
-            command=dialog.destroy,
-            style="DialogButton.TButton",
-        ).grid(row=0, column=2, sticky="e", padx=(8, 0))
+        button_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Apply
+            | QtWidgets.QDialogButtonBox.StandardButton.Close,
+            parent=button_row._qt,
+        )
+        button_row._qt.layout().addWidget(
+            button_box,
+            0,
+            1,
+            1,
+            2,
+            QtCore.Qt.AlignmentFlag.AlignRight,
+        )
+        apply_button = button_box.button(
+            QtWidgets.QDialogButtonBox.StandardButton.Apply
+        )
+        close_button = button_box.button(
+            QtWidgets.QDialogButtonBox.StandardButton.Close
+        )
+        apply_button.setText(self._t("dbf_dict_apply"))
+        close_button.setText(self._t("done"))
+        apply_button.clicked.connect(apply_dictionary)
+        close_button.clicked.connect(dialog.destroy)
+        mark_primary(apply_button)
+        apply_button.setIcon(
+            self.root._window.style().standardIcon(
+                QtWidgets.QStyle.StandardPixmap.SP_DialogApplyButton
+            )
+        )
 
         refresh_file_labels()
         redraw_preview()
@@ -5563,8 +6283,8 @@ class VirtualArrayGui:
         _style_toplevel(dialog)
         dialog.title(self._t("channel_dialog_title"))
         dialog.transient(self.root)
-        dialog.geometry("1120x680")
-        dialog.minsize(1020, 600)
+        dialog.geometry("1120x600")
+        dialog.minsize(1020, 540)
 
         root_frame = ttk.Frame(dialog, style="Dialog.TFrame", padding=12)
         root_frame.pack(fill=tk.BOTH, expand=True)
@@ -5638,7 +6358,7 @@ class VirtualArrayGui:
         table_frame.grid_columnconfigure(0, weight=1)
 
         columns = ("channel", "amp_h", "amp_e", "phase_h", "phase_e")
-        tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=12)
+        tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=8)
         tree.tag_configure("odd", background=THEME["panel_alt_bg"])
         tree.tag_configure("even", background=THEME["card_bg"])
         headings = {
@@ -5658,6 +6378,10 @@ class VirtualArrayGui:
         for column in columns:
             tree.heading(column, text=headings[column], anchor="center")
             tree.column(column, width=widths[column], minwidth=70, anchor="center")
+        header = tree._qt.horizontalHeader()
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+        for section in range(1, len(columns)):
+            header.setSectionResizeMode(section, QtWidgets.QHeaderView.ResizeMode.Stretch)
         tree.grid(row=0, column=0, sticky="nsew")
 
         scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=tree.yview)
@@ -5688,12 +6412,16 @@ class VirtualArrayGui:
             command=lambda: clear_selected_channel(),
             style="DialogDanger.TButton",
         ).grid(row=0, column=4, sticky="ew", padx=(6, 0))
-        ttk.Button(
-            button_row,
-            text=self._t("done"),
-            command=dialog.destroy,
-            style="DialogButton.TButton",
-        ).grid(row=0, column=5, sticky="ew", padx=(6, 0))
+        close_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Close,
+            parent=button_row._qt,
+        )
+        close_button = close_box.button(
+            QtWidgets.QDialogButtonBox.StandardButton.Close
+        )
+        close_button.setText(self._t("done"))
+        close_button.clicked.connect(dialog.destroy)
+        button_row._qt.layout().addWidget(close_box, 0, 5)
 
         def refresh_tree() -> None:
             selected = tree.selection()
@@ -5999,6 +6727,8 @@ class VirtualArrayGui:
         dialog.title(self._t("element_pattern_confirm_title"))
         dialog.transient(self.root)
         dialog.grab_set()
+        dialog.geometry("900x720")
+        dialog.minsize(760, 620)
 
         title = ttk.Label(
             dialog,
@@ -6150,29 +6880,32 @@ class VirtualArrayGui:
 
         button_row = ttk.Frame(dialog)
         button_row.pack(fill=tk.X, padx=10, pady=(0, 10))
-        ttk.Button(
-            button_row,
-            text=self._t("element_pattern_import_button"),
-            command=confirm,
-            style="Accent.TButton",
-        ).pack(side=tk.RIGHT)
-        ttk.Button(
-            button_row,
-            text=self._t("element_pattern_cancel_button"),
-            command=cancel,
-            style="Large.TButton",
-        ).pack(
-            side=tk.RIGHT, padx=(0, 8)
+        button_layout = QtWidgets.QHBoxLayout(button_row._qt)
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            parent=button_row._qt,
         )
-        swap_button = ttk.Button(
-            button_row,
-            text=self._t("element_pattern_swap_button"),
-            command=swap_axes,
-            style="Large.TButton",
+        import_button = button_box.button(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
         )
-        swap_button.pack(side=tk.LEFT)
+        cancel_button = button_box.button(
+            QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        import_button.setText(self._t("element_pattern_import_button"))
+        cancel_button.setText(self._t("element_pattern_cancel_button"))
+        import_button.clicked.connect(confirm)
+        cancel_button.clicked.connect(cancel)
+        mark_primary(import_button)
+        swap_button = button_box.addButton(
+            self._t("element_pattern_swap_button"),
+            QtWidgets.QDialogButtonBox.ButtonRole.ActionRole,
+        )
+        swap_button.clicked.connect(swap_axes)
+        button_layout.addWidget(button_box)
         if pattern.elevation_gain_db is None:
-            swap_button.configure(state=tk.DISABLED)
+            swap_button.setEnabled(False)
         dialog.protocol("WM_DELETE_WINDOW", cancel)
         dialog.wait_window()
         return state["confirmed"]
@@ -6406,6 +7139,7 @@ class VirtualArrayGui:
             rx_pattern=self.element_pattern,
             channel_patterns=self.channel_patterns,
         )
+        self.current_metrics = metrics
 
         self._draw_physical_array()
         self._draw_virtual_array(unique, counts, pair_map, metrics)
@@ -6414,6 +7148,7 @@ class VirtualArrayGui:
         self._draw_dbf_reference_spectrum("azimuth")
         self._draw_dbf_reference_spectrum("elevation")
         self._draw_dbf2d_heatmap()
+        self._update_capability_empty_states(metrics)
 
         self.status.set(self._t("status_ready"))
         self._refresh_workspace_header()
@@ -6421,6 +7156,38 @@ class VirtualArrayGui:
         self.virt_canvas.draw_idle()
         self.az_chart.canvas.draw_idle()
         self.el_chart.canvas.draw_idle()
+
+    def _update_capability_empty_states(self, metrics: ArrayMetrics) -> None:
+        az_available = metrics.azimuth_resolution is not None and metrics.x_aperture > 0
+        el_available = metrics.elevation_resolution is not None and metrics.y_aperture > 0
+
+        for chart, available, title_key in (
+            (self.az_chart, az_available, "empty_azimuth_title"),
+            (self.el_chart, el_available, "empty_elevation_title"),
+        ):
+            if chart.empty_overlay is not None:
+                chart.empty_overlay.set_content(
+                    self._t(title_key),
+                    self._t("empty_array_body"),
+                )
+                chart.empty_overlay.show_overlay(not available)
+            if chart.play_button is not None:
+                chart.play_button.configure(state=tk.NORMAL if available else tk.DISABLED)
+            if not available and chart.stop_button is not None:
+                chart.stop_button.configure(state=tk.DISABLED)
+
+        has_2d = az_available and el_available
+        if self.dbf2d_empty_overlay is not None:
+            self.dbf2d_empty_overlay.set_content(
+                self._t("empty_2d_title"),
+                self._t("empty_2d_body"),
+            )
+            self.dbf2d_empty_overlay.show_overlay(not has_2d)
+        for button in (self.dbf2d_az_button, self.dbf2d_el_button):
+            if button is not None:
+                button.configure(state=tk.NORMAL if has_2d else tk.DISABLED)
+        if not has_2d and self.dbf2d_stop_button is not None:
+            self.dbf2d_stop_button.configure(state=tk.DISABLED)
 
     def _build_virtual_pair_map(
         self, array: AntennaArray
@@ -6494,7 +7261,7 @@ class VirtualArrayGui:
                     ),
                     xytext=(7, 16),
                     textcoords="offset points",
-                    fontsize=8.8,
+                    fontsize=9,
                     ha="left",
                     va="bottom",
                     color=THEME["text_primary"],
@@ -6512,7 +7279,7 @@ class VirtualArrayGui:
                     element.x * DISPLAY_SCALE_LAMBDA,
                     element.y * DISPLAY_SCALE_LAMBDA + dy,
                     element.name,
-                    fontsize=8.8,
+                    fontsize=9,
                     ha="center",
                     va="center",
                     color=THEME["text_secondary"],
@@ -6590,7 +7357,7 @@ class VirtualArrayGui:
         _style_legend(
             self.physical_ax.legend(
                 loc="upper right",
-                fontsize=8,
+                fontsize=9,
                 frameon=False,
                 markerscale=0.72,
                 borderpad=0.15,
@@ -6613,7 +7380,7 @@ class VirtualArrayGui:
                 "linewidth": 0.8,
             },
             arrowprops={"arrowstyle": "->", "color": THEME["focus"], "linewidth": 0.8},
-            fontsize=8,
+            fontsize=9,
             color=THEME["text_primary"],
             annotation_clip=False,
             zorder=60,
@@ -6728,7 +7495,7 @@ class VirtualArrayGui:
                 "linewidth": 0.8,
             },
             arrowprops={"arrowstyle": "->", "color": THEME["focus"], "linewidth": 0.8},
-            fontsize=8,
+            fontsize=9,
             color=THEME["text_primary"],
             annotation_clip=False,
             zorder=60,
@@ -6793,7 +7560,7 @@ class VirtualArrayGui:
             transform=self.virtual_ax.transAxes,
             ha="right",
             va="top",
-            fontsize=7.8,
+            fontsize=9,
             color=THEME["text_primary"],
             bbox={
                 "boxstyle": "round,pad=0.18",
@@ -6804,7 +7571,7 @@ class VirtualArrayGui:
             },
         )
         if counts.max() > 1:
-            _style_legend(self.virtual_ax.legend(loc="best", fontsize=8))
+            _style_legend(self.virtual_ax.legend(loc="upper left", fontsize=9))
 
     def _draw_response_common(
         self,
@@ -6951,7 +7718,7 @@ class VirtualArrayGui:
             textcoords=ax.transAxes,
             ha=annotation_ha,
             va="center",
-            fontsize=7.5,
+            fontsize=9,
             color="#7c2d12",
             bbox={
                 "boxstyle": "round,pad=0.25",
@@ -7009,7 +7776,7 @@ class VirtualArrayGui:
                     textcoords=ax.transAxes,
                     ha=grating_ha,
                     va="center",
-                    fontsize=7.5,
+                    fontsize=9,
                     color="#134e4a",
                     bbox={
                         "boxstyle": "round,pad=0.25",
@@ -7022,7 +7789,7 @@ class VirtualArrayGui:
                     annotation_clip=True,
                 )
             else:
-                _style_legend(ax.legend(loc="lower right", fontsize=7, framealpha=0.92))
+                _style_legend(ax.legend(loc="lower right", fontsize=9, framealpha=0.92))
                 show_legend = False
 
         ax.set_title(self._t("response_title", mode=response_cut.label), pad=6, y=1.02, loc="left",
@@ -7031,7 +7798,7 @@ class VirtualArrayGui:
         ax.set_ylabel(self._t("axis_gain"), labelpad=2, color=THEME["text_secondary"])
         ax.grid(True, alpha=THEME["grid_alpha"], color=THEME["grid_color"], linewidth=0.55)
         if show_legend:
-            _style_legend(ax.legend(loc="lower right", fontsize=7, framealpha=0.92))
+            _style_legend(ax.legend(loc="lower right", fontsize=9, framealpha=0.92))
 
         response_psl_db = (
             metrics.elevation_psl_db
@@ -7182,6 +7949,16 @@ class VirtualArrayGui:
                 geometry = _validated_window_geometry(window.get("geometry"))
                 if geometry is not None:
                     self.root.geometry(geometry)
+                active_tab = window.get("active_tab")
+                if isinstance(active_tab, int) and 0 <= active_tab <= 2:
+                    self._restored_active_tab = active_tab
+                splitter_sizes = window.get("splitter_sizes")
+                if (
+                    isinstance(splitter_sizes, list)
+                    and len(splitter_sizes) == 2
+                    and all(isinstance(size, int) and size > 0 for size in splitter_sizes)
+                ):
+                    self._restored_splitter_sizes = list(splitter_sizes)
                 window_state = window.get("state")
                 if window_state == "zoomed":
                     self.root.after(
@@ -7327,15 +8104,25 @@ class VirtualArrayGui:
             except Exception:
                 LOGGER.debug("Failed to sync plot canvas after window change", exc_info=True)
 
-    def _window_state_config(self) -> dict[str, str]:
+    def _window_state_config(self) -> dict[str, object]:
         self.root.update_idletasks()
         window_state = self.root.state()
         if window_state == "iconic":
             window_state = "normal"
-        return {
+        config: dict[str, object] = {
             "geometry": self.root.winfo_geometry(),
             "state": window_state,
         }
+        if self.main_notebook is not None:
+            try:
+                config["active_tab"] = self.main_notebook.index(
+                    self.main_notebook.select()
+                )
+            except tk.TclError:
+                config["active_tab"] = 0
+        if self.workspace_splitter is not None:
+            config["splitter_sizes"] = [int(size) for size in self.workspace_splitter.sizes()]
+        return config
 
     def _save_local_state(self) -> None:
         state = {
@@ -7839,13 +8626,17 @@ def main() -> None:
     log_path = configure_logging()
     install_excepthook()
     LOGGER.info("Starting MIMO Array Visualizer")
-    root = tk.Tk()
+    _qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    window = QtWidgets.QMainWindow()
+    root = tk.Tk(window)
+    apply_native_theme(root._app)
+    _set_window_icon(root)
     root.report_callback_exception = _show_unhandled_tk_exception
     root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
     root.minsize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
-    root.resizable(True, True)
     LOGGER.info("Log file: %s", log_path)
-    app = VirtualArrayGui(root)
+    app = VirtualArrayGui(window)
+    root.resizable(True, True)
     root.protocol("WM_DELETE_WINDOW", app.on_close)
     app._schedule_layout_sync()
     try:

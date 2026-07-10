@@ -1,8 +1,17 @@
 $ErrorActionPreference = "Stop"
 
-if (-not (Test-Path ".\.venv\Scripts\python.exe")) {
+$ProjectRoot = Split-Path -Parent $PSScriptRoot
+$Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+
+if (-not (Test-Path -LiteralPath $Python)) {
     Write-Error "Missing .venv. Run .\scripts\setup.ps1 first."
 }
 
-.\.venv\Scripts\python.exe -m virtual_array.gui
+Push-Location $ProjectRoot
+try {
+    & $Python -m virtual_array.gui @args
+}
+finally {
+    Pop-Location
+}
 

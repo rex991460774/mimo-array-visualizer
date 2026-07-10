@@ -3,6 +3,9 @@
 import sys
 
 
+# GUI.py is the packaging launcher; it delegates to the single maintained
+# implementation in virtual_array.gui. GUI_mod.py is a compatibility alias only.
+app_entry_script = 'GUI.py'
 app_icon = None
 if sys.platform == 'win32':
     app_icon = 'src/virtual_array/assets/mimo_array_logo.ico'
@@ -10,7 +13,7 @@ elif sys.platform == 'darwin':
     app_icon = 'src/virtual_array/assets/mimo_array_logo.icns'
 
 a = Analysis(
-    ['GUI.py'],
+    [app_entry_script],
     pathex=['src'],
     binaries=[],
     datas=[
@@ -20,6 +23,7 @@ a = Analysis(
         ('src/virtual_array/assets/mimo_array_logo.icns', 'virtual_array/assets'),
     ],
     hiddenimports=[
+        'virtual_array.gui',
         'pyparsing.testing',
         'openpyxl',
         'openpyxl.cell._writer',

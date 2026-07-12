@@ -38,6 +38,9 @@ compatibility alias for existing shortcuts.
 - Polished channel-pattern UI: centered channel table values, top-layer hover
   tooltips, compact transparent Tx/Rx legend, and aligned bottom toolbar inputs.
 - Readable JSON layout import/export with optional evaluation metadata.
+- Current-configuration performance report export to a multi-page PDF, with
+  selectable Az/El focus and frame-hold ranges, independent dB/magnitude
+  spectrum pages, and optional CSV/JSON audit data.
 - Local state persistence (last paths, frequency, window geometry, layout).
 - PyInstaller onedir packaging for Windows.
 
@@ -148,6 +151,28 @@ The 2D DBF panel shows a correlation heatmap over azimuth and elevation.
 Each axis can play/pause independently — one axis stays fixed while the
 other scans, or both axes scan simultaneously.
 
+### Current-Configuration Performance Report
+
+Use **File → Export Current Performance Report…** to choose the PDF path,
+the Az/El performance focus ranges, and the true-angle frame ranges included
+in the spectrum hold plots. The report can include dB plots, normalized
+correlation-magnitude plots, or both. Each axis/unit combination gets a full
+page containing one spectrum chart, and every selected 1° frame is retained in
+its overlay. Both units come from the same per-frame signal-to-1D-dictionary
+normalized correlation (`magnitude = 10^(dB/20)`); they are display forms of
+one calculation rather than separate DBF algorithms. An optional data package
+exports the exact configuration plus per-frame and spectrum CSV files.
+
+Angle-error pages scale their vertical axes from finite errors inside the
+selected performance focus range, following the HFSS report plotting rule.
+Folded errors outside that range may be visually clipped so useful small-error
+detail remains readable; the complete values remain in the exported CSV data.
+
+For a 2D-capable array, these Az/El pages are explicitly reported as orthogonal
+main-plane diagnostics: the azimuth sweep fixes true elevation at 0°, and the
+elevation sweep fixes true azimuth at 0°. They are not presented as a full
+joint 2D error-volume validation.
+
 ---
 
 ## Layout Editing
@@ -227,6 +252,8 @@ src/virtual_array/
   gui.py            → Single native PySide6 GUI (resizable, three-page layout)
   geometry.py       → ArrayPoint, VirtualPoint, AntennaArray
   analysis.py       → Metrics, PSF, DBF spectra
+  performance_report.py → PDF report, focus statistics, Hold data package
+  performance_report_dialog.py → Native report configuration dialog
   element_pattern.py → ElementPattern, ChannelPatternSet
   dbf_dictionary.py → DBF dictionary configuration
   app_state.py      → JSON persistence
@@ -263,6 +290,8 @@ MIMO 阵列可视化工具 — 用于交互式编辑和评估 MIMO 发射/接收
 - 顶部 **通道幅相** 状态分别显示幅度、相位为理想、导入或混合；导入单元方向图时幅度视为导入。
 - 通道方向图界面细节优化：通道表内容居中、悬停信息置顶、Tx/Rx 图例紧凑透明、底部工具条输入框对齐。
 - 可读的 JSON 布局导入/导出（含评估元数据）。
+- 当前配置性能报告：可选方位/俯仰关注范围、逐帧 Hold 真实角范围以及
+  dB/归一化模值角谱，输出多页 PDF 及可选 CSV/JSON 可复现数据包。
 - 本地状态持久化（最近路径、频率、窗口几何、布局）。
 - PyInstaller onedir Windows 打包。
 
@@ -280,6 +309,23 @@ MIMO 阵列可视化工具 — 用于交互式编辑和评估 MIMO 发射/接收
 - 阵列在某方向无有效孔径时显示中性能力提示，不再显示误导性的平直角谱或整片热图。
 - 跨平台中文字体（macOS / Windows / Linux）。
 - 预配置 OpenCode 技能和 ruff/pyright 工具。
+
+### 当前配置性能报告
+
+从 **文件 → 输出当前配置性能报告…** 进入配置对话框，可选报告路径、
+方位/俯仰测角性能关注范围、角谱逐帧 Hold 的真实角范围，以及 dB、
+归一化模值两种纵坐标（可单选或同时输出）。每个“维度 × 纵坐标”组合
+独占一整页且只放一张角谱图，所选 1° 帧全部进入叠加曲线，不会抽帧。
+dB 与模值来自同一套逐帧“信号—1D DBF 字典”归一化相关结果，模值按
+`10^(dB/20)` 转换，并不是另一套测角算法。
+
+测角误差页按所选“性能关注范围”内的有限误差自适应纵轴，遵循 HFSS 报告
+绘图口径；关注范围外的折返误差可能在图上被裁切，以保留小误差细节，
+完整原始值仍保存在可选 CSV 数据包中。
+
+对于具备二维孔径的阵列，报告中两个 1D DBF 页明确定义为正交主平面诊断：
+方位扫描时真实俯仰固定为 0°，俯仰扫描时真实方位固定为 0°；
+它们不会被表述为完整的联合二维误差体验证。
 
 ## 快速开始
 
@@ -359,6 +405,8 @@ MIMOアレイ可視化ツール — MIMO送信/受信アンテナアレイ配置
 - ヘッダーの **チャネル振幅/位相** ステータスで、振幅と位相をそれぞれ理想・読込・混在として表示。要素パターン読み込み時は振幅を読込扱いにします。
 - チャネルパターン UI を調整：表の値を中央揃え、ホバー情報を最前面表示、Tx/Rx 凡例を小さく透明化、下部ツールバー入力欄を整列。
 - 可読 JSON 配置の読み込み/書き出し（評価メタデータ付き）
+- 現在設定の性能レポート（Az/El 評価範囲、全選択フレーム Hold、
+  複数ページ PDF、任意の CSV/JSON 再現データ）
 - ローカル状態の永続化
 - PyInstaller onedir Windows パッケージ
 

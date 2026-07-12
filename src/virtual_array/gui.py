@@ -8,7 +8,9 @@ import math
 import re
 import sys
 from collections import defaultdict, deque
+from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -48,6 +50,7 @@ from .analysis import (
     dbf_2d_spectrum,
     dbf_azimuth_spectrum_bank,
     dbf_elevation_spectrum_bank,
+    dbf_peak_index as analysis_dbf_peak_index,
     local_peak_indices,
 )
 from .element_pattern import (
@@ -253,6 +256,71 @@ UI_TEXT = {
         "en": "Export Array JSON",
         "ja": "アレイJSONを書き出し",
     },
+    "menu_export_performance_report": {
+        "zh": "输出当前配置性能报告…",
+        "en": "Export Current Performance Report…",
+        "ja": "現在の設定性能レポートを出力…",
+    },
+    "report_overwrite_title": {
+        "zh": "覆盖性能报告",
+        "en": "Replace performance report",
+        "ja": "性能レポートを置き換え",
+    },
+    "report_overwrite_question": {
+        "zh": "文件已存在，是否覆盖？\n{file}",
+        "en": "The file already exists. Replace it?\n{file}",
+        "ja": "ファイルはすでに存在します。置き換えますか？\n{file}",
+    },
+    "report_exporting_status": {
+        "zh": "正在生成当前配置性能报告…",
+        "en": "Generating the current performance report…",
+        "ja": "現在の設定性能レポートを生成中…",
+    },
+    "report_progress_title": {
+        "zh": "生成性能报告",
+        "en": "Generate performance report",
+        "ja": "性能レポートを生成",
+    },
+    "report_cancel_button": {
+        "zh": "取消",
+        "en": "Cancel",
+        "ja": "キャンセル",
+    },
+    "report_canceling_status": {
+        "zh": "正在安全取消，当前绘图步骤完成后停止…",
+        "en": "Cancelling safely after the current rendering step…",
+        "ja": "現在の描画ステップ完了後に安全に中止します…",
+    },
+    "report_canceled_status": {
+        "zh": "已取消性能报告生成",
+        "en": "Performance report generation cancelled",
+        "ja": "性能レポートの生成をキャンセルしました",
+    },
+    "report_export_failed_title": {
+        "zh": "性能报告生成失败",
+        "en": "Performance report failed",
+        "ja": "性能レポートの生成に失敗",
+    },
+    "report_exported_status": {
+        "zh": "已输出性能报告：{file}",
+        "en": "Exported performance report: {file}",
+        "ja": "性能レポートを出力しました：{file}",
+    },
+    "report_exported_title": {
+        "zh": "性能报告已生成",
+        "en": "Performance report created",
+        "ja": "性能レポートを生成しました",
+    },
+    "report_exported_message": {
+        "zh": "PDF报告已保存到：\n{file}{data_note}",
+        "en": "The PDF report was saved to:\n{file}{data_note}",
+        "ja": "PDFレポートを保存しました：\n{file}{data_note}",
+    },
+    "report_exported_data_note": {
+        "zh": "\n\n可复现数据包：\n{directory}",
+        "en": "\n\nReproducibility data package:\n{directory}",
+        "ja": "\n\n再現用データパッケージ：\n{directory}",
+    },
     "menu_channel_patterns": {
         "zh": "配置通道幅相",
         "en": "Configure Channel Amp/Phase",
@@ -287,6 +355,7 @@ UI_TEXT = {
             "二、顶部二级菜单\n"
             "文件 > 导入阵面 JSON：读取之前保存的 TX/RX 布局。\n"
             "文件 > 导出阵面 JSON：保存当前布局、评估结果和当前配置，方便复现实验。\n"
+            "文件 > 输出当前配置性能报告：选择 PDF 路径、测角关注范围、逐帧 Hold 真实角范围及 dB/模值角谱。每种角谱独占一页，并可附带 CSV/JSON 数据包。\n"
             "编辑 > 撤销/重做阵列编辑：回退或恢复最近的阵列位置、添加、删除操作。\n"
             "编辑 > 配置通道幅相：给物理通道或虚拟通道加载 HFSS 等工具导出的幅度/相位方向图。不加载时，该通道按理想通道处理。汇总 CSV/XLSX 可选择导入目标：物理通道按 Tx/Rx 单通道规则读取；虚拟通道按 Tx1Rx1、Tx1Rx2 到 TxNRxN 的顺序读取。\n"
             "编辑 > 配置 DBF 字典：选择测角时使用哪种字典。理想几何字典只按阵列几何算相位；理想反向相位用于快速检查符号约定；通道幅相校准字典会叠加已导入的通道方向图；导入 CSV/XLSX 字典用于使用外部仿真或实测字典。\n"
@@ -308,6 +377,7 @@ UI_TEXT = {
             "Top menu items\n"
             "File > Import Array JSON: load a saved TX/RX layout.\n"
             "File > Export Array JSON: save the current layout, evaluation, and configuration.\n"
+            "File > Export Current Performance Report: choose the PDF path, performance focus ranges, frame-hold true-angle ranges, and dB/magnitude spectrum pages. Each spectrum uses its own page; CSV/JSON data is optional.\n"
             "Edit > Undo/Redo: step backward or forward through recent layout edits.\n"
             "Edit > Configure Channel Amp/Phase: load amplitude or phase patterns for physical channels or synthesized virtual channels. Missing channels stay ideal. Choose the summary import target explicitly: physical uses Tx/Rx channel rules, while virtual uses Tx1Rx1, Tx1Rx2 through TxNRxN order.\n"
             "Edit > Configure DBF Dictionary: choose the dictionary used for angle estimation. Ideal geometric uses only array geometry; ideal reversed phase checks sign convention; channel amp/phase uses imported channel data; imported CSV/XLSX uses an external simulated or measured dictionary.\n"
@@ -328,6 +398,7 @@ UI_TEXT = {
             "上部メニュー\n"
             "ファイル > アレイ JSON 読み込み：保存済みの TX/RX 配置を読み込みます。\n"
             "ファイル > アレイ JSON 書き出し：現在の配置、評価、設定を保存します。\n"
+            "ファイル > 現在の設定性能レポート：PDF 保存先、評価範囲、フレーム Hold 範囲、dB/振幅スペクトルを設定します。各スペクトルは 1 ページを専有し、CSV/JSON データは任意です。\n"
             "編集 > 元に戻す/やり直し：最近の配置編集を戻す、または復元します。\n"
             "編集 > チャネル振幅/位相を設定：物理チャネルまたは合成済み仮想チャネルの振幅/位相データを読み込みます。集約 CSV/XLSX は読込先を選択できます。物理は Tx/Rx ルール、仮想は Tx1Rx1、Tx1Rx2 から TxNRxN の順に読みます。\n"
             "編集 > DBF 辞書設定：測角に使う辞書を選びます。理想幾何、逆位相確認、チャネル振幅/位相、外部 CSV/XLSX 辞書を選択できます。\n"
@@ -1041,6 +1112,87 @@ class _DebouncedResizeFilter(QtCore.QObject):
         if event.type() == QtCore.QEvent.Type.Resize:
             self._timer.start()
         return super().eventFilter(watched, event)
+
+
+class _PerformanceReportCancelled(RuntimeError):
+    """Internal cooperative-cancellation signal for report generation."""
+
+
+class _PerformanceReportWorker(QtCore.QObject):
+    progress = QtCore.Signal(int, str)
+    succeeded = QtCore.Signal(object)
+    failed = QtCore.Signal(str)
+    cancelled = QtCore.Signal()
+    finished = QtCore.Signal()
+
+    def __init__(self, generator, snapshot, options) -> None:  # noqa: ANN001
+        super().__init__()
+        self._generator = generator
+        self._snapshot = snapshot
+        self._options = options
+
+    @QtCore.Slot()
+    def run(self) -> None:
+        thread = QtCore.QThread.currentThread()
+
+        def report_progress(percent: int, message: str) -> None:
+            if percent < 100 and thread.isInterruptionRequested():
+                raise _PerformanceReportCancelled
+            self.progress.emit(int(percent), str(message))
+
+        try:
+            artifacts = self._generator(
+                self._snapshot,
+                self._options,
+                progress_callback=report_progress,
+            )
+        except _PerformanceReportCancelled:
+            self.cancelled.emit()
+        except Exception as exc:
+            LOGGER.exception("Performance report worker failed")
+            self.failed.emit(str(exc))
+        else:
+            self.succeeded.emit(artifacts)
+        finally:
+            self.finished.emit()
+
+
+class _PerformanceReportUiBridge(QtCore.QObject):
+    """Marshal report worker and lifecycle signals onto the GUI thread."""
+
+    def __init__(
+        self,
+        controller,
+        thread: QtCore.QThread,
+        parent: QtCore.QObject,
+    ) -> None:  # noqa: ANN001
+        super().__init__(parent)
+        self._controller = controller
+        self._thread = thread
+
+    @QtCore.Slot(int, str)
+    def on_progress(self, percent: int, message: str) -> None:
+        self._controller._on_performance_report_progress(percent, message)
+
+    @QtCore.Slot(object)
+    def on_succeeded(self, artifacts) -> None:  # noqa: ANN001
+        self._controller._on_performance_report_succeeded(artifacts)
+
+    @QtCore.Slot(str)
+    def on_failed(self, message: str) -> None:
+        self._controller._on_performance_report_failed(message)
+
+    @QtCore.Slot()
+    def on_cancelled(self) -> None:
+        self._controller._on_performance_report_cancelled()
+
+    @QtCore.Slot()
+    def on_cancel_requested(self) -> None:
+        self._controller._cancel_performance_report_export()
+
+    @QtCore.Slot()
+    def on_thread_finished(self) -> None:
+        self._controller._clear_performance_report_thread(self._thread, self)
 
 
 class _EmptyStateOverlay(QtWidgets.QFrame):
@@ -1995,14 +2147,11 @@ def _dbf_peak_index(
     true_angle: float,
     tolerance_db: float = 1e-6,
 ) -> int:
-    peak_gain = float(np.max(spectrum_db))
-    candidate_indices = np.flatnonzero(spectrum_db >= peak_gain - tolerance_db)
-    if len(candidate_indices) == 0:
-        return int(np.argmax(spectrum_db))
-    return int(
-        candidate_indices[
-            int(np.argmin(np.abs(scan_angles[candidate_indices] - true_angle)))
-        ]
+    return analysis_dbf_peak_index(
+        scan_angles,
+        spectrum_db,
+        true_angle,
+        tolerance_db=tolerance_db,
     )
 
 
@@ -2106,6 +2255,10 @@ class VirtualArrayGui:
         self.native_language_actions: dict[str, QtGui.QAction] = {}
         self.native_status_bar: QtWidgets.QStatusBar | None = None
         self.workspace_splitter: QtWidgets.QSplitter | None = None
+        self._performance_report_thread: QtCore.QThread | None = None
+        self._performance_report_worker: _PerformanceReportWorker | None = None
+        self._performance_report_bridge: _PerformanceReportUiBridge | None = None
+        self._performance_report_progress: QtWidgets.QProgressDialog | None = None
 
         self.element_pattern: ElementPattern | None = None
         self.channel_patterns = ChannelPatternSet()
@@ -2139,6 +2292,7 @@ class VirtualArrayGui:
         self.header_subtitle_label: ttk.Label | None = None
         self.header_chip_labels: dict[str, ttk.Label] = {}
         self.last_layout_dir = Path("outputs").resolve()
+        self.last_report_dir = Path("outputs").resolve()
         self.last_pattern_dir = Path.home()
         self.last_valid_margin_db = DBF_AMBIGUITY_MARGIN_DB
         self.margin_db = tk.StringVar(value=_format_margin_db(DBF_AMBIGUITY_MARGIN_DB))
@@ -3439,6 +3593,13 @@ class VirtualArrayGui:
             icon=QtWidgets.QStyle.StandardPixmap.SP_DialogSaveButton,
             shortcut=QtGui.QKeySequence.StandardKey.Save,
         )
+        self.native_menus["menu_file"].addSeparator()
+        add_action(
+            "menu_file",
+            "menu_export_performance_report",
+            self.open_performance_report_dialog,
+            icon=QtWidgets.QStyle.StandardPixmap.SP_FileDialogInfoView,
+        )
         add_action(
             "menu_edit",
             "menu_undo",
@@ -3537,6 +3698,11 @@ class VirtualArrayGui:
             self.config_menu.add_command(
                 label=self._t("menu_export_layout"),
                 command=self.export_layout_config,
+            )
+            self.config_menu.add_separator()
+            self.config_menu.add_command(
+                label=self._t("menu_export_performance_report"),
+                command=self.open_performance_report_dialog,
             )
             _style_popup_menu(self.config_menu)
 
@@ -6910,6 +7076,209 @@ class VirtualArrayGui:
         dialog.wait_window()
         return state["confirmed"]
 
+    def open_performance_report_dialog(self) -> None:
+        """Configure and export a report from one frozen in-memory snapshot."""
+        from .performance_report import (
+            PerformanceReportSnapshot,
+            generate_performance_report,
+        )
+        from .performance_report_dialog import PerformanceReportDialog
+
+        metrics = self.current_metrics or self._metrics_for_export()
+        azimuth_available = (
+            metrics.x_aperture > 0.0 and metrics.azimuth_resolution is not None
+        )
+        elevation_available = (
+            metrics.y_aperture > 0.0 and metrics.elevation_resolution is not None
+        )
+        dialog = PerformanceReportDialog(
+            self.root._window,
+            language=self.language,
+            initial_directory=self.last_report_dir,
+            azimuth_available=azimuth_available,
+            elevation_available=elevation_available,
+        )
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+
+        options = dialog.options()
+        output_path = options.output_path.resolve()
+        if output_path.exists():
+            answer = QtWidgets.QMessageBox.question(
+                self.root._window,
+                self._t("report_overwrite_title"),
+                self._t("report_overwrite_question", file=output_path),
+                QtWidgets.QMessageBox.StandardButton.Yes
+                | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.No,
+            )
+            if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+
+        self.last_report_dir = output_path.parent
+        snapshot = PerformanceReportSnapshot(
+            array=self.current_array(),
+            frequency_ghz=self.current_frequency_ghz(),
+            ambiguity_margin_db=self.current_margin_db(),
+            dbf_dictionary=deepcopy(self.dbf_dictionary),
+            element_pattern=deepcopy(self.element_pattern),
+            channel_patterns=deepcopy(self.channel_patterns),
+            current_config=deepcopy(self._layout_config()),
+            app_version=APP_VERSION,
+            created_at=datetime.now().astimezone(),
+        )
+        self._start_performance_report_export(
+            generate_performance_report,
+            snapshot,
+            options,
+        )
+
+    def _start_performance_report_export(
+        self,
+        generator,
+        snapshot,
+        options,
+    ) -> None:  # noqa: ANN001
+        if (
+            self._performance_report_thread is not None
+            and self._performance_report_thread.isRunning()
+        ):
+            return
+
+        progress = QtWidgets.QProgressDialog(
+            self._t("report_exporting_status"),
+            self._t("report_cancel_button"),
+            0,
+            100,
+            self.root._window,
+        )
+        progress.setObjectName("performanceReportProgress")
+        progress.setWindowTitle(self._t("report_progress_title"))
+        progress.setWindowModality(QtCore.Qt.WindowModality.ApplicationModal)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        progress.setMinimumWidth(440)
+        progress.setValue(0)
+        progress_label = progress.findChild(QtWidgets.QLabel)
+        if progress_label is not None:
+            progress_label.setWordWrap(True)
+        cancel_button = progress.findChild(QtWidgets.QPushButton)
+        if cancel_button is not None:
+            cancel_button.setObjectName("performanceReportCancelButton")
+
+        thread = QtCore.QThread()
+        worker = _PerformanceReportWorker(generator, snapshot, options)
+        bridge = _PerformanceReportUiBridge(self, thread, self.root._window)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        queued = QtCore.Qt.ConnectionType.QueuedConnection
+        worker.progress.connect(bridge.on_progress, queued)
+        worker.succeeded.connect(bridge.on_succeeded, queued)
+        worker.failed.connect(bridge.on_failed, queued)
+        worker.cancelled.connect(bridge.on_cancelled, queued)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(bridge.on_thread_finished)
+        thread.finished.connect(thread.deleteLater)
+        progress.canceled.connect(bridge.on_cancel_requested)
+
+        self._performance_report_thread = thread
+        self._performance_report_worker = worker
+        self._performance_report_bridge = bridge
+        self._performance_report_progress = progress
+        self.status.set(self._t("report_exporting_status"))
+        progress.show()
+        thread.start()
+
+    @QtCore.Slot(int, str)
+    def _on_performance_report_progress(self, percent: int, message: str) -> None:
+        progress = self._performance_report_progress
+        if progress is not None:
+            progress.setLabelText(message)
+            # QProgressDialog treats its maximum as a terminal/reset state.  The
+            # worker's terminal signal owns closure, so progress stays at 99 here.
+            progress.setValue(max(0, min(99, int(percent))))
+        self.status.set(message)
+
+    @QtCore.Slot()
+    def _cancel_performance_report_export(self) -> None:
+        thread = self._performance_report_thread
+        if thread is None or not thread.isRunning():
+            return
+        thread.requestInterruption()
+        progress = self._performance_report_progress
+        if progress is not None:
+            progress.setLabelText(self._t("report_canceling_status"))
+            cancel_button = progress.findChild(
+                QtWidgets.QPushButton, "performanceReportCancelButton"
+            )
+            if cancel_button is not None:
+                cancel_button.setEnabled(False)
+        self.status.set(self._t("report_canceling_status"))
+
+    @QtCore.Slot(object)
+    def _on_performance_report_succeeded(self, artifacts) -> None:  # noqa: ANN001
+        self._close_performance_report_progress()
+        data_note = ""
+        if artifacts.data_directory is not None:
+            data_note = self._t(
+                "report_exported_data_note",
+                directory=artifacts.data_directory,
+            )
+        self.status.set(
+            self._t("report_exported_status", file=artifacts.pdf_path)
+        )
+        QtWidgets.QMessageBox.information(
+            self.root._window,
+            self._t("report_exported_title"),
+            self._t(
+                "report_exported_message",
+                file=artifacts.pdf_path,
+                data_note=data_note,
+            ),
+        )
+
+    @QtCore.Slot(str)
+    def _on_performance_report_failed(self, message: str) -> None:
+        self._close_performance_report_progress()
+        self.status.set(self._t("report_export_failed_title"))
+        QtWidgets.QMessageBox.critical(
+            self.root._window,
+            self._t("report_export_failed_title"),
+            message,
+        )
+
+    @QtCore.Slot()
+    def _on_performance_report_cancelled(self) -> None:
+        self._close_performance_report_progress()
+        self.status.set(self._t("report_canceled_status"))
+
+    def _close_performance_report_progress(self) -> None:
+        progress = self._performance_report_progress
+        if progress is None:
+            return
+        self._performance_report_progress = None
+        signals_were_blocked = progress.blockSignals(True)
+        try:
+            progress.hide()
+            progress.close()
+        finally:
+            progress.blockSignals(signals_were_blocked)
+        progress.deleteLater()
+
+    def _clear_performance_report_thread(
+        self,
+        thread: QtCore.QThread,
+        bridge: _PerformanceReportUiBridge,
+    ) -> None:
+        if self._performance_report_thread is thread:
+            self._performance_report_thread = None
+            self._performance_report_worker = None
+        if self._performance_report_bridge is bridge:
+            self._performance_report_bridge = None
+            bridge.deleteLater()
+
     def export_layout_config(self) -> None:
         default_path = Path("outputs") / "antenna_layout.json"
         default_path.parent.mkdir(exist_ok=True)
@@ -7926,6 +8295,10 @@ class VirtualArrayGui:
             if isinstance(layout_dir, str) and layout_dir:
                 self.last_layout_dir = Path(layout_dir)
 
+            report_dir = state.get("last_report_dir")
+            if isinstance(report_dir, str) and report_dir:
+                self.last_report_dir = Path(report_dir)
+
             pattern_dir = state.get("last_pattern_dir")
             if isinstance(pattern_dir, str) and pattern_dir:
                 self.last_pattern_dir = Path(pattern_dir)
@@ -8129,6 +8502,7 @@ class VirtualArrayGui:
             "version": LOCAL_STATE_VERSION,
             "language": self.language,
             "last_layout_dir": str(self.last_layout_dir),
+            "last_report_dir": str(self.last_report_dir),
             "last_pattern_dir": str(self.last_pattern_dir),
             "frequency_ghz": _format_frequency_ghz(self.current_frequency_ghz()),
             "ambiguity_margin_db": _format_margin_db(self.current_margin_db()),
@@ -8170,6 +8544,11 @@ class VirtualArrayGui:
 
     def on_close(self) -> None:
         try:
+            report_thread = self._performance_report_thread
+            if report_thread is not None and report_thread.isRunning():
+                report_thread.requestInterruption()
+                report_thread.quit()
+                report_thread.wait(30_000)
             self.stop_dbf_scan_animation(restore_response=False)
             self.stop_dbf2d_animation(update_status=False)
             self._save_local_state()

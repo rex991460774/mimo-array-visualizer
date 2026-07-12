@@ -88,12 +88,132 @@ class DbfAngleMetrics:
 
 
 @dataclass(frozen=True)
+class DbfAngleFrameSeries:
+    true_angles_deg: np.ndarray
+    estimated_angles_deg: np.ndarray
+    errors_deg: np.ndarray
+    main_peak_db: np.ndarray
+    competitor_peak_db: np.ndarray
+    peak_margins_db: np.ndarray
+    quality_flags: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class _DbfNoFoldResult:
     no_fold_left: float | None
     no_fold_right: float | None
     no_fold_max_abs_error: float | None
     negative_cut_reason: str | None
     positive_cut_reason: str | None
+
+
+def dbf_peak_index(
+    scan_angles_deg: np.ndarray,
+    spectrum_db: np.ndarray,
+    true_angle_deg: float | None = None,
+    tolerance_db: float = 1e-6,
+) -> int:
+    """Return the strongest DBF bin using a deterministic tie policy.
+
+    Without a true angle this is strict ``argmax`` behavior, which avoids using
+    ground truth to improve performance estimates.  A caller that is only
+    choosing a display marker may provide ``true_angle_deg``; in that case all
+    bins within ``tolerance_db`` of the strongest value are treated as tied and
+    the nearest one is returned.
+    """
+    scan_angles = np.asarray(scan_angles_deg, dtype=float)
+    spectrum = np.asarray(spectrum_db, dtype=float)
+    if scan_angles.ndim != 1:
+        raise ValueError("scan_angles_deg must be one-dimensional.")
+    if spectrum.ndim != 1:
+        raise ValueError("spectrum_db must be one-dimensional.")
+    if scan_angles.size == 0:
+        raise ValueError("scan_angles_deg must not be empty.")
+    if spectrum.shape != scan_angles.shape:
+        raise ValueError("spectrum_db length must match scan_angles_deg.")
+    if not np.all(np.isfinite(scan_angles)):
+        raise ValueError("scan_angles_deg must contain only finite values.")
+    if scan_angles.size > 1 and not np.all(np.diff(scan_angles) > 0.0):
+        raise ValueError("scan_angles_deg must be strictly increasing.")
+    if not np.all(np.isfinite(spectrum)):
+        raise ValueError("spectrum_db must contain only finite values.")
+    tolerance = float(tolerance_db)
+    if not np.isfinite(tolerance) or tolerance < 0.0:
+        raise ValueError("tolerance_db must be finite and non-negative.")
+
+    if true_angle_deg is None:
+        return int(np.argmax(spectrum))
+    true_angle = float(true_angle_deg)
+    if not np.isfinite(true_angle):
+        raise ValueError("true_angle_deg must be finite.")
+    peak_gain = float(np.max(spectrum))
+    candidate_indices = np.flatnonzero(spectrum >= peak_gain - tolerance)
+    return int(
+        candidate_indices[
+            int(np.argmin(np.abs(scan_angles[candidate_indices] - true_angle)))
+        ]
+    )
+
+
+def dbf_angle_frame_series_from_spectra(
+    true_angles_deg: np.ndarray,
+    scan_angles_deg: np.ndarray,
+    spectra_db: np.ndarray,
+) -> DbfAngleFrameSeries:
+    """Extract per-frame DBF estimates, errors, peak margins, and quality flags."""
+    true_angles = np.asarray(true_angles_deg, dtype=float)
+    scan_angles = np.asarray(scan_angles_deg, dtype=float)
+    spectra = np.asarray(spectra_db, dtype=float)
+    if true_angles.ndim != 1:
+        raise ValueError("true_angles_deg must be one-dimensional.")
+    if scan_angles.ndim != 1:
+        raise ValueError("scan_angles_deg must be one-dimensional.")
+    if spectra.ndim != 2:
+        raise ValueError("spectra_db must be two-dimensional.")
+    if true_angles.size == 0:
+        raise ValueError("true_angles_deg must not be empty.")
+    if scan_angles.size == 0:
+        raise ValueError("scan_angles_deg must not be empty.")
+    expected_shape = (len(true_angles), len(scan_angles))
+    if spectra.shape != expected_shape:
+        raise ValueError(
+            "spectra_db shape must be "
+            f"{expected_shape}, got {spectra.shape}."
+        )
+    if not np.all(np.isfinite(true_angles)):
+        raise ValueError("true_angles_deg must contain only finite values.")
+    if not np.all(np.isfinite(scan_angles)):
+        raise ValueError("scan_angles_deg must contain only finite values.")
+    if scan_angles.size > 1 and not np.all(np.diff(scan_angles) > 0.0):
+        raise ValueError("scan_angles_deg must be strictly increasing.")
+    if not np.all(np.isfinite(spectra)):
+        raise ValueError("spectra_db must contain only finite values.")
+
+    estimates: list[float] = []
+    main_peaks: list[float] = []
+    competitor_peaks: list[float] = []
+    peak_margins: list[float] = []
+    quality_flags: list[str] = []
+    for spectrum in spectra:
+        estimate, main_peak, competitor_peak, margin, quality_flag = (
+            _dbf_peak_details(scan_angles, spectrum)
+        )
+        estimates.append(estimate)
+        main_peaks.append(main_peak)
+        competitor_peaks.append(competitor_peak)
+        peak_margins.append(margin)
+        quality_flags.append(quality_flag)
+
+    estimate_array = np.asarray(estimates, dtype=float)
+    return DbfAngleFrameSeries(
+        true_angles_deg=true_angles.copy(),
+        estimated_angles_deg=estimate_array,
+        errors_deg=estimate_array - true_angles,
+        main_peak_db=np.asarray(main_peaks, dtype=float),
+        competitor_peak_db=np.asarray(competitor_peaks, dtype=float),
+        peak_margins_db=np.asarray(peak_margins, dtype=float),
+        quality_flags=tuple(quality_flags),
+    )
 
 
 def calculate_metrics_and_psf(
@@ -463,23 +583,19 @@ def dbf_angle_metrics_from_spectra(
     if true_angles.size == 0 or scan_angles.size == 0 or spectra.size == 0:
         return DbfAngleMetrics(None, None, None, None, None, None, None, None, None)
 
-    estimates: list[float] = []
-    peak_margins: list[float] = []
-    quality_flags: list[str] = []
-    for spectrum in spectra:
-        estimate, margin, quality_flag = _dbf_peak_quality(scan_angles, spectrum)
-        estimates.append(estimate)
-        peak_margins.append(margin)
-        quality_flags.append(quality_flag)
-
-    estimate_array = np.asarray(estimates, dtype=float)
-    error_array = estimate_array - true_angles
-    margin_array = np.asarray(peak_margins, dtype=float)
+    frame_series = dbf_angle_frame_series_from_spectra(
+        true_angles,
+        scan_angles,
+        spectra,
+    )
+    true_angles = frame_series.true_angles_deg
+    error_array = frame_series.errors_deg
+    margin_array = frame_series.peak_margins_db
     no_fold = _dbf_no_fold_interval(
         true_angles,
         error_array,
         margin_array,
-        quality_flags,
+        list(frame_series.quality_flags),
         ambiguity_margin_db=ambiguity_margin_db,
     )
 
@@ -513,12 +629,12 @@ def dbf_angle_metrics_from_spectra(
     )
 
 
-def _dbf_peak_quality(
+def _dbf_peak_details(
     scan_angles_deg: np.ndarray,
     spectrum_db: np.ndarray,
-) -> tuple[float, float, str]:
+) -> tuple[float, float, float, float, str]:
     values = np.asarray(spectrum_db, dtype=float)
-    main_index = int(np.argmax(values))
+    main_index = dbf_peak_index(scan_angles_deg, values)
     main_peak = float(values[main_index])
     left_bound, right_bound = _dbf_main_lobe_bounds(values, main_index)
     local_peaks = _dbf_local_peak_indices(values)
@@ -532,7 +648,13 @@ def _dbf_peak_quality(
         competitor_peak = float("-inf")
     peak_margin = main_peak - competitor_peak
     quality_flag = _dbf_quality_flag(scan_angles_deg, values, main_index)
-    return float(scan_angles_deg[main_index]), peak_margin, quality_flag
+    return (
+        float(scan_angles_deg[main_index]),
+        main_peak,
+        competitor_peak,
+        peak_margin,
+        quality_flag,
+    )
 
 
 def _dbf_no_fold_interval(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -155,6 +156,7 @@ def test_canonical_gui_keeps_key_workspace_and_dialog_controls(gui_session) -> N
     for method_name in (
         "open_dbf_dictionary_dialog",
         "open_channel_patterns_dialog",
+        "open_performance_report_dialog",
         "_show_user_manual_dialog",
     ):
         assert callable(getattr(controller, method_name, None))
@@ -180,6 +182,10 @@ def test_native_shell_exposes_shortcuts_focus_and_splitter(gui_session) -> None:
         action = controller.native_actions[key]
         assert isinstance(action, QtGui.QAction)
         assert not action.shortcut().isEmpty()
+    assert isinstance(
+        controller.native_actions["menu_export_performance_report"],
+        QtGui.QAction,
+    )
 
     assert controller.auto_apply_button._qt.property("fluentRole") == "primary"
     focusable = window.findChildren(QtWidgets.QLineEdit) + window.findChildren(
@@ -192,6 +198,140 @@ def test_native_shell_exposes_shortcuts_focus_and_splitter(gui_session) -> None:
         if widget.isEnabled() and widget.isVisible()
     )
     assert controller.main_notebook._qt.tabBar().accessibleName()
+
+
+def test_performance_report_worker_runs_off_the_gui_thread(
+    gui_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = gui_session.controller
+    app = gui_session.app
+    events: list[tuple[str, object, bool]] = []
+    worker_thread_checks: list[bool] = []
+    cancel_requests: list[bool] = []
+    progress_canceled: list[bool] = []
+    application_exit_signals: list[str] = []
+    on_about_to_quit = lambda: application_exit_signals.append("aboutToQuit")
+    on_last_window_closed = lambda: application_exit_signals.append(
+        "lastWindowClosed"
+    )
+    original_success = controller._on_performance_report_succeeded
+    original_failure = controller._on_performance_report_failed
+    original_progress = controller._on_performance_report_progress
+    original_cancel = controller._cancel_performance_report_export
+
+    app.aboutToQuit.connect(on_about_to_quit)
+    app.lastWindowClosed.connect(on_last_window_closed)
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "information",
+        lambda *_args, **_kwargs: QtWidgets.QMessageBox.StandardButton.Ok,
+    )
+
+    def in_gui_thread() -> bool:
+        # Do not cache QApplication.thread(): PySide can invalidate that wrapper
+        # while short-lived QThread wrappers are deleted between exports.
+        return QtCore.QThread.currentThread() is app.thread()
+
+    def fake_generator(_snapshot, _options, progress_callback):
+        worker_thread_checks.append(in_gui_thread())
+        progress_callback(5, "start")
+        progress_callback(100, "done")
+        return SimpleNamespace(pdf_path=Path("report.pdf"), data_directory=None)
+
+    def capture_progress(percent: int, message: str) -> None:
+        events.append(
+            (
+                "progress",
+                (percent, message),
+                in_gui_thread(),
+            )
+        )
+        original_progress(percent, message)
+
+    def capture_success(artifacts) -> None:  # noqa: ANN001
+        events.append(
+            (
+                "success",
+                artifacts.pdf_path,
+                in_gui_thread(),
+            )
+        )
+        original_success(artifacts)
+
+    controller._on_performance_report_progress = capture_progress
+    controller._on_performance_report_succeeded = capture_success
+    controller._on_performance_report_failed = lambda message: events.append(
+        (
+            "failure",
+            message,
+            in_gui_thread(),
+        )
+    )
+    controller._cancel_performance_report_export = lambda: cancel_requests.append(
+        in_gui_thread()
+    )
+    try:
+        for _run_index in range(2):
+            controller._start_performance_report_export(
+                fake_generator,
+                object(),
+                object(),
+            )
+            thread = controller._performance_report_thread
+            worker = controller._performance_report_worker
+            bridge = controller._performance_report_bridge
+            progress = controller._performance_report_progress
+            assert isinstance(thread, QtCore.QThread)
+            assert worker is not None
+            assert bridge is not None
+            assert progress is not None
+            assert bridge.thread() is app.thread()
+            assert progress.minimumWidth() >= 440
+            progress_label = progress.findChild(QtWidgets.QLabel)
+            assert progress_label is not None and progress_label.wordWrap()
+            progress.canceled.connect(lambda: progress_canceled.append(True))
+
+            loop = QtCore.QEventLoop()
+            thread.finished.connect(loop.quit)
+            watchdog = QtCore.QTimer()
+            watchdog.setSingleShot(True)
+            watchdog.timeout.connect(loop.quit)
+            watchdog.start(3_000)
+            loop.exec()
+            finished_in_time = watchdog.isActive()
+            watchdog.stop()
+            process_events(app, cycles=8)
+            assert finished_in_time, "report worker did not finish before timeout"
+            assert controller._performance_report_thread is None
+            assert controller._performance_report_worker is None
+            assert controller._performance_report_bridge is None
+            assert controller._performance_report_progress is None
+            assert gui_session.window.isVisible()
+
+        assert worker_thread_checks == [False, False]
+        assert events == [
+            ("progress", (5, "start"), True),
+            ("progress", (100, "done"), True),
+            ("success", Path("report.pdf"), True),
+            ("progress", (5, "start"), True),
+            ("progress", (100, "done"), True),
+            ("success", Path("report.pdf"), True),
+        ]
+        assert cancel_requests == []
+        assert progress_canceled == []
+        assert application_exit_signals == []
+    finally:
+        app.aboutToQuit.disconnect(on_about_to_quit)
+        app.lastWindowClosed.disconnect(on_last_window_closed)
+        controller._on_performance_report_progress = original_progress
+        controller._on_performance_report_succeeded = original_success
+        controller._on_performance_report_failed = original_failure
+        controller._cancel_performance_report_export = original_cancel
+        progress = controller._performance_report_progress
+        if progress is not None:
+            progress.blockSignals(True)
+            progress.close()
+            controller._performance_report_progress = None
 
 
 def test_configuration_and_manual_dialogs_use_native_qt_controls(gui_session) -> None:

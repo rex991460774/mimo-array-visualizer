@@ -5,8 +5,10 @@ import pytest
 
 from virtual_array.analysis import (
     AF_GRID_SIZE,
+    DBF_QUALITY_OK,
     DBF_SCAN_GRID_SIZE,
     calculate_metrics_and_psf,
+    dbf_angle_frame_series_from_spectra,
     dbf_angle_metrics_from_spectra,
     dbf_2d_spectrum,
     dbf_2d_normalization_reference,
@@ -15,6 +17,7 @@ from virtual_array.analysis import (
     dbf_azimuth_spectrum_bank,
     dbf_elevation_spectrum,
     dbf_elevation_spectrum_bank,
+    dbf_peak_index,
     estimate_resolution,
 )
 from virtual_array.examples.case4_5tx7rx_sel import build_array
@@ -160,6 +163,126 @@ def test_dbf_spectrum_bank_uses_per_frame_correlation_normalization() -> None:
     assert np.max(spectra_db[1]) == pytest.approx(0.0)
     assert np.max(spectra_db[0]) == pytest.approx(0.0)
     assert np.max(spectra_db[2]) == pytest.approx(0.0)
+
+
+def test_dbf_peak_index_prefers_tied_peak_nearest_true_angle() -> None:
+    scan_angles = np.array([-2.0, 0.0, 2.0])
+    spectrum_db = np.array([0.0, -20.0, 0.0])
+
+    assert dbf_peak_index(scan_angles, spectrum_db) == 0
+    assert dbf_peak_index(scan_angles, spectrum_db, true_angle_deg=1.5) == 2
+    assert dbf_peak_index(scan_angles, spectrum_db, true_angle_deg=-1.5) == 0
+
+
+def test_dbf_angle_frame_series_uses_first_peak_when_highest_bins_are_tied() -> None:
+    series = dbf_angle_frame_series_from_spectra(
+        np.array([2.0]),
+        np.array([-2.0, 0.0, 2.0]),
+        np.array([[0.0, -20.0, 0.0]]),
+    )
+
+    assert series.estimated_angles_deg[0] == pytest.approx(-2.0)
+    assert series.errors_deg[0] == pytest.approx(-4.0)
+
+
+def test_dbf_angle_frame_series_reports_per_frame_peak_details() -> None:
+    true_angles = np.array([-1.0, 0.0, 3.0])
+    scan_angles = np.array([-4.0, -2.0, 0.0, 2.0, 4.0])
+    spectra_db = np.array(
+        [
+            [-20.0, 0.0, -20.0, -6.0, -20.0],
+            [-8.0, -20.0, -1.0, -20.0, -10.0],
+            [-20.0, -9.0, -20.0, -2.0, -20.0],
+        ]
+    )
+
+    series = dbf_angle_frame_series_from_spectra(
+        true_angles,
+        scan_angles,
+        spectra_db,
+    )
+
+    assert np.array_equal(series.true_angles_deg, true_angles)
+    assert np.array_equal(series.estimated_angles_deg, np.array([-2.0, 0.0, 2.0]))
+    assert np.array_equal(series.errors_deg, np.array([-1.0, 0.0, -1.0]))
+    assert np.array_equal(series.main_peak_db, np.array([0.0, -1.0, -2.0]))
+    assert np.array_equal(series.competitor_peak_db, np.array([-6.0, -8.0, -9.0]))
+    assert np.array_equal(series.peak_margins_db, np.array([6.0, 7.0, 7.0]))
+    assert series.quality_flags == (DBF_QUALITY_OK,) * 3
+
+
+def test_dbf_angle_frame_series_reports_infinite_margin_without_competitor() -> None:
+    series = dbf_angle_frame_series_from_spectra(
+        np.array([0.0]),
+        np.array([-2.0, -1.0, 0.0, 1.0, 2.0]),
+        np.array([[-20.0, -10.0, 0.0, -10.0, -20.0]]),
+    )
+
+    assert series.estimated_angles_deg[0] == pytest.approx(0.0)
+    assert np.isneginf(series.competitor_peak_db[0])
+    assert np.isposinf(series.peak_margins_db[0])
+    assert series.quality_flags == (DBF_QUALITY_OK,)
+
+
+@pytest.mark.parametrize(
+    ("true_angles", "scan_angles", "spectra_db", "message"),
+    [
+        (
+            np.array([[0.0]]),
+            np.array([0.0]),
+            np.array([[0.0]]),
+            "true_angles_deg must be one-dimensional",
+        ),
+        (
+            np.array([0.0]),
+            np.array([[0.0]]),
+            np.array([[0.0]]),
+            "scan_angles_deg must be one-dimensional",
+        ),
+        (
+            np.array([0.0]),
+            np.array([0.0]),
+            np.array([0.0]),
+            "spectra_db must be two-dimensional",
+        ),
+        (
+            np.array([0.0]),
+            np.array([-1.0, 0.0, 1.0]),
+            np.zeros((2, 3)),
+            "spectra_db shape must be",
+        ),
+        (
+            np.array([np.nan]),
+            np.array([0.0]),
+            np.array([[0.0]]),
+            "true_angles_deg must contain only finite values",
+        ),
+        (
+            np.array([0.0]),
+            np.array([0.0, np.inf]),
+            np.array([[0.0, -1.0]]),
+            "scan_angles_deg must contain only finite values",
+        ),
+        (
+            np.array([0.0]),
+            np.array([-1.0, -1.0, 1.0]),
+            np.array([[-1.0, 0.0, -1.0]]),
+            "scan_angles_deg must be strictly increasing",
+        ),
+    ],
+)
+def test_dbf_angle_frame_series_validates_input_shapes_and_angles(
+    true_angles: np.ndarray,
+    scan_angles: np.ndarray,
+    spectra_db: np.ndarray,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        dbf_angle_frame_series_from_spectra(
+            true_angles,
+            scan_angles,
+            spectra_db,
+        )
 
 
 def test_dbf_elevation_spectrum_matches_psf_elevation_cut() -> None:

@@ -8,6 +8,7 @@ from openpyxl import Workbook
 
 from virtual_array.analysis import calculate_metrics_and_psf, dbf_azimuth_spectrum
 from virtual_array.element_pattern import (
+    PATTERN_KIND_AMPLITUDE,
     PATTERN_KIND_PHASE,
     PATTERN_PLANE_HORIZONTAL,
     ChannelPatternSet,
@@ -236,6 +237,31 @@ def test_loads_hfss_phase_summary_from_complex_values(tmp_path) -> None:
     assert np.allclose(series_by_channel["Rx1"].values, np.array([-90.0, 0.0]))
 
 
+def test_loads_hfss_amplitude_summary_from_complex_values(tmp_path) -> None:
+    csv_path = tmp_path / "complex-amplitude-summary.csv"
+    csv_path.write_text(
+        '"Freq [GHz]","Phi [deg]","Theta [deg]","E0","E1"\n'
+        "24.125,90,-1,0.5+0.5j,0+2j\n"
+        "24.125,90,0,1+1j,3+4j\n",
+        encoding="utf-8",
+    )
+
+    series_by_channel = load_hfss_summary_pattern(
+        csv_path,
+        ["Tx1", "Rx1"],
+        value_kind=PATTERN_KIND_AMPLITUDE,
+    )
+
+    assert np.allclose(
+        series_by_channel["Tx1"].values,
+        20.0 * np.log10(np.array([np.sqrt(0.5), np.sqrt(2.0)])),
+    )
+    assert np.allclose(
+        series_by_channel["Rx1"].values,
+        20.0 * np.log10(np.array([2.0, 5.0])),
+    )
+
+
 def test_loads_hfss_phase_series_from_polar_complex_values(tmp_path) -> None:
     csv_path = tmp_path / "polar-phase.csv"
     csv_path.write_text(
@@ -251,6 +277,23 @@ def test_loads_hfss_phase_series_from_polar_complex_values(tmp_path) -> None:
     )
 
     assert np.allclose(series.values, np.array([-30.0, 0.0]))
+
+
+def test_loads_hfss_amplitude_series_from_polar_complex_values(tmp_path) -> None:
+    csv_path = tmp_path / "polar-amplitude.csv"
+    csv_path.write_text(
+        "Theta [deg],Amplitude\n"
+        "-1,1∠10\n"
+        "0,2∠40\n",
+        encoding="utf-8",
+    )
+
+    series = load_hfss_pattern_series(
+        csv_path,
+        value_kind=PATTERN_KIND_AMPLITUDE,
+    )
+
+    assert np.allclose(series.values, np.array([0.0, 20.0 * np.log10(2.0)]))
 
 
 def test_loads_hfss_phase_summary_from_xlsx_complex_values(tmp_path) -> None:
@@ -270,6 +313,100 @@ def test_loads_hfss_phase_summary_from_xlsx_complex_values(tmp_path) -> None:
 
     assert np.allclose(series_by_channel["Tx1"].values, np.array([-90.0, 0.0]))
     assert np.allclose(series_by_channel["Rx1"].values, np.array([-90.0, 0.0]))
+
+
+def test_loads_hfss_amplitude_summary_from_xlsx_complex_values(tmp_path) -> None:
+    path = tmp_path / "complex-amplitude-summary.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Freq [GHz]", "Phi [deg]", "Theta [deg]", "E0", "E1"])
+    sheet.append([24.125, 90, -1, "1+0j", "0+2j"])
+    sheet.append([24.125, 90, 0, "0+1j", "3+4j"])
+    workbook.save(path)
+
+    series_by_channel = load_hfss_summary_pattern(
+        path,
+        ["Tx1", "Rx1"],
+        value_kind=PATTERN_KIND_AMPLITUDE,
+    )
+
+    assert np.allclose(series_by_channel["Tx1"].values, np.array([0.0, 0.0]))
+    assert np.allclose(
+        series_by_channel["Rx1"].values,
+        20.0 * np.log10(np.array([2.0, 5.0])),
+    )
+
+
+def test_rejects_zero_magnitude_complex_amplitude(tmp_path) -> None:
+    csv_path = tmp_path / "zero-complex-amplitude.csv"
+    csv_path.write_text(
+        "Theta [deg],Amplitude\n"
+        "-1,0+0j\n"
+        "0,1+0j\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Invalid numeric value on row 2"):
+        load_hfss_pattern_series(
+            csv_path,
+            value_kind=PATTERN_KIND_AMPLITUDE,
+        )
+
+
+def test_real_amplitude_values_remain_db_values(tmp_path) -> None:
+    csv_path = tmp_path / "db-amplitude.csv"
+    csv_path.write_text(
+        "Theta [deg],Amplitude [dB]\n"
+        "-1,-6\n"
+        "0,0\n",
+        encoding="utf-8",
+    )
+
+    series = load_hfss_pattern_series(
+        csv_path,
+        value_kind=PATTERN_KIND_AMPLITUDE,
+    )
+
+    assert np.array_equal(series.values, np.array([-6.0, 0.0]))
+
+
+def test_complex_amplitude_and_phase_imports_reconstruct_channel_weight(tmp_path) -> None:
+    csv_path = tmp_path / "complex-field.csv"
+    csv_path.write_text(
+        "Theta [deg],Field\n"
+        "-1,1+1j\n"
+        "0,2+0j\n",
+        encoding="utf-8",
+    )
+    amplitude_series = load_hfss_pattern_series(
+        csv_path,
+        value_kind=PATTERN_KIND_AMPLITUDE,
+    )
+    phase_series = load_hfss_pattern_series(
+        csv_path,
+        value_kind=PATTERN_KIND_PHASE,
+    )
+    channel_patterns = ChannelPatternSet()
+    channel_patterns.set_series(
+        "Rx1",
+        PATTERN_KIND_AMPLITUDE,
+        PATTERN_PLANE_HORIZONTAL,
+        amplitude_series,
+    )
+    channel_patterns.set_series(
+        "Rx1",
+        PATTERN_KIND_PHASE,
+        PATTERN_PLANE_HORIZONTAL,
+        phase_series,
+    )
+
+    weights = channel_patterns.complex_weights(
+        ["Rx1"],
+        np.array([-1.0, 0.0]),
+        np.array([0.0, 0.0]),
+    )
+
+    assert np.allclose(weights[0], np.array([1.0 + 1.0j, 2.0 + 0.0j]))
 
 
 def test_phase_series_unwraps_when_interpolating_across_wrap() -> None:

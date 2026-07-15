@@ -700,9 +700,20 @@ def _parse_float(value: str) -> float:
 
 
 def _parse_hfss_pattern_value(value: str, value_kind: str) -> float:
-    if value_kind == PATTERN_KIND_PHASE and _looks_like_complex(value):
-        return _complex_phase_degrees(value)
+    if _looks_like_complex(value):
+        if value_kind == PATTERN_KIND_AMPLITUDE:
+            return _complex_amplitude_db(value)
+        if value_kind == PATTERN_KIND_PHASE:
+            return _complex_phase_degrees(value)
     return _parse_float(value)
+
+
+def _complex_amplitude_db(value: str) -> float:
+    """Convert a complex linear field value to the dB amplitude model."""
+    magnitude = float(abs(_parse_complex_value(value)))
+    if not np.isfinite(magnitude) or magnitude <= 0.0:
+        raise ValueError("complex amplitude magnitude must be positive and finite")
+    return float(20.0 * np.log10(magnitude))
 
 
 def _complex_phase_degrees(value: str) -> float:

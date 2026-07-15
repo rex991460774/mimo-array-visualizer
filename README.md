@@ -211,6 +211,12 @@ for physical or virtual channels. Summary CSV/XLSX files map columns
 left-to-right by channel order. Loaded patterns are applied as complex
 physical-channel weights (Tx × Rx for each virtual channel).
 
+Amplitude and phase imports both accept rectangular complex values such as
+`1+2j` / `1+2i` and polar values such as `2∠40`. For an amplitude import, the
+complex magnitude is converted to dB with `20*log10(abs(value))`; existing real
+values remain interpreted as dB. For a phase import, the complex angle is used
+and calibrated to the 0° row as before. Complex amplitude values must be nonzero.
+
 ---
 
 ## Development

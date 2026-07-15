@@ -9,6 +9,16 @@
 
 **Rendered implementation**
 
+- `D:\HFSS数据整理\mimo-array-visualizer\outputs\ui-modern-pass-20260715\after-final-1366-native\01-physical-virtual.png`
+- `D:\HFSS数据整理\mimo-array-visualizer\outputs\ui-modern-pass-20260715\after-final-1366-native\02-1d-dbf.png`
+- `D:\HFSS数据整理\mimo-array-visualizer\outputs\ui-modern-pass-20260715\after-final-1366-native\03-2d-dbf.png`
+- Dialog evidence continues through `07-user-manual.png` in the same directory.
+- Minimum-size 2T2R evidence: `outputs\ui-modern-pass-20260715\after-final-1100-2t2r`.
+- Minimum-size English evidence: `outputs\ui-modern-pass-20260715\english-1100-after-fix`.
+- Chaptered manual evidence at 1100×650: `outputs\manual-chapters-20260715-1100\07-user-manual.png`, with corresponding English and Japanese folders.
+
+**Previous rendered implementation**
+
 - `D:\HFSS数据整理\mimo-array-visualizer\outputs\ui-review-final\01-physical-virtual.png`
 - `D:\HFSS数据整理\mimo-array-visualizer\outputs\ui-review-final\02-1d-dbf.png`
 - `D:\HFSS数据整理\mimo-array-visualizer\outputs\ui-review-final\03-2d-dbf.png`
@@ -29,7 +39,7 @@
 
 - No actionable P0, P1, or P2 visual differences remain. The implementation intentionally improves the audited source rather than reproducing its misleading capability states.
 - Fonts and typography: common UI and plot text is at least 9 pt, CJK/system fallbacks remain sharp at 100%/125%/150%, headings have clear weight hierarchy, and long global status text is elided with a full tooltip.
-- Spacing and layout rhythm: the 8 px rhythm, 6 px control radius, 8 px card radius, draggable 78:22 splitter, compact command bar, and stacked Overview groups remain coherent from 1100×650 through 1920×1080.
+- Spacing and layout rhythm: the 8 px rhythm, 8 px control radius, 12 px card radius, draggable 78:22 splitter, compact command bar, and stacked Overview groups remain coherent from 1100×650 through 1920×1080.
 - Colors and tokens: the implementation consistently uses the Fluent canvas/surface/text/MAV-blue tokens. Neutral capability gaps are gray-blue, capability/quality cautions are amber, and red is reserved for destructive or genuinely dangerous states. Focus and interactive borders meet the specified semantic contrast intent.
 - Image quality and assets: the repository MAV raster asset is used directly, remains crisp at 150%, and is also embedded as the packaged executable icon. No visible asset was replaced with text, emoji, CSS art, or a handcrafted substitute.
 - Copy and content: all three page labels, empty states, global status, evaluation values, menus, and dialog actions were checked in Chinese, English, and Japanese. The numerical content is unchanged from the calculation layer.
@@ -45,6 +55,8 @@
 3. Initial comparison found a P2 dialog issue: the ideal one-channel dictionary used an alarming red callout, weak action hierarchy, and a widget-backed table. Fixed with severity-aware neutral/amber/risk callouts, a visible blue primary Apply button, `QDialogButtonBox`, and `QTableView` plus `QAbstractTableModel`. Post-fix evidence: `outputs\ui-review-final\04-dbf-dictionary.png`.
 4. Responsive comparison found P2 clipping at 1100×650 and language-dependent minimum widths up to 1309 px. Fixed by removing fixed plot minima, compacting the Overview rhythm, shortening command-bar copy, and allowing locale-aware intrinsic widths. Post-fix evidence: `outputs\ui-review-1100-final` and the exact-size smoke test.
 5. Focused comparison found P2 polish regressions: plot axes peeking around empty overlays, English/Japanese evaluation values remaining Chinese, a high-DPI logo capture gap, and duplicate-point legend overlap. Fixed with full-canvas overlays, localized dynamic metric values, device-pixel-ratio-aware logo rendering, and separated legend placement. Post-fix evidence: `outputs\lang-en-final`, `outputs\lang-ja-final`, `outputs\dpi-native-150-final`, and `outputs\scenario-full-2d`.
+6. The 2026-07-15 desktop-app pass reduced P1 engineering-tool density: tabs now use a quiet pivot treatment, nested metric borders are flattened, controls expose hover/focus/checked states, capability overlays hide meaningless transport controls, dialogs clamp to the parent work area, tables and scrollbars use the shared Fluent tokens, and the manual is searchable HTML. A follow-up English 1100×650 audit then fixed header/action truncation, narrow-dialog action reflow and its safe resize breakpoint, virtual-plot legend overlap, 3:1 interactive borders, danger checked-state semantics, localized accessibility names, and repeated callout-QSS growth. Post-fix evidence: `outputs\ui-modern-pass-20260715\after-final-1366-native`, `outputs\ui-modern-pass-20260715\after-final-1100-2t2r`, and `outputs\ui-modern-pass-20260715\english-1100-after-fix`.
+7. The help manual now uses 12 stable task-oriented chapters in Chinese, English, and Japanese. Help exposes direct chapter entries plus an F1 full-manual action; the dialog adds a resizable contents pane, cross-chapter search, result navigation, explicit no-result feedback, and keyboard-safe Enter handling. Content focuses on procedures, expected feedback, limits, persistence boundaries, and recovery rather than formulas. Post-fix evidence: `outputs\manual-chapters-20260715-1100`, `outputs\manual-chapters-20260715-en-1100-retry`, and `outputs\manual-chapters-20260715-ja-1100`.
 
 **Implementation Checklist**
 
@@ -54,6 +66,7 @@
 - [x] 1100×650, 1366×768, 1920×1080 and Windows 100%/125%/150% captures have no clipping or persistent overflow.
 - [x] Chinese, English, and Japanese labels and dynamic states are localized.
 - [x] Automated screenshots and native Qt smoke tests cover the three pages and four custom dialogs.
+- [x] The help manual has stable multilingual chapters, direct menu navigation, full-text chapter search, and content/schema regression tests.
 
 **Follow-up Polish**
 

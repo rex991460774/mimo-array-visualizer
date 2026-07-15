@@ -9,6 +9,8 @@ from typing import Any, Callable
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from .native_theme import TOKENS
+
 
 class TclError(Exception):
     """Compatibility exception used by Tk-oriented GUI code."""
@@ -483,12 +485,12 @@ def _style_rules(config: dict[str, Any], *, widget_kind: str) -> list[str]:
             color = "transparent"
         rules.append(f"border: {width}px solid {color};")
         if widget_kind in {"button", "entry", "toolbutton"}:
-            rules.append("border-radius: 6px;")
+            rules.append(f"border-radius: {TOKENS.radius}px;")
         elif widget_kind in {"frame", "groupbox"}:
-            rules.append("border-radius: 8px;")
+            rules.append(f"border-radius: {TOKENS.card_radius}px;")
     elif widget_kind in {"button", "toolbutton"}:
         rules.append("border: 1px solid transparent;")
-        rules.append("border-radius: 6px;")
+        rules.append(f"border-radius: {TOKENS.radius}px;")
     return rules
 
 
@@ -559,6 +561,19 @@ def _qss_for_widget(
             state_rules = _style_rules(state_config, widget_kind=widget_kind)
             if state_rules:
                 blocks.append(f"{selector}:{pseudo} {{ {' '.join(state_rules)} }}")
+        blocks.append(
+            f"{selector}:focus {{ border: 2px solid {TOKENS.focus}; }}"
+        )
+        if style_name and "danger" in style_name.lower():
+            blocks.append(
+                f"{selector}:checked {{ background-color: {TOKENS.danger_fill}; "
+                f"color: {TOKENS.danger}; border: 1px solid {TOKENS.danger}; }}"
+            )
+        else:
+            blocks.append(
+                f"{selector}:checked {{ background-color: {TOKENS.accent_tint}; "
+                f"color: {TOKENS.accent_pressed}; border: 1px solid {TOKENS.accent}; }}"
+            )
 
     if widget_kind == "entry":
         selection_bg = config.get("selectbackground")
@@ -570,6 +585,12 @@ def _qss_for_widget(
             selection_rules.append(f"selection-color: {selection_fg};")
         if selection_rules:
             blocks.append(f"{selector} {{ {' '.join(selection_rules)} }}")
+        blocks.append(
+            f"{selector}:focus {{ border: 2px solid {TOKENS.focus}; }}"
+        )
+
+    if widget_kind == "checkbutton":
+        blocks.append(f"{selector}:focus {{ color: {TOKENS.accent_pressed}; }}")
 
     if widget_kind == "groupbox":
         title_color = config.get("foreground")
@@ -598,6 +619,9 @@ def _qss_for_widget(
             selected_rules.append(f"color: {selected_fg};")
         if selected_rules:
             blocks.append(f"{selector}::item:selected {{ {' '.join(selected_rules)} }}")
+        blocks.append(
+            f"{selector}:focus {{ border: 2px solid {TOKENS.focus}; }}"
+        )
 
     if widget_kind == "notebook":
         tab_config = _merged_style(f"{style_name}.Tab" if style_name else "TNotebook.Tab", "TNotebook.Tab")
@@ -2267,11 +2291,11 @@ class Notebook(Widget):
 
     def __init__(self, parent: Any = None, **kwargs: Any) -> None:
         notebook = QtWidgets.QTabWidget(_qt_parent(parent))
-        notebook.setDocumentMode(False)
+        notebook.setDocumentMode(True)
         notebook.setUsesScrollButtons(False)
         notebook.setElideMode(QtCore.Qt.TextElideMode.ElideNone)
         notebook.tabBar().setExpanding(False)
-        notebook.tabBar().setDrawBase(True)
+        notebook.tabBar().setDrawBase(False)
         super().__init__(notebook, parent, **kwargs)
         self._tabs: dict[Widget, int] = {}
         self._tab_widgets: list[Widget] = []
@@ -2393,6 +2417,42 @@ class Notebook(Widget):
         pane_bg = pane_config.get("background") or "#ffffff"
         if tab_font is not None:
             self._qt.tabBar().setFont(tab_font)
+
+        if self._style_name == "Workspace.TNotebook":
+            tab_height = max(38, font_height + 12)
+            self._qt.setDocumentMode(True)
+            self._qt.tabBar().setDrawBase(False)
+            self._qt.tabBar().setMinimumHeight(tab_height)
+            self._qt.setStyleSheet(
+                "\n".join(
+                    [
+                        "QTabWidget::pane { "
+                        f"background: transparent; border: 0; top: 0px; "
+                        "}",
+                        "QTabWidget::tab-bar { left: 0px; }",
+                        "QTabBar { background: transparent; border: 0; }",
+                        "QTabBar::tab { "
+                        f"min-height: {tab_height - 2}px; padding: 0 16px; "
+                        f"background: transparent; color: {TOKENS.text_secondary}; "
+                        "font-weight: 600; border: 0; "
+                        "border-bottom: 3px solid transparent; margin-right: 2px; "
+                        "border-top-left-radius: 8px; border-top-right-radius: 8px; "
+                        "}",
+                        "QTabBar::tab:hover:!selected { "
+                        f"background: {TOKENS.surface_hover}; color: {TOKENS.text}; "
+                        "}",
+                        "QTabBar::tab:selected { "
+                        f"background: {TOKENS.accent_tint}; color: {TOKENS.accent_pressed}; "
+                        f"border-bottom: 3px solid {TOKENS.accent}; "
+                        "}",
+                        "QTabBar::tab:focus { "
+                        f"outline: 2px solid {TOKENS.focus}; "
+                        "}",
+                    ]
+                )
+            )
+            return
+
         pane_border = "#cfdbe7"
         unselected_rules = _style_rules(
             {**unselected_config, "padding": None},

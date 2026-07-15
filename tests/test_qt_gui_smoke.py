@@ -14,6 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 QtWidgets = pytest.importorskip("PySide6.QtWidgets")
 QtCore = pytest.importorskip("PySide6.QtCore")
+QtTest = pytest.importorskip("PySide6.QtTest")
 
 from scripts.capture_ui_review import (  # noqa: E402
     close_gui_session,
@@ -186,6 +187,11 @@ def test_native_shell_exposes_shortcuts_focus_and_splitter(gui_session) -> None:
         controller.native_actions["menu_export_performance_report"],
         QtGui.QAction,
     )
+    assert isinstance(controller.native_manual_menu, QtWidgets.QMenu)
+    assert len(controller.native_manual_chapter_actions) == 12
+    assert controller.native_actions["menu_user_manual_open"].shortcut() == (
+        QtGui.QKeySequence(QtGui.QKeySequence.StandardKey.HelpContents)
+    )
 
     assert controller.auto_apply_button._qt.property("fluentRole") == "primary"
     focusable = window.findChildren(QtWidgets.QLineEdit) + window.findChildren(
@@ -198,6 +204,97 @@ def test_native_shell_exposes_shortcuts_focus_and_splitter(gui_session) -> None:
         if widget.isEnabled() and widget.isVisible()
     )
     assert controller.main_notebook._qt.tabBar().accessibleName()
+
+
+def test_modern_theme_and_primary_interactions_are_explicit(gui_session) -> None:
+    from PySide6 import QtGui
+
+    from virtual_array.native_theme import TOKENS, application_stylesheet
+
+    controller = gui_session.controller
+    stylesheet = application_stylesheet()
+
+    assert TOKENS.radius >= 8
+    assert TOKENS.card_radius >= TOKENS.radius
+    assert "QPushButton:focus" in stylesheet
+    assert "QScrollBar:vertical" in stylesheet
+    assert "QTabBar::tab:selected" in stylesheet
+    assert f"border: 1px solid {TOKENS.control_border}" in stylesheet
+
+    def contrast_ratio(first: str, second: str) -> float:
+        def luminance(value: str) -> float:
+            color = QtGui.QColor(value)
+            channels = []
+            for channel in (color.redF(), color.greenF(), color.blueF()):
+                channels.append(
+                    channel / 12.92
+                    if channel <= 0.04045
+                    else ((channel + 0.055) / 1.055) ** 2.4
+                )
+            return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+        lighter, darker = sorted((luminance(first), luminance(second)), reverse=True)
+        return (lighter + 0.05) / (darker + 0.05)
+
+    assert contrast_ratio(TOKENS.control_border, TOKENS.surface) >= 3.0
+
+    assert controller.auto_apply_button._qt.isDefault()
+    assert controller.physical_action_buttons["physical_delete"]._qt.isCheckable()
+    assert controller.az_chart.play_button._qt.isCheckable()
+    assert controller.el_chart.play_button._qt.isCheckable()
+    assert controller.dbf2d_az_button._qt.isCheckable()
+    assert controller.dbf2d_el_button._qt.isCheckable()
+
+    original_delete_mode = controller.delete_mode
+    try:
+        controller.delete_mode = True
+        controller._update_delete_button_state()
+        delete_stylesheet = controller.physical_action_buttons[
+            "physical_delete"
+        ]._qt.styleSheet()
+        assert TOKENS.danger_fill in delete_stylesheet
+        assert TOKENS.danger in delete_stylesheet
+    finally:
+        controller.delete_mode = original_delete_mode
+        controller._update_delete_button_state()
+
+
+def test_callout_role_updates_do_not_grow_local_stylesheets(gui_session) -> None:
+    from virtual_array.native_theme import mark_callout
+
+    label = QtWidgets.QLabel("Quality")
+    label.setStyleSheet("QLabel { color: black; }")
+    lengths = []
+    for _cycle in range(5):
+        for role in ("neutral", "success", "warning", "danger"):
+            mark_callout(label, role)
+            lengths.append(len(label.styleSheet()))
+    assert len(set(lengths[4:])) <= 4
+    assert max(lengths) < 500
+    label.deleteLater()
+    process_events(gui_session.app, cycles=2)
+
+
+def test_workspace_tabs_support_keyboard_navigation(gui_session) -> None:
+    controller = gui_session.controller
+    tab_widget = controller.main_notebook._qt
+    tab_bar = tab_widget.tabBar()
+    original_index = tab_widget.currentIndex()
+
+    try:
+        tab_widget.setCurrentIndex(0)
+        tab_bar.setFocus()
+        QtTest.QTest.keyClick(
+            tab_widget,
+            QtCore.Qt.Key.Key_Tab,
+            QtCore.Qt.KeyboardModifier.ControlModifier,
+        )
+        process_events(gui_session.app, cycles=4)
+        assert tab_widget.currentIndex() == 1
+        assert tab_bar.hasFocus()
+    finally:
+        tab_widget.setCurrentIndex(original_index)
+        process_events(gui_session.app, cycles=3)
 
 
 def test_performance_report_worker_runs_off_the_gui_thread(
@@ -347,6 +444,8 @@ def test_configuration_and_manual_dialogs_use_native_qt_controls(gui_session) ->
         closed = False
         try:
             assert dialog.windowTitle()
+            assert dialog.width() <= gui_session.window.width()
+            assert dialog.height() <= gui_session.window.height()
             button_boxes = dialog.findChildren(QtWidgets.QDialogButtonBox)
             assert button_boxes, "custom dialogs must use QDialogButtonBox"
             if expects_table:
@@ -357,10 +456,33 @@ def test_configuration_and_manual_dialogs_use_native_qt_controls(gui_session) ->
                     for table in tables
                 )
                 assert all(table.model().columnCount() > 0 for table in tables)
+                if dialog.objectName() == "channelPatternsDialog":
+                    for button in dialog.findChildren(QtWidgets.QAbstractButton):
+                        if not button.isVisible() or not button.text():
+                            continue
+                        text_width = button.fontMetrics().horizontalAdvance(button.text())
+                        assert text_width + 12 <= button.width(), button.text()
             if expects_text_browser:
+                from virtual_array.user_manual import manual_chapters
+
                 browsers = dialog.findChildren(QtWidgets.QTextBrowser)
                 assert len(browsers) == 1
                 assert browsers[0].toPlainText().strip()
+                search = dialog.findChild(QtWidgets.QLineEdit, "manualSearch")
+                assert search is not None
+                assert search.placeholderText()
+                assert search.isClearButtonEnabled()
+                chapter_list = dialog.findChild(
+                    QtWidgets.QListWidget, "manualChapterList"
+                )
+                assert chapter_list is not None
+                assert chapter_list.count() == len(manual_chapters(controller.language))
+                assert chapter_list.accessibleName()
+                splitter = dialog.findChild(
+                    QtWidgets.QSplitter, "manualContentSplitter"
+                )
+                assert splitter is not None
+                assert "<h2" in browsers[0].toHtml().lower()
 
             _close_with_standard_button(
                 gui_session,
@@ -375,6 +497,109 @@ def test_configuration_and_manual_dialogs_use_native_qt_controls(gui_session) ->
                 except RuntimeError:
                     pass
                 process_events(gui_session.app, cycles=3)
+
+
+def test_manual_chapter_navigation_and_search(gui_session) -> None:
+    controller = gui_session.controller
+    original_language = controller.language
+    controller.set_language("zh")
+    dialog = _open_modeless_dialog(gui_session, controller._show_user_manual_dialog)
+    closed = False
+    try:
+        chapter_list = dialog.findChild(QtWidgets.QListWidget, "manualChapterList")
+        browser = dialog.findChild(QtWidgets.QTextBrowser, "manualBrowser")
+        search = dialog.findChild(QtWidgets.QLineEdit, "manualSearch")
+        result_count = dialog.findChild(QtWidgets.QLabel, "manualSearchResultCount")
+        assert chapter_list is not None
+        assert browser is not None
+        assert search is not None
+        assert result_count is not None
+        assert chapter_list.count() == 12
+
+        chapter_list.setCurrentRow(chapter_list.count() - 1)
+        process_events(gui_session.app, cycles=3)
+        assert chapter_list.currentItem().text() in browser.toPlainText()
+
+        QtTest.QTest.keyClick(
+            dialog,
+            QtCore.Qt.Key.Key_F,
+            QtCore.Qt.KeyboardModifier.ControlModifier,
+        )
+        process_events(gui_session.app, cycles=2)
+        assert search.hasFocus()
+
+        search.setText("Ctrl+Shift+Z")
+        process_events(gui_session.app, cycles=3)
+        visible_rows = [
+            row
+            for row in range(chapter_list.count())
+            if not chapter_list.item(row).isHidden()
+        ]
+        assert visible_rows
+        assert len(visible_rows) < chapter_list.count()
+        assert result_count.text()
+
+        QtTest.QTest.keyClick(search, QtCore.Qt.Key.Key_Return)
+        process_events(gui_session.app, cycles=2)
+        assert dialog.isVisible(), "Enter in manual search must not close the dialog"
+
+        search.setText("__definitely_not_a_manual_term__")
+        process_events(gui_session.app, cycles=2)
+        assert chapter_list.currentRow() == -1
+        assert "未找到" in browser.toPlainText()
+
+        search.clear()
+        process_events(gui_session.app, cycles=2)
+        assert all(
+            not chapter_list.item(row).isHidden()
+            for row in range(chapter_list.count())
+        )
+
+        _close_with_standard_button(
+            gui_session,
+            dialog,
+            QtWidgets.QDialogButtonBox.StandardButton.Close,
+        )
+        closed = True
+    finally:
+        controller.set_language(original_language)
+        if not closed:
+            try:
+                dialog.reject()
+            except RuntimeError:
+                pass
+
+
+def test_help_menu_chapter_action_opens_the_requested_section(gui_session) -> None:
+    controller = gui_session.controller
+    original_language = controller.language
+    controller.set_language("zh")
+    requested_key = "files_reports"
+    action = controller.native_manual_chapter_actions[requested_key]
+    dialog = _open_modeless_dialog(gui_session, action.trigger)
+    closed = False
+    try:
+        chapter_list = dialog.findChild(QtWidgets.QListWidget, "manualChapterList")
+        assert chapter_list is not None
+        current = chapter_list.currentItem()
+        assert current is not None
+        assert current.data(QtCore.Qt.ItemDataRole.UserRole) == requested_key
+        assert current.text() in dialog.findChild(
+            QtWidgets.QTextBrowser, "manualBrowser"
+        ).toPlainText()
+        _close_with_standard_button(
+            gui_session,
+            dialog,
+            QtWidgets.QDialogButtonBox.StandardButton.Close,
+        )
+        closed = True
+    finally:
+        controller.set_language(original_language)
+        if not closed:
+            try:
+                dialog.reject()
+            except RuntimeError:
+                pass
 
 
 def test_element_pattern_confirmation_dialog_can_be_cancelled_modally(
@@ -417,6 +642,7 @@ def test_element_pattern_confirmation_dialog_can_be_cancelled_modally(
         dialog = opened[-1]
         try:
             observation["modal"] = dialog.isModal()
+            observation["size"] = (dialog.width(), dialog.height())
             boxes = dialog.findChildren(QtWidgets.QDialogButtonBox)
             observation["button_box_count"] = len(boxes)
             cancel_buttons = [
@@ -448,6 +674,9 @@ def test_element_pattern_confirmation_dialog_can_be_cancelled_modally(
     assert observation.get("modal") is True
     assert observation.get("button_box_count", 0) >= 1
     assert observation.get("has_cancel") is True
+    width, height = observation["size"]
+    assert width <= gui_session.window.width()
+    assert height <= gui_session.window.height()
     assert not [
         dialog
         for dialog in _visible_dialogs(gui_session)
@@ -464,8 +693,13 @@ def test_main_page_labels_are_localized_in_all_supported_languages(gui_session) 
     }
     expected_dynamic = {
         "zh": ("不可用", "边界受限"),
-        "en": ("Unavailable", "Boundary limited"),
+        "en": ("Unavailable", "At boundary"),
         "ja": ("利用不可", "境界制限"),
+    }
+    expected_accessible = {
+        "zh": ("工作区页面", "应用状态"),
+        "en": ("Workspace pages", "Application status"),
+        "ja": ("ワークスペースページ", "アプリケーション状態"),
     }
     original_language = controller.language
 
@@ -478,6 +712,36 @@ def test_main_page_labels_are_localized_in_all_supported_languages(gui_session) 
             margin, cut_reason = expected_dynamic[language]
             assert controller.secondary_value_labels["row_az_margin"]._qt.text() == margin
             assert controller.secondary_value_labels["row_az_cut"]._qt.text() == cut_reason
+            workspace_name, status_name = expected_accessible[language]
+            assert controller.main_notebook._qt.tabBar().accessibleName() == workspace_name
+            assert controller.native_status_bar.accessibleName() == status_name
+            for overlay in (
+                controller.az_chart.empty_overlay,
+                controller.el_chart.empty_overlay,
+                controller.dbf2d_empty_overlay,
+            ):
+                assert overlay is not None
+                assert overlay.accessibleName()
+            assert (
+                controller.auto_apply_button._qt.accessibleName()
+                == controller.auto_apply_button._qt.text()
+            )
+            assert (
+                controller.az_chart.play_button._qt.accessibleName()
+                == controller.az_chart.play_button._qt.text()
+            )
+            if language == "en":
+                for label in (
+                    controller.header_title_label._qt,
+                    controller.header_subtitle_label._qt,
+                ):
+                    assert (
+                        label.fontMetrics().horizontalAdvance(label.text())
+                        <= label.width()
+                    )
+                assert controller.header_subtitle_label._qt.toolTip().startswith(
+                    "Array layout"
+                )
     finally:
         controller.set_language(original_language)
         process_events(gui_session.app, cycles=5)
@@ -514,6 +778,9 @@ def test_initial_1t1r_uses_neutral_capability_empty_states(gui_session) -> None:
             assert overlay is not None and overlay.isVisible()
             assert overlay.title_label.text() == expected_title
             assert overlay.body_label.text()
+            assert overlay.action_button.isVisible()
+            assert overlay.action_button.text()
+            assert not chart.footer_widget._qt.isVisible()
             assert not chart.play_button._qt.isEnabled()
 
         navigator.select(2)
@@ -522,6 +789,8 @@ def test_initial_1t1r_uses_neutral_capability_empty_states(gui_session) -> None:
         assert overlay_2d is not None and overlay_2d.isVisible()
         assert overlay_2d.title_label.text() == "当前阵列不具备完整 2D 测角能力"
         assert overlay_2d.body_label.text()
+        assert overlay_2d.action_button.isVisible()
+        assert not controller.dbf2d_controls_widget._qt.isVisible()
         assert controller.dbf2d_hover_db.size == 0
         assert not controller.dbf2d_az_button._qt.isEnabled()
         assert not controller.dbf2d_el_button._qt.isEnabled()

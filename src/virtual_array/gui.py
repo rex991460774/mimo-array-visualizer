@@ -70,9 +70,21 @@ from .element_pattern import (
 from .geometry import AntennaArray, ArrayPoint
 from .grid import GRID_STEP, snap_to_grid
 from .logging_config import configure_logging, current_log_path, install_excepthook
-from .native_theme import TOKENS, apply_native_theme, mark_primary
+from .native_theme import (
+    TOKENS,
+    apply_native_theme,
+    fit_dialog_to_parent,
+    mark_callout,
+    mark_primary,
+    mark_quiet,
+)
 from .qt_plot import Figure, FigureCanvasTkAgg, MplButton, Rectangle, rcParams
 from .qt_tk import filedialog, messagebox, tk, ttk
+from .user_manual import (
+    manual_chapter_html,
+    manual_chapter_search_text,
+    manual_chapters,
+)
 from .version import APP_VERSION
 
 
@@ -171,7 +183,7 @@ VIRT_FIG_W = 5.8
 VIRT_FIG_H = 4.3
 RESPONSE_FIG_W = 5.8
 RESPONSE_FIG_H = 4.0
-PLOT_COLUMN_MIN_WIDTH = 450
+PLOT_COLUMN_MIN_WIDTH = 380
 EVAL_PANEL_MIN_WIDTH = 380
 WORKSPACE_DEFAULT_PANE_WIDTH = WINDOW_WIDTH // 2
 DBF2D_CANVAS_SIZE = 310
@@ -198,8 +210,23 @@ UI_TEXT = {
     },
     "app_subtitle": {
         "zh": "阵列布局、虚拟孔径、响应曲线与DBF扫描",
-        "en": "Array layout, virtual aperture, response curves, and DBF scan",
+        "en": "Array layout, virtual aperture, and DBF response",
         "ja": "アレイ配置、仮想開口、応答曲線、DBFスキャン",
+    },
+    "accessibility_workspace_pages": {
+        "zh": "工作区页面",
+        "en": "Workspace pages",
+        "ja": "ワークスペースページ",
+    },
+    "accessibility_plot_capability": {
+        "zh": "图表能力提示",
+        "en": "Plot capability message",
+        "ja": "チャート機能の案内",
+    },
+    "accessibility_status_bar": {
+        "zh": "应用状态",
+        "en": "Application status",
+        "ja": "アプリケーション状態",
     },
     "main_tab_physical_virtual": {
         "zh": "物理与虚拟阵列",
@@ -233,9 +260,19 @@ UI_TEXT = {
         "en": "Both axes need aperture. If only one axis is available, use 1D DBF.",
         "ja": "両軸に開口が必要です。一方向のみ有効な場合は 1D DBF を使用してください。",
     },
+    "empty_action_edit_array": {
+        "zh": "调整阵列",
+        "en": "Edit array",
+        "ja": "アレイを調整",
+    },
+    "empty_action_view_1d": {
+        "zh": "转到 1D DBF",
+        "en": "Open 1D DBF",
+        "ja": "1D DBF を開く",
+    },
     "chip_frequency": {"zh": "频率", "en": "Frequency", "ja": "周波数"},
     "chip_dictionary": {"zh": "DBF字典", "en": "DBF Dictionary", "ja": "DBF辞書"},
-    "chip_pattern": {"zh": "通道辐相", "en": "Ch Amp/Phase", "ja": "チャネル振幅/位相"},
+    "chip_pattern": {"zh": "通道幅相", "en": "Ch Amp/Phase", "ja": "チャネル振幅/位相"},
     "chip_virtual_channels": {"zh": "虚拟通道", "en": "Virtual", "ja": "仮想"},
     "chip_az_resolution": {"zh": "方位分辨率", "en": "Az Res", "ja": "方位分解能"},
     "chip_el_resolution": {"zh": "俯仰分辨率", "en": "El Res", "ja": "仰角分解能"},
@@ -341,71 +378,56 @@ UI_TEXT = {
     "menu_about": {"zh": "关于", "en": "About", "ja": "このアプリについて"},
     "menu_user_manual": {"zh": "使用说明", "en": "User Manual", "ja": "使用説明"},
     "manual_title": {"zh": "MIMO阵列可视化工具使用说明", "en": "MIMO Array Visualizer User Manual", "ja": "MIMOアレイ可視化ツール使用説明"},
-    "manual_body": {
-        "zh": (
-            "MIMO阵列可视化工具使用说明\n\n"
-            "这个程序用来快速搭建 TX/RX 阵列，观察虚拟孔径，并检查 DBF 测角是否容易出现模糊、跳变或旁瓣竞争。\n\n"
-            "一、主要子模块\n"
-            "物理阵列：这里是真实 TX/RX 的位置。可以添加、删除、拖动通道，坐标单位按波长显示。物理位置改变后，后面的虚拟阵列和角谱都会重新计算。\n"
-            "虚拟阵列：显示 TX 与 RX 组合后的等效采样点。点越分散，通常角分辨率越好；点重合越多，可用虚拟通道越少。\n"
-            "方位/俯仰 1D 角谱：看某一个真实角下，DBF 字典会把峰值打到哪里。橙色线是真实角，叉号是估计峰值。拖动橙色线可以手动检查不同真实角。\n"
-            "总览与测角评估：总览看通道数、虚拟通道、口径和分辨率；测角评估看不模糊范围、范围内最大误差、竞争峰裕量和截断原因。\n"
-            "2D DBF 热图：同时看方位和俯仰。颜色越亮表示相关系数越高，白色十字是真实角，叉号是峰值位置。拖动十字可以同时改变真实方位和真实俯仰。\n"
-            "底部参数：频率影响物理尺寸换算；竞争峰裕量用于判断峰值是否可靠；自动排阵可以快速生成指定数量的 T/R 通道；DBF 显示可在 dB 和模值之间切换，dB 适合看动态范围，模值适合看轮廓边界。\n\n"
-            "二、顶部二级菜单\n"
-            "文件 > 导入阵面 JSON：读取之前保存的 TX/RX 布局。\n"
-            "文件 > 导出阵面 JSON：保存当前布局、评估结果和当前配置，方便复现实验。\n"
-            "文件 > 输出当前配置性能报告：选择 PDF 路径、测角关注范围、逐帧 Hold 真实角范围及 dB/模值角谱。每种角谱独占一页，并可附带 CSV/JSON 数据包。\n"
-            "编辑 > 撤销/重做阵列编辑：回退或恢复最近的阵列位置、添加、删除操作。\n"
-            "编辑 > 配置通道幅相：给物理通道或虚拟通道加载 HFSS 等工具导出的幅度/相位方向图。不加载时，该通道按理想通道处理。汇总 CSV/XLSX 可选择导入目标：物理通道按 Tx/Rx 单通道规则读取；虚拟通道按 Tx1Rx1、Tx1Rx2 到 TxNRxN 的顺序读取。\n"
-            "编辑 > 配置 DBF 字典：选择测角时使用哪种字典。理想几何字典只按阵列几何算相位；理想反向相位用于快速检查符号约定；通道幅相校准字典会叠加已导入的通道方向图；导入 CSV/XLSX 字典用于使用外部仿真或实测字典。\n"
-            "视图 > 中文/英文/日文：切换界面语言。\n"
-            "帮助 > 使用说明：打开本说明。帮助 > 关于：查看版本和日志路径。\n\n"
-            "三、常见使用顺序\n"
-            "先摆放或导入阵列，再设置频率和竞争峰裕量；如果有通道幅相或外部字典，再从编辑菜单导入；最后看 1D 角谱、2D 热图和测角评估，确认峰值是否跟随真实角、误差是否可接受。"
-        ),
-        "en": (
-            "MIMO Array Visualizer User Manual\n\n"
-            "This tool helps you build a TX/RX array, inspect the virtual aperture, and check whether DBF angle estimation is likely to suffer from ambiguity, jumps, or competing sidelobes.\n\n"
-            "Main modules\n"
-            "Physical array: the real TX/RX positions. Add, delete, or drag channels. Coordinates are displayed in wavelengths, and every layout change recalculates the virtual array and spectra.\n"
-            "Virtual array: the equivalent sampling points created by TX/RX combinations. Wider spread usually improves resolution; duplicate points reduce usable virtual channels.\n"
-            "Az/El 1D spectra: show where the DBF dictionary peaks for a selected true angle. The orange line is the true angle and the cross is the estimated peak. Drag the orange line to inspect other angles.\n"
-            "Overview and angle evaluation: overview reports channel count, virtual channels, aperture, and resolution; angle evaluation reports no-fold range, max error, peak margin, and why the valid range stops.\n"
-            "2D DBF heatmap: shows azimuth and elevation together. Brighter color means higher correlation, the white crosshair is the true angle, and the cross marker is the peak. Drag the crosshair to change both true angles.\n"
-            "Footer parameters: frequency controls size conversion; peak margin controls reliability checks; Auto Array quickly creates a requested T/R count; DBF Display switches between dB and magnitude, where dB is better for dynamic range and magnitude is better for shape boundaries.\n\n"
-            "Top menu items\n"
-            "File > Import Array JSON: load a saved TX/RX layout.\n"
-            "File > Export Array JSON: save the current layout, evaluation, and configuration.\n"
-            "File > Export Current Performance Report: choose the PDF path, performance focus ranges, frame-hold true-angle ranges, and dB/magnitude spectrum pages. Each spectrum uses its own page; CSV/JSON data is optional.\n"
-            "Edit > Undo/Redo: step backward or forward through recent layout edits.\n"
-            "Edit > Configure Channel Amp/Phase: load amplitude or phase patterns for physical channels or synthesized virtual channels. Missing channels stay ideal. Choose the summary import target explicitly: physical uses Tx/Rx channel rules, while virtual uses Tx1Rx1, Tx1Rx2 through TxNRxN order.\n"
-            "Edit > Configure DBF Dictionary: choose the dictionary used for angle estimation. Ideal geometric uses only array geometry; ideal reversed phase checks sign convention; channel amp/phase uses imported channel data; imported CSV/XLSX uses an external simulated or measured dictionary.\n"
-            "View: switch language. Help: open this manual or the About dialog.\n\n"
-            "Typical flow\n"
-            "Place or import the array, set frequency and peak margin, import channel data or dictionaries if available, then check the 1D spectra, 2D heatmap, and angle evaluation to confirm that peaks track the true angle."
-        ),
-        "ja": (
-            "MIMOアレイ可視化ツール使用説明\n\n"
-            "このツールは TX/RX アレイを作成し、仮想開口を確認し、DBF 測角で曖昧性、ジャンプ、競合サイドローブが起きやすいかを見るためのものです。\n\n"
-            "主なモジュール\n"
-            "物理アレイ：実際の TX/RX 位置です。チャネルの追加、削除、ドラッグができ、座標は波長単位で表示されます。\n"
-            "仮想アレイ：TX/RX の組み合わせでできる等価サンプル点です。広がりが大きいほど分解能は良くなりやすく、重複点が多いほど有効チャネルは減ります。\n"
-            "方位/仰角 1D スペクトル：選んだ真角度に対して DBF 辞書のピークがどこに出るかを示します。オレンジ線が真角度、× が推定ピークです。\n"
-            "概要と測角評価：概要はチャネル数、仮想チャネル、開口、分解能を表示します。測角評価は非曖昧範囲、最大誤差、ピーク余裕、範囲が止まる理由を表示します。\n"
-            "2D DBF ヒートマップ：方位と仰角を同時に見ます。明るいほど相関係数が高く、白い十字が真角度、× がピークです。\n"
-            "下部パラメータ：周波数は寸法換算に使います。ピーク余裕は信頼性判定に使います。自動配置は指定した T/R 数を素早く作成します。DBF 表示は dB と振幅を切り替えられ、dB はダイナミックレンジ、振幅は形状の境界確認に向いています。\n\n"
-            "上部メニュー\n"
-            "ファイル > アレイ JSON 読み込み：保存済みの TX/RX 配置を読み込みます。\n"
-            "ファイル > アレイ JSON 書き出し：現在の配置、評価、設定を保存します。\n"
-            "ファイル > 現在の設定性能レポート：PDF 保存先、評価範囲、フレーム Hold 範囲、dB/振幅スペクトルを設定します。各スペクトルは 1 ページを専有し、CSV/JSON データは任意です。\n"
-            "編集 > 元に戻す/やり直し：最近の配置編集を戻す、または復元します。\n"
-            "編集 > チャネル振幅/位相を設定：物理チャネルまたは合成済み仮想チャネルの振幅/位相データを読み込みます。集約 CSV/XLSX は読込先を選択できます。物理は Tx/Rx ルール、仮想は Tx1Rx1、Tx1Rx2 から TxNRxN の順に読みます。\n"
-            "編集 > DBF 辞書設定：測角に使う辞書を選びます。理想幾何、逆位相確認、チャネル振幅/位相、外部 CSV/XLSX 辞書を選択できます。\n"
-            "表示：言語を切り替えます。ヘルプ：この説明書またはバージョン情報を開きます。\n\n"
-            "基本の流れ\n"
-            "アレイを配置または読み込み、周波数とピーク余裕を設定し、必要ならチャネルデータや辞書を読み込み、1D スペクトル、2D ヒートマップ、測角評価を確認します。"
-        ),
+    "manual_search_placeholder": {
+        "zh": "搜索全部章节",
+        "en": "Search all chapters",
+        "ja": "すべての章を検索",
+    },
+    "menu_user_manual_open": {
+        "zh": "打开完整说明",
+        "en": "Open full manual",
+        "ja": "完整な説明書を開く",
+    },
+    "manual_contents": {"zh": "章节目录", "en": "Contents", "ja": "目次"},
+    "manual_contents_accessible": {
+        "zh": "使用说明章节目录",
+        "en": "User manual chapter list",
+        "ja": "使用説明の章一覧",
+    },
+    "manual_body_accessible": {
+        "zh": "当前章节内容",
+        "en": "Current manual chapter",
+        "ja": "現在の章の内容",
+    },
+    "manual_search_result_count": {
+        "zh": "匹配 {count} 个章节",
+        "en": "{count} matching chapters",
+        "ja": "{count} 章に一致",
+    },
+    "manual_search_position": {
+        "zh": "{current} / {total}",
+        "en": "{current} / {total}",
+        "ja": "{current} / {total}",
+    },
+    "manual_search_no_results": {
+        "zh": "未找到匹配章节",
+        "en": "No matching chapters",
+        "ja": "一致する章がありません",
+    },
+    "manual_search_no_results_detail": {
+        "zh": "请换用功能名、按钮名、文件格式或状态提示进行搜索。",
+        "en": "Try a feature, button, file format, or status message.",
+        "ja": "機能名、ボタン名、ファイル形式、またはステータス表示で検索してください。",
+    },
+    "manual_previous_result": {
+        "zh": "上一个匹配章节",
+        "en": "Previous matching chapter",
+        "ja": "前の一致章",
+    },
+    "manual_next_result": {
+        "zh": "下一个匹配章节",
+        "en": "Next matching chapter",
+        "ja": "次の一致章",
     },
     "about_title": {"zh": "关于 MIMO阵列工作台", "en": "About MIMO Array Workbench", "ja": "MIMOアレイワークベンチについて"},
     "about_message": {
@@ -441,8 +463,8 @@ UI_TEXT = {
     "pattern_state_ideal": {"zh": "理想", "en": "ideal", "ja": "理想"},
     "pattern_state_imported": {"zh": "导入", "en": "imported", "ja": "読込"},
     "pattern_state_mixed": {"zh": "混合", "en": "mixed", "ja": "混在"},
-    "overview_title": {"zh": "  阵列概览  ", "en": "  Array Overview  ", "ja": "  アレイ概要  "},
-    "angle_eval_title": {"zh": "  测角评估  ", "en": "  Angle Evaluation  ", "ja": "  測角評価  "},
+    "overview_title": {"zh": "阵列概览", "en": "Array Overview", "ja": "アレイ概要"},
+    "angle_eval_title": {"zh": "测角评估", "en": "Angle Evaluation", "ja": "測角評価"},
     "eval_tab_overview": {"zh": "总览", "en": "Overview", "ja": "概要"},
     "eval_tab_angle": {"zh": "测角", "en": "Angle", "ja": "測角"},
     "eval_tab_dbf2d": {"zh": "2D DBF", "en": "2D DBF", "ja": "2D DBF"},
@@ -757,15 +779,15 @@ UI_TEXT = {
     "row_el_no_fold_error": {"zh": "俯仰范围内最大误差", "en": "El Max Error in Range", "ja": "仰角範囲内最大誤差"},
     "row_el_margin": {"zh": "俯仰竞争峰裕量", "en": "El Peak Margin", "ja": "仰角競合ピーク余裕"},
     "row_el_cut": {"zh": "俯仰截断原因", "en": "El Cut Reason", "ja": "仰角打切り理由"},
-    "metric_no_fold": {"zh": "不模糊范围", "en": "No-Fold Range", "ja": "非曖昧範囲"},
+    "metric_no_fold": {"zh": "不模糊范围", "en": "No-Fold", "ja": "非曖昧範囲"},
     "metric_max_error": {"zh": "最大误差", "en": "Max Error", "ja": "最大誤差"},
     "metric_peak_margin": {"zh": "竞争峰裕量", "en": "Peak Margin", "ja": "競合ピーク余裕"},
     "metric_cut_reason": {"zh": "截断原因", "en": "Cut Reason", "ja": "打切り理由"},
     "metric_value_no_competitor": {"zh": "无竞争峰", "en": "No competitor", "ja": "競合ピークなし"},
     "metric_value_unavailable": {"zh": "不可用", "en": "Unavailable", "ja": "利用不可"},
     "cut_reason_peak_blurred": {"zh": "峰模糊", "en": "Peak blurred", "ja": "ピーク曖昧"},
-    "cut_reason_data_boundary": {"zh": "边界", "en": "Data boundary", "ja": "データ境界"},
-    "cut_reason_boundary_limited": {"zh": "边界受限", "en": "Boundary limited", "ja": "境界制限"},
+    "cut_reason_data_boundary": {"zh": "边界", "en": "Data edge", "ja": "データ境界"},
+    "cut_reason_boundary_limited": {"zh": "边界受限", "en": "At boundary", "ja": "境界制限"},
     "cut_reason_error_jump": {"zh": "误差跳变", "en": "Error jump", "ja": "誤差ジャンプ"},
     "cut_reason_unreliable": {"zh": "谱不可靠", "en": "Unreliable spectrum", "ja": "スペクトル不安定"},
     "cut_reason_normal": {"zh": "正常", "en": "Normal", "ja": "正常"},
@@ -958,41 +980,41 @@ THEME = {
     # Base
     "bg": TOKENS.canvas,
     "card_bg": TOKENS.surface,
-    "metric_bg": "#f7fbff",
-    "panel_bg": "#f3f8fd",
-    "panel_alt_bg": "#e7f0fb",
-    "card_border": "#d6e4f2",
-    "metric_border": "#d4e2f0",
-    "status_bar_bg": "#f7fbff",
-    "toolbar_group_bg": "#f9fcff",
-    "input_bg": "#ffffff",
-    "disabled_bg": "#ecf2f8",
-    "app_menu_bg": "#fbfdff",
-    "app_menu_hover": "#eaf3ff",
-    "app_menu_text": "#4f5f70",
-    "app_menu_text_active": "#0f6cbd",
-    "header_bg": "#f5faff",
-    "header_panel_bg": "#fbfdff",
-    "header_border": "#d7e5f3",
-    "chip_bg": "#f8fbff",
-    "chip_border": "#d6e4f2",
-    "app_logo_bg": "#0078d4",
+    "metric_bg": TOKENS.surface_subtle,
+    "panel_bg": TOKENS.canvas,
+    "panel_alt_bg": TOKENS.surface_muted,
+    "card_border": TOKENS.border,
+    "metric_border": TOKENS.border,
+    "status_bar_bg": TOKENS.surface,
+    "toolbar_group_bg": TOKENS.surface,
+    "input_bg": TOKENS.surface,
+    "disabled_bg": TOKENS.disabled,
+    "app_menu_bg": TOKENS.surface,
+    "app_menu_hover": TOKENS.surface_hover,
+    "app_menu_text": TOKENS.text_secondary,
+    "app_menu_text_active": TOKENS.accent_pressed,
+    "header_bg": TOKENS.surface,
+    "header_panel_bg": TOKENS.surface_subtle,
+    "header_border": TOKENS.border,
+    "chip_bg": TOKENS.surface_subtle,
+    "chip_border": TOKENS.border,
+    "app_logo_bg": TOKENS.accent,
     # Accent
-    "accent": "#0078d4",
-    "accent_hover": "#106ebe",
-    "accent_pressed": "#005a9e",
-    "accent_light": "#dff1ff",
+    "accent": TOKENS.accent,
+    "accent_hover": TOKENS.accent_hover,
+    "accent_pressed": TOKENS.accent_pressed,
+    "accent_light": TOKENS.accent_tint,
     "secondary_accent": "#3a96dd",
-    "secondary_light": "#e5f3ff",
-    "danger": "#c50f1f",
+    "secondary_light": TOKENS.accent_tint,
+    "danger": TOKENS.danger,
     "danger_hover": "#d13438",
     "danger_pressed": "#a4262c",
-    "danger_light": "#fde7e9",
+    "danger_light": TOKENS.danger_fill,
     "danger_border": "#f3b6bd",
-    "warning": "#8a5a00",
-    "warning_light": "#fff4ce",
-    "success": "#0f7b0f",
-    "success_light": "#dff6dd",
+    "warning": TOKENS.warning,
+    "warning_light": TOKENS.warning_fill,
+    "success": TOKENS.success,
+    "success_light": TOKENS.success_fill,
     # Text
     "text_primary": TOKENS.text,
     "text_secondary": TOKENS.text_secondary,
@@ -1006,37 +1028,37 @@ THEME = {
     "font_size_base": 10,
     "font_size_lg": 13,
     # Matplotlib
-    "plot_bg": "#f9fcff",
-    "grid_color": "#d5e3f1",
-    "grid_major_color": "#a9c8e8",
-    "grid_minor_color": "#edf5fd",
-    "grid_alpha": 0.34,
-    "axis_spine": "#c9d4e0",
+    "plot_bg": TOKENS.surface_subtle,
+    "grid_color": "#dbe5ef",
+    "grid_major_color": "#bfd1e2",
+    "grid_minor_color": "#edf2f7",
+    "grid_alpha": 0.30,
+    "axis_spine": TOKENS.border_strong,
     "tx_color": "#f05261",
     "tx_edge": "#9f1239",
     "rx_color": "#0f6cbd",
     "rx_edge": "#0b5cab",
     "selection": "#0078d4",
-    "selection_fill": "#dff1ff",
-    "hover_fill": "#eef7ff",
-    "response_line": "#0078d4",
+    "selection_fill": TOKENS.accent_tint,
+    "hover_fill": TOKENS.surface_hover,
+    "response_line": TOKENS.accent,
     "response_secondary_line": "#64748b",
     "sidelobe": "#f59e0b",
     # MplButton
     "mpl_btn_bg": "#ffffff",
-    "mpl_btn_hover": "#eaf3ff",
+    "mpl_btn_hover": TOKENS.surface_hover,
     "mpl_btn_text": "#171717",
     "mpl_btn_border": "#d9dde3",
     # ttk buttons
     "button_bg": "#ffffff",
-    "button_hover": "#eaf3ff",
-    "button_pressed": "#dff1ff",
+    "button_hover": TOKENS.surface_hover,
+    "button_pressed": TOKENS.surface_pressed,
     "button_border": TOKENS.control_border,
     "dialog_button_hover": "#f0f1ee",
     "dialog_button_pressed": "#e5e7e2",
-    "menu_hover": "#eaf3ff",
-    "focus": "#0078d4",
-    "focus_soft": "#8ecdf8",
+    "menu_hover": TOKENS.surface_hover,
+    "focus": TOKENS.focus,
+    "focus_soft": "#78b9e6",
 }
 
 
@@ -1078,6 +1100,7 @@ class ResponseChart:
     progress_label: ttk.Label | None = None
     play_button: ttk.Button | None = None
     stop_button: ttk.Button | None = None
+    footer_widget: ttk.Frame | None = None
     hover_annotation: any = None  # matplotlib Annotation
     hover_marker: any = None
     hover_db: np.ndarray = None
@@ -1205,7 +1228,7 @@ class _EmptyStateOverlay(QtWidgets.QFrame):
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
             "#plotEmptyState {"
-            f"background: {TOKENS.surface_subtle};"
+            f"background: {TOKENS.surface};"
             f"border: 1px solid {TOKENS.border};"
             f"border-radius: {TOKENS.card_radius}px;"
             "}"
@@ -1215,14 +1238,14 @@ class _EmptyStateOverlay(QtWidgets.QFrame):
             "}"
         )
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(34, 26, 34, 26)
-        layout.setSpacing(8)
+        layout.setContentsMargins(36, 28, 36, 28)
+        layout.setSpacing(10)
         layout.addStretch(1)
         icon_label = QtWidgets.QLabel(self)
         icon = self.style().standardIcon(
             QtWidgets.QStyle.StandardPixmap.SP_MessageBoxInformation
         )
-        icon_label.setPixmap(icon.pixmap(30, 30))
+        icon_label.setPixmap(icon.pixmap(28, 28))
         icon_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(icon_label)
         self.title_label = QtWidgets.QLabel(self)
@@ -1238,8 +1261,20 @@ class _EmptyStateOverlay(QtWidgets.QFrame):
         self.body_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.body_label.setWordWrap(True)
         layout.addWidget(self.body_label)
+        self.action_button = QtWidgets.QPushButton(self)
+        self.action_button.setObjectName("plotEmptyStateAction")
+        self.action_button.setAccessibleName("")
+        self.action_button.setMaximumWidth(180)
+        mark_quiet(self.action_button)
+        layout.addWidget(
+            self.action_button,
+            0,
+            QtCore.Qt.AlignmentFlag.AlignHCenter,
+        )
+        self.action_button.hide()
+        self._action_connected = False
         layout.addStretch(1)
-        self.setAccessibleName("Plot capability message")
+        self.setAccessibleName("")
         self._host.installEventFilter(self)
         self.setGeometry(self._host.rect())
         self.hide()
@@ -1248,6 +1283,24 @@ class _EmptyStateOverlay(QtWidgets.QFrame):
         self.title_label.setText(title)
         self.body_label.setText(body)
         self.setAccessibleDescription(f"{title}. {body}")
+
+    def set_action(self, label: str | None, callback=None) -> None:  # noqa: ANN001
+        if self._action_connected:
+            try:
+                self.action_button.clicked.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            self._action_connected = False
+        if label and callback is not None:
+            self.action_button.setText(label)
+            self.action_button.setAccessibleName(label)
+            self.action_button.clicked.connect(
+                lambda _checked=False, cb=callback: cb()
+            )
+            self._action_connected = True
+            self.action_button.show()
+            return
+        self.action_button.hide()
 
     def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
         if watched is self._host and event.type() == QtCore.QEvent.Type.Resize:
@@ -1716,7 +1769,7 @@ def _style_canvas_widget(widget: tk.Widget) -> None:
     try:
         widget.configure(
             background=THEME["card_bg"],
-            highlightthickness=1,
+            highlightthickness=0,
             highlightbackground=THEME["card_border"],
             highlightcolor=THEME["card_border"],
             takefocus=0,
@@ -1768,11 +1821,25 @@ def _new_response_hover_annotation(ax):  # noqa: ANN001
     return annotation
 
 
-def _configure_pattern_preview_axis(ax) -> None:  # noqa: ANN001
+def _configure_pattern_preview_axis(ax, angles: np.ndarray | None = None) -> None:  # noqa: ANN001
     _configure_axis_chrome(ax)
-    ax.set_xlim(-180.0, 180.0)
-    ax.set_xticks(np.arange(-180.0, 181.0, 30.0))
-    ax.set_xticks(np.arange(-180.0, 181.0, 10.0), minor=True)
+    if angles is None or np.asarray(angles).size == 0:
+        low, high = -180.0, 180.0
+    else:
+        finite = np.asarray(angles, dtype=float)
+        finite = finite[np.isfinite(finite)]
+        if finite.size == 0:
+            low, high = -180.0, 180.0
+        else:
+            data_low = float(np.min(finite))
+            data_high = float(np.max(finite))
+            padding = max(5.0, (data_high - data_low) * 0.05)
+            low = max(-180.0, math.floor((data_low - padding) / 10.0) * 10.0)
+            high = min(180.0, math.ceil((data_high + padding) / 10.0) * 10.0)
+    major_step = 30.0 if high - low > 160.0 else 20.0
+    ax.set_xlim(low, high)
+    ax.set_xticks(np.arange(low, high + 0.1, major_step))
+    ax.set_xticks(np.arange(low, high + 0.1, 10.0), minor=True)
     ax.grid(True, which="major", alpha=0.32, color=THEME["grid_major_color"], linewidth=0.6)
     ax.grid(True, which="minor", alpha=0.18, color=THEME["grid_minor_color"], linewidth=0.45)
 
@@ -2220,6 +2287,7 @@ class VirtualArrayGui:
         self.dbf2d_az_button: ttk.Button | None = None
         self.dbf2d_el_button: ttk.Button | None = None
         self.dbf2d_stop_button: ttk.Button | None = None
+        self.dbf2d_controls_widget: ttk.Frame | None = None
         self.dbf2d_status_label: ttk.Label | None = None
         self.dbf2d_fig: Figure | None = None
         self.dbf2d_ax = None
@@ -2250,10 +2318,15 @@ class VirtualArrayGui:
         self.edit_menu: tk.Menu | None = None
         self.help_menu: tk.Menu | None = None
         self.native_menu_bar: QtWidgets.QMenuBar | None = None
+        self._native_brand_label: QtWidgets.QLabel | None = None
         self.native_menus: dict[str, QtWidgets.QMenu] = {}
         self.native_actions: dict[str, QtGui.QAction] = {}
         self.native_language_actions: dict[str, QtGui.QAction] = {}
+        self.native_manual_menu: QtWidgets.QMenu | None = None
+        self.native_manual_chapter_actions: dict[str, QtGui.QAction] = {}
         self.native_status_bar: QtWidgets.QStatusBar | None = None
+        self._manual_dialog: QtWidgets.QDialog | None = None
+        self._manual_select_chapter = None
         self.workspace_splitter: QtWidgets.QSplitter | None = None
         self._performance_report_thread: QtCore.QThread | None = None
         self._performance_report_worker: _PerformanceReportWorker | None = None
@@ -2290,6 +2363,7 @@ class VirtualArrayGui:
         }
         self.header_title_label: ttk.Label | None = None
         self.header_subtitle_label: ttk.Label | None = None
+        self.header_title_group: ttk.Frame | None = None
         self.header_chip_labels: dict[str, ttk.Label] = {}
         self.last_layout_dir = Path("outputs").resolve()
         self.last_report_dir = Path("outputs").resolve()
@@ -2350,9 +2424,9 @@ class VirtualArrayGui:
         style.configure(
             "HeaderChip.TFrame",
             background=THEME["chip_bg"],
-            bordercolor=THEME["chip_border"],
+            bordercolor=THEME["chip_bg"],
             lightcolor="#ffffff",
-            darkcolor=THEME["chip_border"],
+            darkcolor=THEME["chip_bg"],
             relief="solid",
             borderwidth=1,
         )
@@ -2387,7 +2461,7 @@ class VirtualArrayGui:
             "HeaderTitle.TLabel",
             background=THEME["header_bg"],
             foreground=THEME["text_primary"],
-            font=(_f, 15, "bold"),
+            font=(_f, 14, "bold"),
         )
         style.configure(
             "HeaderSubtitle.TLabel",
@@ -2482,9 +2556,9 @@ class VirtualArrayGui:
         style.configure(
             "Metric.TFrame",
             background=THEME["metric_bg"],
-            bordercolor=THEME["metric_border"],
+            bordercolor=THEME["metric_bg"],
             lightcolor="#ffffff",
-            darkcolor=THEME["metric_border"],
+            darkcolor=THEME["metric_bg"],
             relief="solid",
             borderwidth=1,
         )
@@ -2504,31 +2578,31 @@ class VirtualArrayGui:
             "MetricValue.TLabel",
             background=THEME["metric_bg"],
             foreground=THEME["text_primary"],
-            font=(_fm, THEME["font_size_sm"], "bold"),
+            font=(_fm, THEME["font_size_base"], "bold"),
         )
         style.configure(
             "MetricValueMuted.TLabel",
             background=THEME["metric_bg"],
             foreground=THEME["text_muted"],
-            font=(_fm, THEME["font_size_sm"], "bold"),
+            font=(_fm, THEME["font_size_base"], "bold"),
         )
         style.configure(
             "MetricValueGood.TLabel",
             background=THEME["metric_bg"],
             foreground=THEME["success"],
-            font=(_fm, THEME["font_size_sm"], "bold"),
+            font=(_fm, THEME["font_size_base"], "bold"),
         )
         style.configure(
             "MetricValueWarn.TLabel",
             background=THEME["metric_bg"],
             foreground=THEME["warning"],
-            font=(_fm, THEME["font_size_sm"], "bold"),
+            font=(_fm, THEME["font_size_base"], "bold"),
         )
         style.configure(
             "MetricValueRisk.TLabel",
             background=THEME["metric_bg"],
             foreground=THEME["danger"],
-            font=(_fm, THEME["font_size_sm"], "bold"),
+            font=(_fm, THEME["font_size_base"], "bold"),
         )
 
         button_base = {
@@ -3227,7 +3301,7 @@ class VirtualArrayGui:
 
         # ── Row 2: Main notebook with 3 sub-pages ──────────────────
         # ── Row 2: notebook (left) + overview panel (right) 4:1 ──
-        main_panel = ttk.Frame(root, style="Panel.TFrame", padding=(16, 12, 16, 10))
+        main_panel = ttk.Frame(root, style="Panel.TFrame", padding=(16, 8, 16, 8))
         main_panel.grid(row=2, column=0, columnspan=3, sticky="nsew")
         main_panel.grid_columnconfigure(0, weight=1)
         main_panel.grid_rowconfigure(0, weight=1)
@@ -3240,27 +3314,29 @@ class VirtualArrayGui:
         workspace_pane.grid(row=0, column=0, sticky="nsew")
         self.workspace_splitter = workspace_pane._qt
         self.workspace_splitter.setChildrenCollapsible(False)
-        self.workspace_splitter.setHandleWidth(8)
+        self.workspace_splitter.setHandleWidth(10)
 
         workspace_content = ttk.Frame(workspace_pane, style="Panel.TFrame")
         workspace_content.grid_rowconfigure(0, weight=1)
         workspace_content.grid_columnconfigure(0, weight=1)
 
         self.main_notebook = ttk.Notebook(workspace_content, style="Workspace.TNotebook")
-        self.main_notebook.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        self.main_notebook.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
         self.main_notebook.bind("<<NotebookTabChanged>>", self._on_main_tab_changed, add="+")
-        self.main_notebook._qt.tabBar().setAccessibleName("Workspace pages")
+        self.main_notebook._qt.tabBar().setAccessibleName(
+            self._t("accessibility_workspace_pages")
+        )
 
         overview_panel = ttk.Frame(
             workspace_pane,
             style="Panel.TFrame",
             padding=(0, 2, 0, 2),
-            width=312,
+            width=320,
         )
         overview_panel.grid_rowconfigure(0, weight=1)
         overview_panel.grid_columnconfigure(0, weight=1)
-        overview_panel._qt.setMinimumWidth(280)
-        overview_panel._qt.setMaximumWidth(360)
+        overview_panel._qt.setMinimumWidth(292)
+        overview_panel._qt.setMaximumWidth(380)
         workspace_content._qt.setMinimumWidth(720)
         workspace_pane.add(workspace_content, weight=4)
         workspace_pane.add(overview_panel, weight=1)
@@ -3331,10 +3407,10 @@ class VirtualArrayGui:
         # ── Row 2: Controls ───────────────────────────────────────
         controls_outer = ttk.Frame(root, style="Status.TFrame")
         controls_outer.grid(row=3, column=0, columnspan=3, sticky="ew")
-        controls = ttk.Frame(controls_outer, style="Status.TFrame", padding=(12, 8, 12, 8))
+        controls = ttk.Frame(controls_outer, style="Status.TFrame", padding=(12, 7, 12, 7))
         controls.pack(fill=tk.X)
 
-        controls.grid_rowconfigure(0, minsize=42)
+        controls.grid_rowconfigure(0, minsize=38)
         controls.grid_columnconfigure(4, weight=1)
 
         def toolbar_group(
@@ -3420,11 +3496,16 @@ class VirtualArrayGui:
         self.auto_apply_button.pack(side=tk.LEFT)
         mark_primary(self.auto_apply_button._qt)
         self.auto_apply_button._qt.setIcon(
-            self.root._window.style().standardIcon(
-                QtWidgets.QStyle.StandardPixmap.SP_DialogApplyButton
-            )
+            QtGui.QIcon()
         )
-        self.auto_apply_button._qt.setFixedWidth(116)
+        self.auto_apply_button._qt.setMinimumWidth(116)
+        self.auto_apply_button._qt.setMaximumWidth(168)
+        self.auto_apply_button._qt.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Fixed,
+        )
+        self.auto_apply_button._qt.setDefault(True)
+        self.auto_apply_button._qt.setAutoDefault(True)
         self.auto_apply_button._qt.setAccessibleName(self._t("auto_apply"))
 
         display_group = toolbar_group(3)
@@ -3519,42 +3600,9 @@ class VirtualArrayGui:
         menu_bar = QtWidgets.QMenuBar(window)
         menu_bar.setObjectName("fluentAppMenu")
         menu_bar.setNativeMenuBar(False)
-        menu_bar.setMinimumHeight(40)
+        menu_bar.setMinimumHeight(34)
         window.setMenuBar(menu_bar)
         self.native_menu_bar = menu_bar
-
-        brand_widget = QtWidgets.QWidget(menu_bar)
-        brand_layout = QtWidgets.QHBoxLayout(brand_widget)
-        brand_layout.setContentsMargins(4, 0, 12, 0)
-        brand_layout.setSpacing(8)
-        logo = QtWidgets.QLabel(brand_widget)
-        pixmap = QtGui.QPixmap(str(APP_LOGO_UI_PATH))
-        if not pixmap.isNull():
-            logo.setPixmap(
-                pixmap.scaled(
-                    38,
-                    38,
-                    QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                    QtCore.Qt.TransformationMode.SmoothTransformation,
-                )
-            )
-        else:
-            logo.setText("MAV")
-        logo.setFixedSize(40, 40)
-        logo.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        logo.setAccessibleName("MAV")
-        brand_layout.addWidget(logo)
-        brand_label = QtWidgets.QLabel(self._t("app_name"), brand_widget)
-        brand_font = brand_label.font()
-        brand_font.setPointSize(11)
-        brand_font.setBold(True)
-        brand_label.setFont(brand_font)
-        brand_layout.addWidget(brand_label)
-        brand_action = QtWidgets.QWidgetAction(menu_bar)
-        brand_action.setDefaultWidget(brand_widget)
-        menu_bar.addAction(brand_action)
-        menu_bar.addSeparator()
-        self._native_brand_label = brand_label
 
         for key in ("menu_file", "menu_edit", "menu_view", "menu_help"):
             self.native_menus[key] = menu_bar.addMenu(self._t(key))
@@ -3646,12 +3694,27 @@ class VirtualArrayGui:
             self.native_language_actions[language] = action
             self.native_actions[label_key] = action
 
-        add_action(
-            "menu_help",
-            "menu_user_manual",
-            self._show_user_manual_dialog,
-            icon=QtWidgets.QStyle.StandardPixmap.SP_MessageBoxQuestion,
+        self.native_manual_menu = self.native_menus["menu_help"].addMenu(
+            style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MessageBoxQuestion),
+            self._t("menu_user_manual"),
         )
+        open_manual_action = QtGui.QAction(
+            self._t("menu_user_manual_open"), window
+        )
+        open_manual_action.setShortcut(QtGui.QKeySequence.StandardKey.HelpContents)
+        open_manual_action.triggered.connect(
+            lambda _checked=False: self._show_user_manual_dialog()
+        )
+        self.native_manual_menu.addAction(open_manual_action)
+        self.native_actions["menu_user_manual_open"] = open_manual_action
+        self.native_manual_menu.addSeparator()
+        for chapter in manual_chapters(self.language):
+            action = QtGui.QAction(chapter.title, window)
+            action.triggered.connect(
+                lambda _checked=False, key=chapter.key: self._show_user_manual_dialog(key)
+            )
+            self.native_manual_menu.addAction(action)
+            self.native_manual_chapter_actions[chapter.key] = action
         self.native_menus["menu_help"].addSeparator()
         add_action(
             "menu_help",
@@ -3662,6 +3725,7 @@ class VirtualArrayGui:
 
         status_bar = QtWidgets.QStatusBar(window)
         status_bar.setObjectName("fluentStatusBar")
+        status_bar.setAccessibleName(self._t("accessibility_status_bar"))
         status_bar.setSizeGripEnabled(True)
         window.setStatusBar(status_bar)
         self.native_status_bar = status_bar
@@ -3670,11 +3734,21 @@ class VirtualArrayGui:
 
     def _refresh_app_menus(self) -> None:
         if self.native_menu_bar is not None:
-            self._native_brand_label.setText(self._t("app_name"))
+            if self._native_brand_label is not None:
+                self._native_brand_label.setText(self._t("app_name"))
             for key, menu in self.native_menus.items():
                 menu.setTitle(self._t(key))
             for key, action in self.native_actions.items():
                 action.setText(self._t(key))
+            if self.native_manual_menu is not None:
+                self.native_manual_menu.setTitle(self._t("menu_user_manual"))
+                chapters_by_key = {
+                    chapter.key: chapter for chapter in manual_chapters(self.language)
+                }
+                for key, action in self.native_manual_chapter_actions.items():
+                    chapter = chapters_by_key.get(key)
+                    if chapter is not None:
+                        action.setText(chapter.title)
             for language, action in self.native_language_actions.items():
                 action.setChecked(language == self.language)
             return
@@ -3754,38 +3828,265 @@ class VirtualArrayGui:
             )
             _style_popup_menu(self.help_menu)
 
-    def _show_user_manual_dialog(self) -> None:
+    def _show_user_manual_dialog(self, chapter_key: str | None = None) -> None:
+        if self._manual_dialog is not None:
+            try:
+                if chapter_key and callable(self._manual_select_chapter):
+                    self._manual_select_chapter(chapter_key)
+                self._manual_dialog.showNormal()
+                self._manual_dialog.raise_()
+                self._manual_dialog.activateWindow()
+                return
+            except RuntimeError:
+                self._manual_dialog = None
+                self._manual_select_chapter = None
+
+        chapters = manual_chapters(self.language)
         dialog = QtWidgets.QDialog(self.root._window)
         dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.setObjectName("userManualDialog")
         dialog.setWindowTitle(self._t("manual_title"))
-        dialog.resize(760, 620)
-        dialog.setMinimumSize(620, 480)
         layout = QtWidgets.QVBoxLayout(dialog)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(10)
-        title = QtWidgets.QLabel(self._t("manual_title"), dialog)
+        layout.setContentsMargins(18, 16, 18, 14)
+        layout.setSpacing(12)
+
+        header = QtWidgets.QWidget(dialog)
+        header_layout = QtWidgets.QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(12)
+        title = QtWidgets.QLabel(self._t("manual_title"), header)
         title_font = title.font()
         title_font.setPointSize(14)
         title_font.setBold(True)
         title.setFont(title_font)
-        layout.addWidget(title)
+        header_layout.addWidget(title, 1)
+
+        result_count = QtWidgets.QLabel(header)
+        result_count.setObjectName("manualSearchResultCount")
+        result_count.setProperty("fluentRole", "caption")
+        result_count.setAccessibleName(self._t("manual_search_result_count", count=0))
+        header_layout.addWidget(result_count)
+
+        search = QtWidgets.QLineEdit(header)
+        search.setObjectName("manualSearch")
+        search.setPlaceholderText(self._t("manual_search_placeholder"))
+        search.setClearButtonEnabled(True)
+        search.setMaximumWidth(300)
+        search.setAccessibleName(self._t("manual_search_placeholder"))
+        header_layout.addWidget(search)
+
+        previous_result = QtWidgets.QToolButton(header)
+        previous_result.setObjectName("manualPreviousResult")
+        previous_result.setIcon(
+            dialog.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_ArrowBack)
+        )
+        previous_result.setToolTip(self._t("manual_previous_result"))
+        previous_result.setAccessibleName(self._t("manual_previous_result"))
+        header_layout.addWidget(previous_result)
+
+        next_result = QtWidgets.QToolButton(header)
+        next_result.setObjectName("manualNextResult")
+        next_result.setIcon(
+            dialog.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_ArrowForward)
+        )
+        next_result.setToolTip(self._t("manual_next_result"))
+        next_result.setAccessibleName(self._t("manual_next_result"))
+        header_layout.addWidget(next_result)
+
+        result_position = QtWidgets.QLabel(header)
+        result_position.setObjectName("manualSearchPosition")
+        result_position.setProperty("fluentRole", "caption")
+        result_position.setMinimumWidth(42)
+        result_position.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        header_layout.addWidget(result_position)
+        layout.addWidget(header)
+
+        content_splitter = QtWidgets.QSplitter(
+            QtCore.Qt.Orientation.Horizontal, dialog
+        )
+        content_splitter.setObjectName("manualContentSplitter")
+        content_splitter.setChildrenCollapsible(False)
+        content_splitter.setHandleWidth(6)
+
+        contents_group = QtWidgets.QGroupBox(self._t("manual_contents"), content_splitter)
+        contents_layout = QtWidgets.QVBoxLayout(contents_group)
+        contents_layout.setContentsMargins(8, 10, 8, 8)
+        chapter_list = QtWidgets.QListWidget(contents_group)
+        chapter_list.setObjectName("manualChapterList")
+        chapter_list.setAccessibleName(self._t("manual_contents_accessible"))
+        chapter_list.setUniformItemSizes(True)
+        chapter_list.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        for chapter in chapters:
+            item = QtWidgets.QListWidgetItem(chapter.title)
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, chapter.key)
+            item.setToolTip(f"{chapter.title}\n{chapter.summary}")
+            chapter_list.addItem(item)
+        contents_layout.addWidget(chapter_list)
+        content_splitter.addWidget(contents_group)
+
         browser = QtWidgets.QTextBrowser(dialog)
-        browser.setPlainText(self._t("manual_body"))
+        browser.setObjectName("manualBrowser")
         browser.setOpenExternalLinks(False)
-        browser.setAccessibleName(self._t("manual_title"))
-        layout.addWidget(browser, 1)
+        browser.setAccessibleName(self._t("manual_body_accessible"))
+        content_splitter.addWidget(browser)
+        content_splitter.setStretchFactor(0, 0)
+        content_splitter.setStretchFactor(1, 1)
+        content_splitter.setSizes([230, 730])
+        layout.addWidget(content_splitter, 1)
+
+        search_documents = [
+            manual_chapter_search_text(chapter).casefold() for chapter in chapters
+        ]
+        matching_rows = list(range(len(chapters)))
+        match_position = 0
+
+        def show_chapter(row: int) -> None:
+            if not 0 <= row < len(chapters):
+                return
+            browser.setHtml(manual_chapter_html(chapters[row]))
+            browser.moveCursor(QtGui.QTextCursor.MoveOperation.Start)
+            browser.verticalScrollBar().setValue(0)
+            query = search.text().strip()
+            if query:
+                browser.find(query)
+
+        def select_chapter(key: str) -> None:
+            if search.text():
+                search.clear()
+            for row in range(chapter_list.count()):
+                item = chapter_list.item(row)
+                if item.data(QtCore.Qt.ItemDataRole.UserRole) == key:
+                    item.setHidden(False)
+                    chapter_list.setCurrentRow(row)
+                    chapter_list.scrollToItem(item)
+                    return
+
+        def update_result_labels() -> None:
+            count = len(matching_rows)
+            result_count.setText(
+                self._t("manual_search_result_count", count=count)
+                if search.text().strip()
+                else ""
+            )
+            result_count.setAccessibleName(
+                self._t("manual_search_result_count", count=count)
+            )
+            result_position.setText(
+                self._t(
+                    "manual_search_position",
+                    current=match_position + 1,
+                    total=count,
+                )
+                if search.text().strip() and count
+                else ""
+            )
+            enabled = bool(search.text().strip() and count)
+            previous_result.setEnabled(enabled)
+            next_result.setEnabled(enabled)
+
+        def go_to_result(delta: int) -> None:
+            nonlocal match_position
+            if not matching_rows:
+                return
+            match_position = (match_position + delta) % len(matching_rows)
+            chapter_list.setCurrentRow(matching_rows[match_position])
+            update_result_labels()
+
+        def update_search(query: str) -> None:
+            nonlocal matching_rows, match_position
+            normalized = query.strip().casefold()
+            matching_rows = [
+                row
+                for row, document in enumerate(search_documents)
+                if not normalized or normalized in document
+            ]
+            for row in range(chapter_list.count()):
+                chapter_list.item(row).setHidden(
+                    bool(normalized) and row not in matching_rows
+                )
+            match_position = 0
+            if matching_rows:
+                chapter_list.setCurrentRow(matching_rows[0])
+            else:
+                chapter_list.setCurrentRow(-1)
+                browser.setPlainText(
+                    f"{self._t('manual_search_no_results')}\n\n"
+                    f"{self._t('manual_search_no_results_detail')}"
+                )
+            update_result_labels()
+
+        class _SearchKeyFilter(QtCore.QObject):
+            def eventFilter(self, watched, event) -> bool:  # noqa: ANN001, N802
+                if (
+                    watched is search
+                    and event.type() == QtCore.QEvent.Type.KeyPress
+                    and event.key()
+                    in {QtCore.Qt.Key.Key_Return, QtCore.Qt.Key.Key_Enter}
+                ):
+                    direction = (
+                        -1
+                        if event.modifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier
+                        else 1
+                    )
+                    go_to_result(direction)
+                    return True
+                return super().eventFilter(watched, event)
+
+        chapter_list.currentRowChanged.connect(show_chapter)
+        search.textChanged.connect(update_search)
+        previous_result.clicked.connect(lambda: go_to_result(-1))
+        next_result.clicked.connect(lambda: go_to_result(1))
+        search_key_filter = _SearchKeyFilter(dialog)
+        search.installEventFilter(search_key_filter)
+
+        find_shortcut = QtGui.QShortcut(
+            QtGui.QKeySequence.StandardKey.Find, dialog
+        )
+        find_shortcut.activated.connect(
+            lambda: (search.setFocus(), search.selectAll())
+        )
+        find_next_shortcut = QtGui.QShortcut(
+            QtGui.QKeySequence.StandardKey.FindNext, dialog
+        )
+        find_next_shortcut.activated.connect(lambda: go_to_result(1))
+        find_previous_shortcut = QtGui.QShortcut(
+            QtGui.QKeySequence.StandardKey.FindPrevious, dialog
+        )
+        find_previous_shortcut.activated.connect(lambda: go_to_result(-1))
+
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Close,
             parent=dialog,
         )
         buttons.rejected.connect(dialog.close)
-        buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Close).setText(
-            self._t("done")
-        )
+        close_button = buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Close)
+        close_button.setText(self._t("done"))
+        close_button.setAutoDefault(False)
+        close_button.setDefault(False)
         layout.addWidget(buttons)
+        fit_dialog_to_parent(
+            dialog,
+            self.root._window,
+            preferred_size=(1000, 680),
+            minimum_size=(760, 520),
+        )
         self._manual_dialog = dialog
-        dialog.destroyed.connect(lambda: setattr(self, "_manual_dialog", None))
+        self._manual_select_chapter = select_chapter
+
+        def clear_manual_dialog() -> None:
+            self._manual_dialog = None
+            self._manual_select_chapter = None
+
+        dialog.destroyed.connect(clear_manual_dialog)
+        initial_key = chapter_key or chapters[0].key
+        select_chapter(initial_key)
+        QtWidgets.QWidget.setTabOrder(search, chapter_list)
+        QtWidgets.QWidget.setTabOrder(chapter_list, browser)
+        QtWidgets.QWidget.setTabOrder(browser, close_button)
         dialog.show()
+        search.setFocus()
 
     def _show_about_dialog(self) -> None:
         log_path = current_log_path()
@@ -3844,7 +4145,7 @@ class VirtualArrayGui:
             )
 
     def _build_workspace_header(self, parent: tk.Widget) -> None:
-        header = ttk.Frame(parent, style="Header.TFrame", padding=(18, 12, 18, 10))
+        header = ttk.Frame(parent, style="Header.TFrame", padding=(18, 8, 18, 8))
         header.grid(row=1, column=0, columnspan=3, sticky="ew")
         header.grid_columnconfigure(0, weight=0)
         header.grid_columnconfigure(1, weight=0)
@@ -3857,12 +4158,12 @@ class VirtualArrayGui:
             style="HeaderLogo.TLabel",
         )
         logo_label.grid(row=0, column=0, sticky="w", padx=(0, 10))
-        logo_label._qt.setFixedSize(48, 48)
+        logo_label._qt.setFixedSize(42, 42)
         logo_label._qt.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         logo_label._qt.setAccessibleName("MAV")
         if self.app_logo_image is not None and not self.app_logo_image.pixmap.isNull():
             pixel_ratio = max(1.0, logo_label._qt.devicePixelRatioF())
-            physical_size = max(40, round(40 * pixel_ratio))
+            physical_size = max(36, round(36 * pixel_ratio))
             logo_pixmap = self.app_logo_image.pixmap.scaled(
                 physical_size,
                 physical_size,
@@ -3873,12 +4174,13 @@ class VirtualArrayGui:
             logo_label._qt.setPixmap(logo_pixmap)
 
         title_group = ttk.Frame(header, style="Header.TFrame")
-        title_group.grid(row=0, column=1, sticky="w", padx=(0, 18))
+        self.header_title_group = title_group
+        title_group.grid(row=0, column=1, sticky="w", padx=(0, 20))
         title_group.grid_columnconfigure(0, weight=1)
-        title_group._qt.setMaximumWidth(300)
+        self._update_header_title_group_width()
         self.header_title_label = ttk.Label(
             title_group,
-            text=self._t("app_name"),
+            text="",
             style="HeaderTitle.TLabel",
             anchor="w",
         )
@@ -3895,14 +4197,15 @@ class VirtualArrayGui:
             QtWidgets.QSizePolicy.Policy.Ignored,
             QtWidgets.QSizePolicy.Policy.Preferred,
         )
+        self._set_header_title_text()
         self._set_header_subtitle_text()
 
         chip_row = ttk.Frame(header, style="Header.TFrame")
         chip_row.grid(row=0, column=2, sticky="ew")
         chip_specs = (
-            ("chip_frequency", self.header_frequency_text, 96),
-            ("chip_dictionary", self.header_dictionary_text, 150),
-            ("chip_pattern", self.header_pattern_text, 190),
+            ("chip_frequency", self.header_frequency_text, 94),
+            ("chip_dictionary", self.header_dictionary_text, 146),
+            ("chip_pattern", self.header_pattern_text, 184),
         )
         for column, (label_key, value_var, min_width) in enumerate(chip_specs):
             self._build_header_chip(
@@ -3928,7 +4231,7 @@ class VirtualArrayGui:
         chip = ttk.Frame(
             parent,
             style="HeaderChip.TFrame",
-            padding=(6, 3) if compact else (8, 5),
+            padding=(9, 4) if compact else (10, 6),
         )
         chip.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 6, 0))
         chip.grid_columnconfigure(0, weight=1)
@@ -3956,7 +4259,7 @@ class VirtualArrayGui:
         def sync_tooltip(value: object) -> None:
             full_text = str(value)
             value_label._qt.setToolTip(full_text)
-            available = max(72, min_width - 18)
+            available = max(72, min_width - 22)
             value_label._qt.setText(
                 value_label._qt.fontMetrics().elidedText(
                     full_text,
@@ -3980,8 +4283,9 @@ class VirtualArrayGui:
         splitter.setSizes([max(720, total - 312), 312])
 
     def _refresh_workspace_header(self) -> None:
+        self._update_header_title_group_width()
         if self.header_title_label is not None:
-            self.header_title_label.configure(text=self._t("app_name"))
+            self._set_header_title_text()
         if self.header_subtitle_label is not None:
             self._set_header_subtitle_text()
         for key, label in self.header_chip_labels.items():
@@ -3995,6 +4299,33 @@ class VirtualArrayGui:
         )
         self.header_pattern_text.set(self.pattern_status.get())
 
+    def _header_title_width(self) -> int:
+        return {
+            LANGUAGE_EN: 340,
+            LANGUAGE_JA: 330,
+        }.get(self.language, 300)
+
+    def _update_header_title_group_width(self) -> None:
+        if self.header_title_group is None:
+            return
+        width = self._header_title_width()
+        self.header_title_group._qt.setMinimumWidth(width)
+        self.header_title_group._qt.setMaximumWidth(width)
+
+    def _set_header_title_text(self) -> None:
+        if self.header_title_label is None:
+            return
+        full_text = self._t("app_name")
+        label = self.header_title_label._qt
+        label.setToolTip(full_text)
+        label.setText(
+            label.fontMetrics().elidedText(
+                full_text,
+                QtCore.Qt.TextElideMode.ElideRight,
+                self._header_title_width() - 4,
+            )
+        )
+
     def _set_header_subtitle_text(self) -> None:
         if self.header_subtitle_label is None:
             return
@@ -4005,7 +4336,7 @@ class VirtualArrayGui:
             label.fontMetrics().elidedText(
                 full_text,
                 QtCore.Qt.TextElideMode.ElideRight,
-                296,
+                self._header_title_width() - 4,
             )
         )
 
@@ -4058,6 +4389,7 @@ class VirtualArrayGui:
             self.auto_toolbar_label.configure(text=self._t("auto_label"))
         if getattr(self, "auto_apply_button", None) is not None:
             self.auto_apply_button.configure(text=self._t("auto_apply"))
+            self.auto_apply_button._qt.setAccessibleName(self._t("auto_apply"))
         if getattr(self, "dbf_display_label", None) is not None:
             self.dbf_display_label.configure(text=self._t("dbf_display_label"))
         if getattr(self, "dbf_display_db_radio", None) is not None:
@@ -4066,6 +4398,7 @@ class VirtualArrayGui:
             self.dbf_display_mag_radio.configure(text=self._t("dbf_display_magnitude"))
         for key, button in self.physical_action_buttons.items():
             button.configure(text=self._t(key))
+            button._qt.setAccessibleName(self._t(key))
         self._update_delete_button_state()
         for button, key in zip(
             self.physical_buttons,
@@ -4085,6 +4418,19 @@ class VirtualArrayGui:
             for key, label in self.secondary_name_labels.items():
                 label_key = getattr(self, "secondary_name_label_keys", {}).get(key, key)
                 label.configure(text=self._t(label_key))
+        if self.main_notebook is not None:
+            self.main_notebook._qt.tabBar().setAccessibleName(
+                self._t("accessibility_workspace_pages")
+            )
+        if self.native_status_bar is not None:
+            self.native_status_bar.setAccessibleName(
+                self._t("accessibility_status_bar")
+            )
+        for chart in (getattr(self, "az_chart", None), getattr(self, "el_chart", None)):
+            if chart is None:
+                continue
+            chart.play_button._qt.setAccessibleName(self._t("dbf_play_compact"))
+            chart.stop_button._qt.setAccessibleName(self._t("dbf_stop_compact"))
         self._update_dbf_scan_controls()
         self._update_dbf2d_controls()
         self._update_channel_pattern_status()
@@ -4159,6 +4505,7 @@ class VirtualArrayGui:
         play_button._qt.setIcon(
             native_style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MediaPlay)
         )
+        play_button._qt.setCheckable(True)
         stop_button._qt.setIcon(
             native_style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MediaStop)
         )
@@ -4171,6 +4518,7 @@ class VirtualArrayGui:
             progress_label=progress_label,
             play_button=play_button,
             stop_button=stop_button,
+            footer_widget=progress_frame,
         )
         chart.empty_overlay = _EmptyStateOverlay(canvas)
         return chart
@@ -4196,6 +4544,18 @@ class VirtualArrayGui:
             )
             button.grid(row=0, column=column, sticky="w", padx=(0 if column == 0 else 6, 0))
             self.physical_action_buttons[key] = button
+        delete_button = self.physical_action_buttons["physical_delete"]._qt
+        delete_button.setCheckable(True)
+        delete_button.setIcon(
+            self.root._window.style().standardIcon(
+                QtWidgets.QStyle.StandardPixmap.SP_TrashIcon
+            )
+        )
+        self.physical_action_buttons["physical_clear"]._qt.setIcon(
+            self.root._window.style().standardIcon(
+                QtWidgets.QStyle.StandardPixmap.SP_DialogResetButton
+            )
+        )
 
     def _update_delete_button_state(self) -> None:
         button = self.physical_action_buttons.get("physical_delete")
@@ -4204,6 +4564,7 @@ class VirtualArrayGui:
         button.configure(
             style="CompactDanger.TButton" if self.delete_mode else "Compact.TButton"
         )
+        button._qt.setChecked(self.delete_mode)
 
     def _build_figure_buttons(
         self,
@@ -4241,7 +4602,7 @@ class VirtualArrayGui:
         key: str,
         row: int,
     ) -> None:
-        tile = ttk.Frame(parent, style="Metric.TFrame", padding=(7, 3))
+        tile = ttk.Frame(parent, style="Metric.TFrame", padding=(9, 3))
         tile.grid(
             row=row,
             column=0,
@@ -4278,15 +4639,15 @@ class VirtualArrayGui:
         metric_specs: tuple[tuple[str, str], ...],
         row: int,
     ) -> None:
-        group = ttk.Frame(parent, style="Metric.TFrame", padding=(7, 3))
+        group = ttk.Frame(parent, style="Metric.TFrame", padding=(9, 4))
         group.grid(
             row=row,
             column=0,
             sticky="nsew",
             pady=(0, 2),
         )
-        group.grid_columnconfigure(0, weight=0, minsize=60)
-        group.grid_columnconfigure(1, weight=1, minsize=150)
+        group.grid_columnconfigure(0, weight=0, minsize=82)
+        group.grid_columnconfigure(1, weight=1, minsize=140)
         title = ttk.Label(
             group,
             text=self._t(axis_key),
@@ -4304,8 +4665,9 @@ class VirtualArrayGui:
                 style="MetricName.TLabel",
                 anchor="w",
                 justify=tk.LEFT,
-                wraplength=0,
+                wraplength=108,
             )
+            name_label._qt.setWordWrap(True)
             name_label.grid(row=row, column=0, sticky="w", padx=(0, 2))
             value_label = ttk.Label(
                 group,
@@ -4322,7 +4684,7 @@ class VirtualArrayGui:
 
     def _build_evaluation_panel(self, parent: ttk.Frame) -> None:
         """Build the Array Evaluation card using Qt-compatible widgets."""
-        self.eval_frame = ttk.Frame(parent, style="Card.TFrame", padding=(6, 2))
+        self.eval_frame = ttk.Frame(parent, style="Card.TFrame", padding=(6, 4))
         self.eval_frame.grid(row=0, column=0, sticky="nsew")
         self.eval_frame.grid_rowconfigure(0, weight=0)
         self.eval_frame.grid_rowconfigure(1, weight=0)
@@ -4388,6 +4750,7 @@ class VirtualArrayGui:
         self.dbf2d_empty_overlay = _EmptyStateOverlay(dbf2d_widget)
 
         button_row = ttk.Frame(self.dbf2d_frame, style="Card.TFrame")
+        self.dbf2d_controls_widget = button_row
         button_row.grid(row=1, column=0, sticky="ew", pady=(5, 0))
         for col in range(3):
             button_row.grid_columnconfigure(col, weight=1, uniform="dbf2d_buttons")
@@ -4421,6 +4784,7 @@ class VirtualArrayGui:
             button._qt.setIcon(
                 native_style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MediaPlay)
             )
+            button._qt.setCheckable(True)
         self.dbf2d_stop_button._qt.setIcon(
             native_style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MediaStop)
         )
@@ -4708,6 +5072,8 @@ class VirtualArrayGui:
         self.drag_start_snapshot = None
         self._sync_auto_count_inputs()
         self._update_delete_button_state()
+        if hasattr(self, "phys_canvas"):
+            self._set_physical_cursor("")
 
     def _layout_snapshot_for(
         self,
@@ -4884,6 +5250,7 @@ class VirtualArrayGui:
         else:
             self.status.set(self._t("delete_mode_off"))
         self._update_delete_button_state()
+        self._set_physical_cursor("crosshair" if self.delete_mode else "")
 
     def clear_array_layout(self, _event=None) -> None:  # noqa: ANN001
         new_elements = _starter_layout_elements()
@@ -5019,6 +5386,7 @@ class VirtualArrayGui:
             self.delete_mode = False
             self.status.set(self._t("delete_mode_off"))
             self._update_delete_button_state()
+            self._set_physical_cursor("")
             return "break"
 
         if self.dragging is not None and self.drag_start_snapshot is not None:
@@ -5058,6 +5426,32 @@ class VirtualArrayGui:
             chart.canvas.get_tk_widget().configure(cursor=cursor)
         except (tk.TclError, AttributeError):
             return
+
+    def _set_physical_cursor(self, cursor: str) -> None:
+        try:
+            self.phys_canvas.get_tk_widget().configure(cursor=cursor)
+        except (tk.TclError, AttributeError):
+            return
+
+    def _update_physical_cursor(self, event) -> None:  # noqa: ANN001
+        if self.dragging is not None:
+            self._set_physical_cursor("closedhand")
+            return
+        if self.delete_mode:
+            self._set_physical_cursor("crosshair")
+            return
+        if (
+            event.inaxes == self.physical_ax
+            and event.xdata is not None
+            and event.ydata is not None
+        ):
+            nearest = self._nearest_element(
+                _to_internal_half_lambda(float(event.xdata)),
+                _to_internal_half_lambda(float(event.ydata)),
+            )
+            self._set_physical_cursor("openhand" if nearest is not None else "")
+            return
+        self._set_physical_cursor("")
 
     def _response_event_near_true_line(self, event, chart: ResponseChart) -> bool:  # noqa: ANN001
         if event.inaxes != chart.ax or event.xdata is None or chart.true_angle is None:
@@ -5306,6 +5700,16 @@ class VirtualArrayGui:
                     else "CompactPlay.TButton"
                 )
                 chart.play_button.configure(text=text, style=style_name)
+                active_or_paused = is_active_mode or has_paused_mode
+                chart.play_button._qt.setChecked(active_or_paused)
+                icon_kind = (
+                    QtWidgets.QStyle.StandardPixmap.SP_MediaPause
+                    if is_active_mode and not self.dbf_scan_paused
+                    else QtWidgets.QStyle.StandardPixmap.SP_MediaPlay
+                )
+                chart.play_button._qt.setIcon(
+                    self.root._window.style().standardIcon(icon_kind)
+                )
             if chart.stop_button is not None:
                 chart.stop_button.configure(text=self._t("dbf_stop_compact"))
                 state = tk.NORMAL if self.dbf_scan_mode == mode else tk.DISABLED
@@ -5728,6 +6132,14 @@ class VirtualArrayGui:
                     else "CompactPlay.TButton"
                 ),
             )
+            self.dbf2d_az_button._qt.setChecked(self.dbf2d_az_playing)
+            self.dbf2d_az_button._qt.setIcon(
+                self.root._window.style().standardIcon(
+                    QtWidgets.QStyle.StandardPixmap.SP_MediaPause
+                    if self.dbf2d_az_playing
+                    else QtWidgets.QStyle.StandardPixmap.SP_MediaPlay
+                )
+            )
         if self.dbf2d_el_button is not None:
             self.dbf2d_el_button.configure(
                 text=self._t("dbf2d_pause_el")
@@ -5738,6 +6150,14 @@ class VirtualArrayGui:
                     if self.dbf2d_el_playing
                     else "CompactPlay.TButton"
                 ),
+            )
+            self.dbf2d_el_button._qt.setChecked(self.dbf2d_el_playing)
+            self.dbf2d_el_button._qt.setIcon(
+                self.root._window.style().standardIcon(
+                    QtWidgets.QStyle.StandardPixmap.SP_MediaPause
+                    if self.dbf2d_el_playing
+                    else QtWidgets.QStyle.StandardPixmap.SP_MediaPlay
+                )
             )
         if self.dbf2d_stop_button is not None:
             state = tk.NORMAL if self.dbf2d_az_playing or self.dbf2d_el_playing else tk.DISABLED
@@ -5946,14 +6366,20 @@ class VirtualArrayGui:
     def open_dbf_dictionary_dialog(self) -> None:
         dialog = tk.Toplevel(self.root)
         _style_toplevel(dialog)
+        dialog._qt.setObjectName("dbfDictionaryDialog")
         dialog.title(self._t("dbf_dictionary_title"))
         dialog.transient(self.root)
-        dialog.geometry("1120x700")
-        dialog.minsize(1040, 640)
+        fit_dialog_to_parent(
+            dialog._qt,
+            self.root._window,
+            preferred_size=(1120, 680),
+            minimum_size=(760, 520),
+        )
 
         root_frame = ttk.Frame(dialog, style="Dialog.TFrame", padding=12)
         root_frame.pack(fill=tk.BOTH, expand=True)
-        root_frame.grid_columnconfigure(0, weight=0, minsize=330)
+        mode_column_width = 360 if self.language == LANGUAGE_EN else 330
+        root_frame.grid_columnconfigure(0, weight=0, minsize=mode_column_width)
         root_frame.grid_columnconfigure(1, weight=1)
         root_frame.grid_rowconfigure(0, weight=1)
 
@@ -6151,6 +6577,27 @@ class VirtualArrayGui:
             font=(THEME["font_family_mono"], THEME["font_size_sm"]),
         )
         preview_status.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        preview_status._qt.setMinimumWidth(0)
+        preview_status._qt.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored,
+            QtWidgets.QSizePolicy.Policy.Preferred,
+        )
+
+        def set_preview_status_text(text: str) -> None:
+            label = preview_status._qt
+            label.setToolTip(text)
+            available_width = max(
+                240,
+                dialog._qt.width() - mode_column_width - 72,
+            )
+            label.setText(
+                label.fontMetrics().elidedText(
+                    text,
+                    QtCore.Qt.TextElideMode.ElideMiddle,
+                    available_width,
+                )
+            )
+
         quality_status = ttk.Label(
             preview_frame,
             text="",
@@ -6224,15 +6671,12 @@ class VirtualArrayGui:
             matrix_tree.heading("message", text=self._t("dbf_dictionary_preview_title").strip())
             matrix_tree.column("message", width=520, anchor="center", stretch=True)
             matrix_tree.insert("", tk.END, values=(message,))
-            preview_status.configure(text=message)
+            set_preview_status_text(message)
             quality_status.configure(
                 text=self._t("dbf_dict_quality_unavailable"),
                 foreground=THEME["text_secondary"],
             )
-            quality_status._qt.setStyleSheet(
-                f"background:{TOKENS.surface_subtle}; color:{TOKENS.text_secondary};"
-                f"border:1px solid {TOKENS.border}; border-radius:6px; padding:8px;"
-            )
+            mark_callout(quality_status._qt, "neutral")
 
         def update_quality_status(report: DbfDictionaryQualityReport) -> None:
             capability_limited = (
@@ -6250,21 +6694,18 @@ class VirtualArrayGui:
             ):
                 text_key = "dbf_dict_quality_danger"
                 color = THEME["danger"]
-                fill = TOKENS.danger_fill
-                border = "#d99aa2"
+                callout_role = "danger"
             elif report.severity in {
                 DBF_DICTIONARY_QUALITY_WARNING,
                 DBF_DICTIONARY_QUALITY_DANGER,
             }:
                 text_key = "dbf_dict_quality_warning"
                 color = THEME["warning"]
-                fill = TOKENS.warning_fill
-                border = "#c9a94f"
+                callout_role = "warning"
             else:
                 text_key = "dbf_dict_quality_ok"
                 color = THEME["success"]
-                fill = "#edf8ed"
-                border = "#82b882"
+                callout_role = "success"
             quality_status.configure(
                 text=self._t(
                     text_key,
@@ -6277,10 +6718,7 @@ class VirtualArrayGui:
                 ),
                 foreground=color,
             )
-            quality_status._qt.setStyleSheet(
-                f"background:{fill}; color:{color}; border:1px solid {border};"
-                "border-radius:6px; padding:8px;"
-            )
+            mark_callout(quality_status._qt, callout_role)
 
         def redraw_preview() -> None:
             try:
@@ -6325,8 +6763,8 @@ class VirtualArrayGui:
                     )
                 axis_label = _dbf_short_label(axis_var.get(), self.language)
                 title = f"{self._t('dbf_dict_preview_phase')} - {axis_label}"
-                preview_status.configure(
-                    text=f"{title} | "
+                set_preview_status_text(
+                    f"{title} | "
                     + self._t(
                         "dbf_dict_preview_status",
                         mode=_dbf_dictionary_mode_label(config.mode, self.language),
@@ -6434,23 +6872,31 @@ class VirtualArrayGui:
         apply_button.clicked.connect(apply_dictionary)
         close_button.clicked.connect(dialog.destroy)
         mark_primary(apply_button)
-        apply_button.setIcon(
-            self.root._window.style().standardIcon(
-                QtWidgets.QStyle.StandardPixmap.SP_DialogApplyButton
-            )
-        )
+        apply_button.setIcon(QtGui.QIcon())
 
         refresh_file_labels()
         redraw_preview()
         _apply_interactive_cursors(dialog)
+        fit_dialog_to_parent(
+            dialog._qt,
+            self.root._window,
+            preferred_size=(1120, 680),
+            minimum_size=(760, 520),
+        )
 
     def open_channel_patterns_dialog(self) -> None:
         dialog = tk.Toplevel(self.root)
         _style_toplevel(dialog)
+        dialog._qt.setObjectName("channelPatternsDialog")
         dialog.title(self._t("channel_dialog_title"))
         dialog.transient(self.root)
-        dialog.geometry("1120x600")
-        dialog.minsize(1020, 540)
+        fit_dialog_to_parent(
+            dialog._qt,
+            self.root._window,
+            preferred_size=(1060, 520),
+            minimum_size=(760, 460),
+        )
+        compact_channel_actions = dialog._qt.width() < 920
 
         root_frame = ttk.Frame(dialog, style="Dialog.TFrame", padding=12)
         root_frame.pack(fill=tk.BOTH, expand=True)
@@ -6463,28 +6909,49 @@ class VirtualArrayGui:
             padding=(8, 6),
         )
         summary_frame.grid(row=0, column=0, sticky="ew")
-        for column in range(5):
+        summary_column_count = 2 if compact_channel_actions else 5
+        for column in range(summary_column_count):
             summary_frame.grid_columnconfigure(column, weight=1, uniform="summary_buttons")
         summary_target_var = tk.StringVar(value=CHANNEL_PATTERN_TARGET_PHYSICAL)
-        ttk.Label(
+        summary_target_label = ttk.Label(
             summary_frame,
             text=self._t("summary_target_label"),
             style="TLabel",
-        ).grid(row=0, column=0, sticky="w", padx=(0, 8), pady=(0, 6))
-        ttk.Radiobutton(
+        )
+        physical_target_button = ttk.Radiobutton(
             summary_frame,
             text=self._t("summary_target_physical"),
             variable=summary_target_var,
             value=CHANNEL_PATTERN_TARGET_PHYSICAL,
             command=lambda: refresh_tree(),
-        ).grid(row=0, column=1, sticky="w", padx=(0, 8), pady=(0, 6))
-        ttk.Radiobutton(
+        )
+        virtual_target_button = ttk.Radiobutton(
             summary_frame,
             text=self._t("summary_target_virtual"),
             variable=summary_target_var,
             value=CHANNEL_PATTERN_TARGET_VIRTUAL,
             command=lambda: refresh_tree(),
-        ).grid(row=0, column=2, sticky="w", padx=(0, 8), pady=(0, 6))
+        )
+        if compact_channel_actions:
+            summary_target_label.grid(
+                row=0, column=0, columnspan=2, sticky="w", pady=(0, 4)
+            )
+            physical_target_button.grid(
+                row=1, column=0, sticky="w", padx=(0, 8), pady=(0, 6)
+            )
+            virtual_target_button.grid(
+                row=1, column=1, sticky="w", pady=(0, 6)
+            )
+        else:
+            summary_target_label.grid(
+                row=0, column=0, sticky="w", padx=(0, 8), pady=(0, 6)
+            )
+            physical_target_button.grid(
+                row=0, column=1, sticky="w", padx=(0, 8), pady=(0, 6)
+            )
+            virtual_target_button.grid(
+                row=0, column=2, sticky="w", padx=(0, 8), pady=(0, 6)
+            )
 
         summary_specs = (
             (_pattern_slot_label(PATTERN_KIND_AMPLITUDE, PATTERN_PLANE_HORIZONTAL, self.language), PATTERN_KIND_AMPLITUDE, PATTERN_PLANE_HORIZONTAL),
@@ -6492,27 +6959,36 @@ class VirtualArrayGui:
             (_pattern_slot_label(PATTERN_KIND_PHASE, PATTERN_PLANE_HORIZONTAL, self.language), PATTERN_KIND_PHASE, PATTERN_PLANE_HORIZONTAL),
             (_pattern_slot_label(PATTERN_KIND_PHASE, PATTERN_PLANE_ELEVATION, self.language), PATTERN_KIND_PHASE, PATTERN_PLANE_ELEVATION),
         )
-        for column, (label, kind, plane) in enumerate(summary_specs):
+        for index, (label, kind, plane) in enumerate(summary_specs):
+            action_row = 2 + index // 2 if compact_channel_actions else 1
+            action_column = index % 2 if compact_channel_actions else index
             ttk.Button(
                 summary_frame,
                 text=self._t("load_summary", label=label),
                 command=lambda k=kind, p=plane: self._load_summary_channel_pattern(
                     k, p, summary_target_var.get(), dialog, refresh_tree
                 ),
-                style="DialogButton.TButton",
+                style="Compact.TButton",
             ).grid(
-                row=1,
-                column=column,
+                row=action_row,
+                column=action_column,
                 sticky="ew",
-                padx=(0 if column == 0 else 6, 0),
+                padx=(0 if action_column == 0 else 6, 0),
+                pady=(0, 5) if compact_channel_actions else 0,
             )
 
-        ttk.Button(
+        clear_all_button = ttk.Button(
             summary_frame,
             text=self._t("clear_all"),
             command=lambda: clear_all_patterns(),
-            style="DialogDanger.TButton",
-        ).grid(row=1, column=4, sticky="ew", padx=(6, 0))
+            style="CompactDanger.TButton",
+        )
+        if compact_channel_actions:
+            clear_all_button.grid(
+                row=4, column=0, columnspan=2, sticky="ew", pady=(0, 1)
+            )
+        else:
+            clear_all_button.grid(row=1, column=4, sticky="ew", padx=(6, 0))
 
         table_frame = ttk.LabelFrame(
             root_frame,
@@ -6556,28 +7032,36 @@ class VirtualArrayGui:
 
         button_row = ttk.Frame(root_frame, style="Dialog.TFrame")
         button_row.grid(row=2, column=0, sticky="ew", pady=(10, 0))
-        for column in range(6):
+        bottom_column_count = 2 if compact_channel_actions else 6
+        for column in range(bottom_column_count):
             button_row.grid_columnconfigure(column, weight=1, uniform="channel_buttons")
-        for column, (label, kind, plane) in enumerate(summary_specs):
+        for index, (label, kind, plane) in enumerate(summary_specs):
+            action_row = index // 2 if compact_channel_actions else 0
+            action_column = index % 2 if compact_channel_actions else index
             ttk.Button(
                 button_row,
                 text=self._t("set_pattern", label=label),
                 command=lambda k=kind, p=plane: self._load_single_channel_pattern(
                     tree, k, p, dialog, refresh_tree
                 ),
-                style="DialogButton.TButton",
+                style="Compact.TButton",
             ).grid(
-                row=0,
-                column=column,
+                row=action_row,
+                column=action_column,
                 sticky="ew",
-                padx=(0 if column == 0 else 6, 0),
+                padx=(0 if action_column == 0 else 6, 0),
+                pady=(0, 5) if compact_channel_actions else 0,
             )
-        ttk.Button(
+        clear_channel_button = ttk.Button(
             button_row,
             text=self._t("clear_channel"),
             command=lambda: clear_selected_channel(),
-            style="DialogDanger.TButton",
-        ).grid(row=0, column=4, sticky="ew", padx=(6, 0))
+            style="CompactDanger.TButton",
+        )
+        if compact_channel_actions:
+            clear_channel_button.grid(row=2, column=0, sticky="ew")
+        else:
+            clear_channel_button.grid(row=0, column=4, sticky="ew", padx=(6, 0))
         close_box = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Close,
             parent=button_row._qt,
@@ -6587,7 +7071,10 @@ class VirtualArrayGui:
         )
         close_button.setText(self._t("done"))
         close_button.clicked.connect(dialog.destroy)
-        button_row._qt.layout().addWidget(close_box, 0, 5)
+        if compact_channel_actions:
+            button_row._qt.layout().addWidget(close_box, 2, 1)
+        else:
+            button_row._qt.layout().addWidget(close_box, 0, 5)
 
         def refresh_tree() -> None:
             selected = tree.selection()
@@ -6640,6 +7127,12 @@ class VirtualArrayGui:
             tree.selection_set(first)
             tree.focus(first)
         _apply_interactive_cursors(dialog)
+        fit_dialog_to_parent(
+            dialog._qt,
+            self.root._window,
+            preferred_size=(1060, 520),
+            minimum_size=(760 if compact_channel_actions else 920, 460),
+        )
 
     def _physical_channel_names(self) -> list[str]:
         array = self.current_array()
@@ -6890,11 +7383,16 @@ class VirtualArrayGui:
     ) -> ElementPattern | None:
         dialog = tk.Toplevel(self.root)
         _style_toplevel(dialog)
+        dialog._qt.setObjectName("elementPatternConfirmationDialog")
         dialog.title(self._t("element_pattern_confirm_title"))
         dialog.transient(self.root)
         dialog.grab_set()
-        dialog.geometry("900x720")
-        dialog.minsize(760, 620)
+        fit_dialog_to_parent(
+            dialog._qt,
+            self.root._window,
+            preferred_size=(920, 680),
+            minimum_size=(720, 520),
+        )
 
         title = ttk.Label(
             dialog,
@@ -6912,11 +7410,16 @@ class VirtualArrayGui:
             background=THEME["bg"],
         )
         subtitle.pack(fill=tk.X, padx=10, pady=(0, 6))
-        metrics_frame = ttk.Frame(dialog)
-        metrics_frame.pack(fill=tk.X, padx=10, pady=(0, 6))
+        metrics_frame = ttk.Frame(
+            dialog,
+            style="Metric.TFrame",
+            padding=(10, 7),
+        )
+        metrics_frame.pack(fill=tk.X, padx=10, pady=(0, 8))
         horizontal_metrics_label = ttk.Label(
             metrics_frame,
             text="",
+            style="MetricValue.TLabel",
             font=(THEME["font_family_mono"], 9),
             foreground=THEME["response_line"],
         )
@@ -6924,6 +7427,7 @@ class VirtualArrayGui:
         elevation_metrics_label = ttk.Label(
             metrics_frame,
             text="",
+            style="MetricValue.TLabel",
             font=(THEME["font_family_mono"], 9),
             foreground=THEME["secondary_accent"],
         )
@@ -6984,7 +7488,7 @@ class VirtualArrayGui:
                 loc="left",
             )
             horizontal_ax.set_ylabel(self._t("element_pattern_axis_gain"))
-            _configure_pattern_preview_axis(horizontal_ax)
+            _configure_pattern_preview_axis(horizontal_ax, current.angles_deg)
             horizontal_ax.grid(True, alpha=0.3, color=THEME["grid_major_color"], linewidth=0.55)
 
             if current.elevation_gain_db is not None:
@@ -7022,7 +7526,7 @@ class VirtualArrayGui:
             )
             elevation_ax.set_xlabel(self._t("element_pattern_axis_angle"))
             elevation_ax.set_ylabel(self._t("element_pattern_axis_gain"))
-            _configure_pattern_preview_axis(elevation_ax)
+            _configure_pattern_preview_axis(elevation_ax, current.angles_deg)
             elevation_ax.grid(True, alpha=0.3, color=THEME["grid_major_color"], linewidth=0.55)
             fig.tight_layout()
             canvas.draw_idle()
@@ -7073,6 +7577,12 @@ class VirtualArrayGui:
         if pattern.elevation_gain_db is None:
             swap_button.setEnabled(False)
         dialog.protocol("WM_DELETE_WINDOW", cancel)
+        fit_dialog_to_parent(
+            dialog._qt,
+            self.root._window,
+            preferred_size=(920, 680),
+            minimum_size=(720, 520),
+        )
         dialog.wait_window()
         return state["confirmed"]
 
@@ -7097,6 +7607,12 @@ class VirtualArrayGui:
             initial_directory=self.last_report_dir,
             azimuth_available=azimuth_available,
             elevation_available=elevation_available,
+        )
+        fit_dialog_to_parent(
+            dialog,
+            self.root._window,
+            preferred_size=(780, 700),
+            minimum_size=(650, 520),
         )
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
@@ -7535,11 +8051,20 @@ class VirtualArrayGui:
             (self.el_chart, el_available, "empty_elevation_title"),
         ):
             if chart.empty_overlay is not None:
+                chart.empty_overlay.setAccessibleName(
+                    self._t("accessibility_plot_capability")
+                )
                 chart.empty_overlay.set_content(
                     self._t(title_key),
                     self._t("empty_array_body"),
                 )
+                chart.empty_overlay.set_action(
+                    self._t("empty_action_edit_array"),
+                    lambda: self._select_main_tab(0),
+                )
                 chart.empty_overlay.show_overlay(not available)
+            if chart.footer_widget is not None:
+                chart.footer_widget._qt.setVisible(available)
             if chart.play_button is not None:
                 chart.play_button.configure(state=tk.NORMAL if available else tk.DISABLED)
             if not available and chart.stop_button is not None:
@@ -7547,11 +8072,28 @@ class VirtualArrayGui:
 
         has_2d = az_available and el_available
         if self.dbf2d_empty_overlay is not None:
+            self.dbf2d_empty_overlay.setAccessibleName(
+                self._t("accessibility_plot_capability")
+            )
             self.dbf2d_empty_overlay.set_content(
                 self._t("empty_2d_title"),
                 self._t("empty_2d_body"),
             )
+            target_index = 1 if az_available or el_available else 0
+            action_key = (
+                "empty_action_view_1d"
+                if target_index == 1
+                else "empty_action_edit_array"
+            )
+            self.dbf2d_empty_overlay.set_action(
+                self._t(action_key),
+                lambda index=target_index: self._select_main_tab(index),
+            )
             self.dbf2d_empty_overlay.show_overlay(not has_2d)
+        if self.dbf2d_controls_widget is not None:
+            self.dbf2d_controls_widget._qt.setVisible(has_2d)
+        if self.dbf2d_status_label is not None:
+            self.dbf2d_status_label._qt.setVisible(has_2d)
         for button in (self.dbf2d_az_button, self.dbf2d_el_button):
             if button is not None:
                 button.configure(state=tk.NORMAL if has_2d else tk.DISABLED)
@@ -7694,6 +8236,7 @@ class VirtualArrayGui:
             True, which="minor", color=THEME["grid_minor_color"], linewidth=0.42, alpha=0.24
         )
         if self.dragging is not None:
+            self._set_physical_cursor("closedhand")
             snap_x = self.dragging.x * DISPLAY_SCALE_LAMBDA
             snap_y = self.dragging.y * DISPLAY_SCALE_LAMBDA
             self.physical_ax.axvline(
@@ -7940,7 +8483,7 @@ class VirtualArrayGui:
             },
         )
         if counts.max() > 1:
-            _style_legend(self.virtual_ax.legend(loc="upper left", fontsize=9))
+            _style_legend(self.virtual_ax.legend(loc="lower left", fontsize=9))
 
     def _draw_response_common(
         self,
@@ -8648,6 +9191,7 @@ class VirtualArrayGui:
             return
 
         self._update_physical_hover(event)
+        self._update_physical_cursor(event)
         self._update_virtual_hover(event)
         self._update_response_cursor(event, self.az_chart)
         self._update_response_cursor(event, self.el_chart)
@@ -8698,6 +9242,7 @@ class VirtualArrayGui:
                 self.generate_virtual_array()
             finally:
                 self.drag_axis_limits = None
+            self._set_physical_cursor("openhand")
 
     def on_arrow_key(self, event) -> str | None:
         if _event_widget_is_text_input(event):

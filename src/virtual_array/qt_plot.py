@@ -65,6 +65,8 @@ def _cursor_shape(name: str | None) -> QtCore.Qt.CursorShape:
         "pointinghand": QtCore.Qt.CursorShape.PointingHandCursor,
         "fleur": QtCore.Qt.CursorShape.SizeAllCursor,
         "size_all": QtCore.Qt.CursorShape.SizeAllCursor,
+        "openhand": QtCore.Qt.CursorShape.OpenHandCursor,
+        "closedhand": QtCore.Qt.CursorShape.ClosedHandCursor,
         "sb_h_double_arrow": QtCore.Qt.CursorShape.SizeHorCursor,
         "size_hor": QtCore.Qt.CursorShape.SizeHorCursor,
         "sb_v_double_arrow": QtCore.Qt.CursorShape.SizeVerCursor,

@@ -302,9 +302,23 @@ def _prepare_widget_for_capture(widget: Any) -> None:
 
 
 def _render_widget_image(widget: Any) -> Any:
-    """Render a complete, opaque QWidget image on a CPU-backed paint device."""
+    """Capture a complete, opaque QWidget image with a render fallback.
+
+    ``QWidget.grab`` composites backing-store children correctly after page
+    switches.  Some headless or RDP platforms still return a non-null black
+    pixmap, so direct ``QWidget.render`` is compared when the grab looks bad.
+    """
 
     QtCore, QtGui, QtWidgets = _qt_modules()
+    pixmap = widget.grab()
+    grabbed_image = None
+    if not pixmap.isNull():
+        grabbed_image = pixmap.toImage().convertToFormat(
+            QtGui.QImage.Format.Format_RGB32
+        )
+        if _near_black_fraction(grabbed_image) <= MAX_NEAR_BLACK_FRACTION:
+            return grabbed_image
+
     size = widget.size()
     if size.width() <= 0 or size.height() <= 0:
         widget.adjustSize()
@@ -330,7 +344,9 @@ def _render_widget_image(widget: Any) -> Any:
         flags,
     )
     painter.end()
-    return image
+    if grabbed_image is None:
+        return image
+    return min((grabbed_image, image), key=_near_black_fraction)
 
 
 def _near_black_fraction(image: Any) -> float:
@@ -351,7 +367,7 @@ def _near_black_fraction(image: Any) -> float:
 
 
 def render_widget(widget: Any, output_path: Path) -> Path:
-    """Paint and validate a QWidget PNG using QWidget.render()."""
+    """Capture and validate a QWidget PNG with grab/render fallbacks."""
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     best_image = None

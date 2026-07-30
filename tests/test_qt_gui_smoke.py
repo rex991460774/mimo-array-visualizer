@@ -183,10 +183,12 @@ def test_native_shell_exposes_shortcuts_focus_and_splitter(gui_session) -> None:
         action = controller.native_actions[key]
         assert isinstance(action, QtGui.QAction)
         assert not action.shortcut().isEmpty()
-    assert isinstance(
-        controller.native_actions["menu_export_performance_report"],
-        QtGui.QAction,
-    )
+    assert "menu_export_report" in controller.native_actions
+    report_action = controller.native_actions["menu_export_report"]
+    assert isinstance(report_action, QtGui.QAction)
+    assert report_action in controller.native_menus["menu_file"].actions()
+    assert report_action.menu() is None
+    assert "menu_export_angle_error_image" not in controller.native_actions
     assert isinstance(controller.native_manual_menu, QtWidgets.QMenu)
     assert len(controller.native_manual_chapter_actions) == 12
     assert controller.native_actions["menu_user_manual_open"].shortcut() == (
@@ -204,6 +206,144 @@ def test_native_shell_exposes_shortcuts_focus_and_splitter(gui_session) -> None:
         if widget.isEnabled() and widget.isVisible()
     )
     assert controller.main_notebook._qt.tabBar().accessibleName()
+
+
+def test_report_dialog_reuses_one_instance_for_sequential_report_and_png_exports(
+    gui_session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from virtual_array.performance_report import (
+        generate_angle_error_image,
+        generate_performance_report,
+    )
+
+    controller = gui_session.controller
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+    report_path = report_dir / "custom-report.pdf"
+    report_path.write_bytes(b"existing report placeholder")
+    image_path = report_dir / "custom-report_angle_error.png"
+    captured: list[dict[str, object]] = []
+    overwrite_parents: list[QtWidgets.QWidget] = []
+    busy_observations: list[bool] = []
+    snapshot = object()
+
+    monkeypatch.setattr(controller, "last_report_dir", report_dir)
+    monkeypatch.setattr(controller, "last_report_error_limit_deg", 7.5)
+    monkeypatch.setattr(
+        controller,
+        "current_metrics",
+        SimpleNamespace(
+            x_aperture=1.0,
+            azimuth_resolution=1.0,
+            y_aperture=0.0,
+            elevation_resolution=None,
+        ),
+    )
+    monkeypatch.setattr(controller, "_performance_report_snapshot", lambda: snapshot)
+
+    def start_export(generator, frozen_snapshot, options, *, export_kind="report"):
+        export_parent = controller._performance_export_parent
+        assert export_parent is controller._performance_report_dialog
+        busy_observations.append(
+            not export_parent.save_button.isEnabled()
+            and not export_parent.angle_image_button.isEnabled()
+            and not export_parent.cancel_button.isEnabled()
+        )
+        captured.append(
+            {
+                "generator": generator,
+                "snapshot": frozen_snapshot,
+                "options": options,
+                "export_kind": export_kind,
+            }
+        )
+        # Stand in for thread.finished so this test can issue the next request.
+        export_parent.set_export_busy(False)
+        controller._performance_export_parent = None
+
+    def confirm_overwrite(parent, *_args, **_kwargs):
+        overwrite_parents.append(parent)
+        return QtWidgets.QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "question", confirm_overwrite)
+    monkeypatch.setattr(
+        gui_session.gui_module,
+        "fit_dialog_to_parent",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(controller, "_start_performance_report_export", start_export)
+
+    dialog = None
+    try:
+        controller.open_performance_report_dialog()
+        process_events(gui_session.app, cycles=5)
+        dialog = controller._performance_report_dialog
+        assert isinstance(dialog, QtWidgets.QDialog)
+        assert dialog.isVisible()
+        assert dialog.error_limit_spin.value() == pytest.approx(7.5)
+
+        # Invoking the menu again raises the existing form instead of resetting it.
+        original_identity = id(dialog)
+        controller.open_performance_report_dialog()
+        process_events(gui_session.app, cycles=2)
+        assert controller._performance_report_dialog is dialog
+        assert id(controller._performance_report_dialog) == original_identity
+
+        dialog.output_path_edit.setText(str(report_path))
+        dialog.title_edit.setText("Keep these settings")
+        dialog.error_limit_spin.setValue(7.5)
+        dialog.az_focus_start.setValue(-43)
+        dialog.az_focus_stop.setValue(52)
+
+        dialog.save_button.click()
+        process_events(gui_session.app, cycles=3)
+        assert dialog.isVisible()
+        assert dialog.save_button.isEnabled()
+
+        dialog.angle_image_button.click()
+        process_events(gui_session.app, cycles=3)
+
+        assert dialog.isVisible()
+        assert controller._performance_report_dialog is dialog
+        assert [item["export_kind"] for item in captured] == [
+            "report",
+            "angle_image",
+        ]
+        assert [item["generator"] for item in captured] == [
+            generate_performance_report,
+            generate_angle_error_image,
+        ]
+        assert all(item["snapshot"] is snapshot for item in captured)
+        assert busy_observations == [True, True]
+        assert overwrite_parents == [dialog]
+
+        report_options = captured[0]["options"]
+        image_options = captured[1]["options"]
+        assert report_options.output_path == report_path
+        assert report_options.title == "Keep these settings"
+        assert report_options.error_limit_deg == pytest.approx(7.5)
+        assert report_options.azimuth_focus.start_deg == -43
+        assert report_options.azimuth_focus.stop_deg == 52
+        assert image_options.output_path == image_path
+        assert image_options.output_path.parent == report_dir
+        assert image_options.error_limit_deg == pytest.approx(7.5)
+        assert dialog.title_edit.text() == "Keep these settings"
+        assert (dialog.az_focus_start.value(), dialog.az_focus_stop.value()) == (
+            -43,
+            52,
+        )
+        assert controller.last_report_dir == report_dir
+        assert controller.last_report_error_limit_deg == pytest.approx(7.5)
+    finally:
+        if dialog is not None:
+            dialog.set_export_busy(False)
+            dialog.reject()
+            process_events(gui_session.app, cycles=4)
+        controller._performance_export_parent = None
+        gui_session.window.activateWindow()
+        process_events(gui_session.app, cycles=3)
 
 
 def test_modern_theme_and_primary_interactions_are_explicit(gui_session) -> None:
@@ -300,12 +440,15 @@ def test_workspace_tabs_support_keyboard_navigation(gui_session) -> None:
 def test_performance_report_worker_runs_off_the_gui_thread(
     gui_session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from virtual_array.performance_report_dialog import PerformanceReportDialog
+
     controller = gui_session.controller
     app = gui_session.app
     events: list[tuple[str, object, bool]] = []
     worker_thread_checks: list[bool] = []
     cancel_requests: list[bool] = []
     progress_canceled: list[bool] = []
+    information_parents: list[QtWidgets.QWidget] = []
     application_exit_signals: list[str] = []
     on_about_to_quit = lambda: application_exit_signals.append("aboutToQuit")
     on_last_window_closed = lambda: application_exit_signals.append(
@@ -318,10 +461,25 @@ def test_performance_report_worker_runs_off_the_gui_thread(
 
     app.aboutToQuit.connect(on_about_to_quit)
     app.lastWindowClosed.connect(on_last_window_closed)
+
+    report_dialog = PerformanceReportDialog(
+        gui_session.window,
+        language="zh",
+        initial_directory=Path.cwd(),
+        azimuth_available=True,
+        elevation_available=True,
+    )
+    report_dialog.open()
+    process_events(app, cycles=4)
+
+    def capture_information(parent, *_args, **_kwargs):
+        information_parents.append(parent)
+        return QtWidgets.QMessageBox.StandardButton.Ok
+
     monkeypatch.setattr(
         QtWidgets.QMessageBox,
         "information",
-        lambda *_args, **_kwargs: QtWidgets.QMessageBox.StandardButton.Ok,
+        capture_information,
     )
 
     def in_gui_thread() -> bool:
@@ -369,6 +527,12 @@ def test_performance_report_worker_runs_off_the_gui_thread(
     )
     try:
         for _run_index in range(2):
+            report_dialog.set_export_busy(True)
+            controller._performance_export_parent = report_dialog
+            assert not report_dialog.save_button.isEnabled()
+            assert not report_dialog.angle_image_button.isEnabled()
+            assert not report_dialog.cancel_button.isEnabled()
+
             controller._start_performance_report_export(
                 fake_generator,
                 object(),
@@ -383,6 +547,11 @@ def test_performance_report_worker_runs_off_the_gui_thread(
             assert bridge is not None
             assert progress is not None
             assert bridge.thread() is app.thread()
+            assert progress.parentWidget() is report_dialog
+            assert (
+                progress.windowModality()
+                == QtCore.Qt.WindowModality.WindowModal
+            )
             assert progress.minimumWidth() >= 440
             progress_label = progress.findChild(QtWidgets.QLabel)
             assert progress_label is not None and progress_label.wordWrap()
@@ -403,6 +572,11 @@ def test_performance_report_worker_runs_off_the_gui_thread(
             assert controller._performance_report_worker is None
             assert controller._performance_report_bridge is None
             assert controller._performance_report_progress is None
+            assert controller._performance_export_parent is None
+            assert report_dialog.save_button.isEnabled()
+            assert report_dialog.angle_image_button.isEnabled()
+            assert report_dialog.cancel_button.isEnabled()
+            assert report_dialog.isVisible()
             assert gui_session.window.isVisible()
 
         assert worker_thread_checks == [False, False]
@@ -416,6 +590,7 @@ def test_performance_report_worker_runs_off_the_gui_thread(
         ]
         assert cancel_requests == []
         assert progress_canceled == []
+        assert information_parents == [report_dialog, report_dialog]
         assert application_exit_signals == []
     finally:
         app.aboutToQuit.disconnect(on_about_to_quit)
@@ -429,6 +604,11 @@ def test_performance_report_worker_runs_off_the_gui_thread(
             progress.blockSignals(True)
             progress.close()
             controller._performance_report_progress = None
+        controller._performance_export_parent = None
+        report_dialog.set_export_busy(False)
+        report_dialog.close()
+        report_dialog.deleteLater()
+        process_events(app, cycles=3)
 
 
 def test_configuration_and_manual_dialogs_use_native_qt_controls(gui_session) -> None:

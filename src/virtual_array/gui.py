@@ -293,10 +293,60 @@ UI_TEXT = {
         "en": "Export Array JSON",
         "ja": "アレイJSONを書き出し",
     },
-    "menu_export_performance_report": {
-        "zh": "输出当前配置性能报告…",
-        "en": "Export Current Performance Report…",
-        "ja": "現在の設定性能レポートを出力…",
+    "menu_export_report": {
+        "zh": "输出报告…",
+        "en": "Export Report…",
+        "ja": "レポートを出力…",
+    },
+    "angle_image_overwrite_title": {
+        "zh": "覆盖测角误差图片",
+        "en": "Replace angle-error image",
+        "ja": "測角誤差画像を置き換え",
+    },
+    "angle_image_overwrite_question": {
+        "zh": "文件已存在，是否覆盖？\n{file}",
+        "en": "The file already exists. Replace it?\n{file}",
+        "ja": "ファイルはすでに存在します。置き換えますか？\n{file}",
+    },
+    "angle_image_exporting_status": {
+        "zh": "正在生成 ±90° 测角误差图片…",
+        "en": "Generating the ±90° angle-error image…",
+        "ja": "±90°測角誤差画像を生成中…",
+    },
+    "angle_image_progress_title": {
+        "zh": "生成测角误差图片",
+        "en": "Generate angle-error image",
+        "ja": "測角誤差画像を生成",
+    },
+    "angle_image_canceling_status": {
+        "zh": "正在安全取消，当前绘图步骤完成后停止…",
+        "en": "Cancelling safely after the current rendering step…",
+        "ja": "現在の描画ステップ完了後に安全に中止します…",
+    },
+    "angle_image_canceled_status": {
+        "zh": "已取消测角误差图片生成",
+        "en": "Angle-error image generation cancelled",
+        "ja": "測角誤差画像の生成をキャンセルしました",
+    },
+    "angle_image_export_failed_title": {
+        "zh": "测角误差图片生成失败",
+        "en": "Angle-error image failed",
+        "ja": "測角誤差画像の生成に失敗",
+    },
+    "angle_image_exported_status": {
+        "zh": "已输出测角误差图片：{file}",
+        "en": "Exported angle-error image: {file}",
+        "ja": "測角誤差画像を出力しました：{file}",
+    },
+    "angle_image_exported_title": {
+        "zh": "测角误差图片已生成",
+        "en": "Angle-error image created",
+        "ja": "測角誤差画像を生成しました",
+    },
+    "angle_image_exported_message": {
+        "zh": "PNG 图片已保存到：\n{file}",
+        "en": "The PNG image was saved to:\n{file}",
+        "ja": "PNG画像を保存しました：\n{file}",
     },
     "report_overwrite_title": {
         "zh": "覆盖性能报告",
@@ -2332,6 +2382,9 @@ class VirtualArrayGui:
         self._performance_report_worker: _PerformanceReportWorker | None = None
         self._performance_report_bridge: _PerformanceReportUiBridge | None = None
         self._performance_report_progress: QtWidgets.QProgressDialog | None = None
+        self._performance_report_dialog: QtWidgets.QDialog | None = None
+        self._performance_export_parent: QtWidgets.QWidget | None = None
+        self._performance_export_kind = "report"
 
         self.element_pattern: ElementPattern | None = None
         self.channel_patterns = ChannelPatternSet()
@@ -2367,6 +2420,7 @@ class VirtualArrayGui:
         self.header_chip_labels: dict[str, ttk.Label] = {}
         self.last_layout_dir = Path("outputs").resolve()
         self.last_report_dir = Path("outputs").resolve()
+        self.last_report_error_limit_deg = 1.0
         self.last_pattern_dir = Path.home()
         self.last_valid_margin_db = DBF_AMBIGUITY_MARGIN_DB
         self.margin_db = tk.StringVar(value=_format_margin_db(DBF_AMBIGUITY_MARGIN_DB))
@@ -3616,6 +3670,7 @@ class VirtualArrayGui:
             *,
             icon: QtWidgets.QStyle.StandardPixmap | None = None,
             shortcut: QtGui.QKeySequence | QtGui.QKeySequence.StandardKey | None = None,
+            target_menu: QtWidgets.QMenu | None = None,
         ) -> QtGui.QAction:
             action = QtGui.QAction(self._t(text_key), window)
             if icon is not None:
@@ -3623,7 +3678,8 @@ class VirtualArrayGui:
             if shortcut is not None:
                 action.setShortcut(shortcut)
             action.triggered.connect(lambda _checked=False, cb=callback: cb())
-            self.native_menus[menu_key].addAction(action)
+            menu = target_menu if target_menu is not None else self.native_menus[menu_key]
+            menu.addAction(action)
             self.native_actions[text_key] = action
             return action
 
@@ -3644,7 +3700,7 @@ class VirtualArrayGui:
         self.native_menus["menu_file"].addSeparator()
         add_action(
             "menu_file",
-            "menu_export_performance_report",
+            "menu_export_report",
             self.open_performance_report_dialog,
             icon=QtWidgets.QStyle.StandardPixmap.SP_FileDialogInfoView,
         )
@@ -3775,7 +3831,7 @@ class VirtualArrayGui:
             )
             self.config_menu.add_separator()
             self.config_menu.add_command(
-                label=self._t("menu_export_performance_report"),
+                label=self._t("menu_export_report"),
                 command=self.open_performance_report_dialog,
             )
             _style_popup_menu(self.config_menu)
@@ -7587,12 +7643,14 @@ class VirtualArrayGui:
         return state["confirmed"]
 
     def open_performance_report_dialog(self) -> None:
-        """Configure and export a report from one frozen in-memory snapshot."""
-        from .performance_report import (
-            PerformanceReportSnapshot,
-            generate_performance_report,
-        )
+        """Open the reusable report form for one or more sequential exports."""
         from .performance_report_dialog import PerformanceReportDialog
+
+        current_dialog = self._performance_report_dialog
+        if current_dialog is not None and current_dialog.isVisible():
+            current_dialog.raise_()
+            current_dialog.activateWindow()
+            return
 
         metrics = self.current_metrics or self._metrics_for_export()
         azimuth_available = (
@@ -7607,6 +7665,7 @@ class VirtualArrayGui:
             initial_directory=self.last_report_dir,
             azimuth_available=azimuth_available,
             elevation_available=elevation_available,
+            initial_error_limit_deg=self.last_report_error_limit_deg,
         )
         fit_dialog_to_parent(
             dialog,
@@ -7614,16 +7673,73 @@ class VirtualArrayGui:
             preferred_size=(780, 700),
             minimum_size=(650, 520),
         )
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+        dialog.export_requested.connect(
+            lambda export_kind, current=dialog: (
+                self._export_from_performance_report_dialog(current, export_kind)
+            )
+        )
+        dialog.finished.connect(
+            lambda _result, current=dialog: self._clear_performance_report_dialog(
+                current
+            )
+        )
+        self._performance_report_dialog = dialog
+        dialog.open()
+
+    def _clear_performance_report_dialog(self, dialog) -> None:  # noqa: ANN001
+        if self._performance_report_dialog is dialog:
+            self._performance_report_dialog = None
+        delete_later = getattr(dialog, "deleteLater", None)
+        if callable(delete_later):
+            delete_later()
+
+    def _export_from_performance_report_dialog(
+        self,
+        dialog,
+        export_kind: str,
+    ) -> None:  # noqa: ANN001
+        """Start one export without closing or resetting the settings dialog."""
+        from .performance_report import (
+            AngleErrorImageOptions,
+            generate_angle_error_image,
+            generate_performance_report,
+        )
+
+        if (
+            self._performance_report_thread is not None
+            and self._performance_report_thread.isRunning()
+        ):
             return
 
-        options = dialog.options()
-        output_path = options.output_path.resolve()
+        self.last_report_error_limit_deg = dialog.error_limit_spin.value()
+        if export_kind == "angle_image":
+            inherited_options = dialog.angle_error_image_options()
+            output_path = inherited_options.output_path.resolve()
+            options = AngleErrorImageOptions(
+                output_path=output_path,
+                error_limit_deg=inherited_options.error_limit_deg,
+                language=inherited_options.language,
+            )
+            generator = generate_angle_error_image
+            export_kind = "angle_image"
+            overwrite_title = self._t("angle_image_overwrite_title")
+            overwrite_question = self._t(
+                "angle_image_overwrite_question", file=output_path
+            )
+        else:
+            options = dialog.options()
+            output_path = options.output_path.resolve()
+            generator = generate_performance_report
+            export_kind = "report"
+            overwrite_title = self._t("report_overwrite_title")
+            overwrite_question = self._t(
+                "report_overwrite_question", file=output_path
+            )
         if output_path.exists():
             answer = QtWidgets.QMessageBox.question(
-                self.root._window,
-                self._t("report_overwrite_title"),
-                self._t("report_overwrite_question", file=output_path),
+                dialog,
+                overwrite_title,
+                overwrite_question,
                 QtWidgets.QMessageBox.StandardButton.Yes
                 | QtWidgets.QMessageBox.StandardButton.No,
                 QtWidgets.QMessageBox.StandardButton.No,
@@ -7632,7 +7748,24 @@ class VirtualArrayGui:
                 return
 
         self.last_report_dir = output_path.parent
-        snapshot = PerformanceReportSnapshot(
+        dialog.set_export_busy(True)
+        self._performance_export_parent = dialog
+        try:
+            self._start_performance_report_export(
+                generator,
+                self._performance_report_snapshot(),
+                options,
+                export_kind=export_kind,
+            )
+        except Exception:
+            self._performance_export_parent = None
+            dialog.set_export_busy(False)
+            raise
+
+    def _performance_report_snapshot(self):  # noqa: ANN202
+        from .performance_report import PerformanceReportSnapshot
+
+        return PerformanceReportSnapshot(
             array=self.current_array(),
             frequency_ghz=self.current_frequency_ghz(),
             ambiguity_margin_db=self.current_margin_db(),
@@ -7643,17 +7776,14 @@ class VirtualArrayGui:
             app_version=APP_VERSION,
             created_at=datetime.now().astimezone(),
         )
-        self._start_performance_report_export(
-            generate_performance_report,
-            snapshot,
-            options,
-        )
 
     def _start_performance_report_export(
         self,
         generator,
         snapshot,
         options,
+        *,
+        export_kind: str = "report",
     ) -> None:  # noqa: ANN001
         if (
             self._performance_report_thread is not None
@@ -7661,16 +7791,31 @@ class VirtualArrayGui:
         ):
             return
 
+        self._performance_export_kind = (
+            "angle_image" if export_kind == "angle_image" else "report"
+        )
+        exporting_key = (
+            "angle_image_exporting_status"
+            if self._performance_export_kind == "angle_image"
+            else "report_exporting_status"
+        )
+        progress_title_key = (
+            "angle_image_progress_title"
+            if self._performance_export_kind == "angle_image"
+            else "report_progress_title"
+        )
+        export_parent = self._performance_export_parent or self.root._window
+
         progress = QtWidgets.QProgressDialog(
-            self._t("report_exporting_status"),
+            self._t(exporting_key),
             self._t("report_cancel_button"),
             0,
             100,
-            self.root._window,
+            export_parent,
         )
         progress.setObjectName("performanceReportProgress")
-        progress.setWindowTitle(self._t("report_progress_title"))
-        progress.setWindowModality(QtCore.Qt.WindowModality.ApplicationModal)
+        progress.setWindowTitle(self._t(progress_title_key))
+        progress.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
         progress.setMinimumDuration(0)
         progress.setAutoClose(False)
         progress.setAutoReset(False)
@@ -7703,7 +7848,7 @@ class VirtualArrayGui:
         self._performance_report_worker = worker
         self._performance_report_bridge = bridge
         self._performance_report_progress = progress
-        self.status.set(self._t("report_exporting_status"))
+        self.status.set(self._t(exporting_key))
         progress.show()
         thread.start()
 
@@ -7723,19 +7868,35 @@ class VirtualArrayGui:
         if thread is None or not thread.isRunning():
             return
         thread.requestInterruption()
+        canceling_key = (
+            "angle_image_canceling_status"
+            if self._performance_export_kind == "angle_image"
+            else "report_canceling_status"
+        )
         progress = self._performance_report_progress
         if progress is not None:
-            progress.setLabelText(self._t("report_canceling_status"))
+            progress.setLabelText(self._t(canceling_key))
             cancel_button = progress.findChild(
                 QtWidgets.QPushButton, "performanceReportCancelButton"
             )
             if cancel_button is not None:
                 cancel_button.setEnabled(False)
-        self.status.set(self._t("report_canceling_status"))
+        self.status.set(self._t(canceling_key))
 
     @QtCore.Slot(object)
     def _on_performance_report_succeeded(self, artifacts) -> None:  # noqa: ANN001
         self._close_performance_report_progress()
+        message_parent = self._performance_export_parent or self.root._window
+        if self._performance_export_kind == "angle_image":
+            self.status.set(
+                self._t("angle_image_exported_status", file=artifacts.png_path)
+            )
+            QtWidgets.QMessageBox.information(
+                message_parent,
+                self._t("angle_image_exported_title"),
+                self._t("angle_image_exported_message", file=artifacts.png_path),
+            )
+            return
         data_note = ""
         if artifacts.data_directory is not None:
             data_note = self._t(
@@ -7746,7 +7907,7 @@ class VirtualArrayGui:
             self._t("report_exported_status", file=artifacts.pdf_path)
         )
         QtWidgets.QMessageBox.information(
-            self.root._window,
+            message_parent,
             self._t("report_exported_title"),
             self._t(
                 "report_exported_message",
@@ -7758,17 +7919,28 @@ class VirtualArrayGui:
     @QtCore.Slot(str)
     def _on_performance_report_failed(self, message: str) -> None:
         self._close_performance_report_progress()
-        self.status.set(self._t("report_export_failed_title"))
+        message_parent = self._performance_export_parent or self.root._window
+        title_key = (
+            "angle_image_export_failed_title"
+            if self._performance_export_kind == "angle_image"
+            else "report_export_failed_title"
+        )
+        self.status.set(self._t(title_key))
         QtWidgets.QMessageBox.critical(
-            self.root._window,
-            self._t("report_export_failed_title"),
+            message_parent,
+            self._t(title_key),
             message,
         )
 
     @QtCore.Slot()
     def _on_performance_report_cancelled(self) -> None:
         self._close_performance_report_progress()
-        self.status.set(self._t("report_canceled_status"))
+        canceled_key = (
+            "angle_image_canceled_status"
+            if self._performance_export_kind == "angle_image"
+            else "report_canceled_status"
+        )
+        self.status.set(self._t(canceled_key))
 
     def _close_performance_report_progress(self) -> None:
         progress = self._performance_report_progress
@@ -7788,12 +7960,20 @@ class VirtualArrayGui:
         thread: QtCore.QThread,
         bridge: _PerformanceReportUiBridge,
     ) -> None:
-        if self._performance_report_thread is thread:
+        owns_thread = self._performance_report_thread is thread
+        if owns_thread:
             self._performance_report_thread = None
             self._performance_report_worker = None
         if self._performance_report_bridge is bridge:
             self._performance_report_bridge = None
             bridge.deleteLater()
+        if owns_thread:
+            export_parent = self._performance_export_parent
+            self._performance_export_parent = None
+            set_export_busy = getattr(export_parent, "set_export_busy", None)
+            if callable(set_export_busy):
+                set_export_busy(False)
+            self._performance_export_kind = "report"
 
     def export_layout_config(self) -> None:
         default_path = Path("outputs") / "antenna_layout.json"
@@ -8842,6 +9022,14 @@ class VirtualArrayGui:
             if isinstance(report_dir, str) and report_dir:
                 self.last_report_dir = Path(report_dir)
 
+            report_error_limit = state.get("last_report_error_limit_deg")
+            try:
+                parsed_report_error_limit = float(report_error_limit)
+            except (TypeError, ValueError):
+                parsed_report_error_limit = float("nan")
+            if math.isfinite(parsed_report_error_limit) and 0.0 < parsed_report_error_limit <= 30.0:
+                self.last_report_error_limit_deg = parsed_report_error_limit
+
             pattern_dir = state.get("last_pattern_dir")
             if isinstance(pattern_dir, str) and pattern_dir:
                 self.last_pattern_dir = Path(pattern_dir)
@@ -9046,6 +9234,7 @@ class VirtualArrayGui:
             "language": self.language,
             "last_layout_dir": str(self.last_layout_dir),
             "last_report_dir": str(self.last_report_dir),
+            "last_report_error_limit_deg": self.last_report_error_limit_deg,
             "last_pattern_dir": str(self.last_pattern_dir),
             "frequency_ghz": _format_frequency_ghz(self.current_frequency_ghz()),
             "ambiguity_margin_db": _format_margin_db(self.current_margin_db()),

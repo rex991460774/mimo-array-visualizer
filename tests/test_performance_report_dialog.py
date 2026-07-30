@@ -10,6 +10,8 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 QtWidgets = pytest.importorskip("PySide6.QtWidgets")
+QtCore = pytest.importorskip("PySide6.QtCore")
+QtTest = pytest.importorskip("PySide6.QtTest")
 
 from virtual_array.performance_report_dialog import PerformanceReportDialog  # noqa: E402
 
@@ -31,6 +33,7 @@ def dialog(qapp, tmp_path: Path):
         elevation_available=True,
     )
     yield widget
+    widget.set_export_busy(False)
     widget.close()
     widget.deleteLater()
 
@@ -53,10 +56,13 @@ def test_dialog_defaults_are_complete_and_do_not_write_files(
     assert (dialog.el_hold_start.value(), dialog.el_hold_stop.value()) == (-15, 15)
     assert dialog.az_hold_follows_focus.isChecked()
     assert dialog.el_hold_follows_focus.isChecked()
+    assert dialog.az_hold_curve_step.value() == 1
+    assert dialog.el_hold_curve_step.value() == 1
     assert not dialog.az_hold_start.isEnabled()
     assert not dialog.el_hold_start.isEnabled()
 
     assert "141" in dialog.az_hold_frame_count.text()
+    assert "1°" in dialog.az_hold_frame_count.text()
     assert "31" in dialog.el_hold_frame_count.text()
     assert "0°" in dialog.findChild(
         QtWidgets.QLabel, "azOrthogonalPlaneNote"
@@ -72,6 +78,12 @@ def test_dialog_defaults_are_complete_and_do_not_write_files(
     assert not dialog.include_spectrum_magnitude_checkbox.isChecked()
     assert dialog.include_raw_checkbox.isChecked()
     assert dialog.save_button.isEnabled()
+    assert isinstance(dialog.angle_image_button, QtWidgets.QPushButton)
+    assert dialog.angle_image_button.isEnabled()
+    assert dialog.export_kind == "report"
+
+    with pytest.raises(AttributeError):
+        setattr(dialog, "export_kind", "angle_image")
 
 
 def test_range_spin_boxes_and_important_object_names_are_stable(
@@ -98,6 +110,8 @@ def test_range_spin_boxes_and_important_object_names_are_stable(
         "reportBrowseButton": QtWidgets.QPushButton,
         "azHoldFollowsFocus": QtWidgets.QCheckBox,
         "elHoldFollowsFocus": QtWidgets.QCheckBox,
+        "azHoldCurveStep": QtWidgets.QSpinBox,
+        "elHoldCurveStep": QtWidgets.QSpinBox,
         "reportErrorLimitDeg": QtWidgets.QDoubleSpinBox,
         "reportSpectrumFloorDb": QtWidgets.QDoubleSpinBox,
         "reportIncludeSpectrumDb": QtWidgets.QCheckBox,
@@ -108,6 +122,11 @@ def test_range_spin_boxes_and_important_object_names_are_stable(
     }
     for object_name, widget_type in expected_names_and_types.items():
         assert dialog.findChild(widget_type, object_name) is not None
+
+    for object_name in ("azHoldCurveStep", "elHoldCurveStep"):
+        spin = dialog.findChild(QtWidgets.QSpinBox, object_name)
+        assert spin is not None
+        assert (spin.minimum(), spin.maximum(), spin.singleStep()) == (1, 180, 1)
 
 
 def test_hold_range_follows_focus_until_user_requests_independent_range(
@@ -132,21 +151,49 @@ def test_hold_range_follows_focus_until_user_requests_independent_range(
     assert (dialog.az_hold_start.value(), dialog.az_hold_stop.value()) == (-25, 48)
 
 
-def test_invalid_range_shows_inline_error_and_prevents_accept(
+def test_hold_curve_interval_updates_plotted_curve_preview_and_options(
     dialog: PerformanceReportDialog,
 ) -> None:
+    dialog.az_focus_start.setValue(-10)
+    dialog.az_focus_stop.setValue(12)
+    dialog.az_hold_curve_step.setValue(5)
+
+    assert "范围内 23 帧" in dialog.az_hold_frame_count.text()
+    assert "每 5°（5 帧）" in dialog.az_hold_frame_count.text()
+    assert "共 6 条" in dialog.az_hold_frame_count.text()
+    assert "起止角均保留" in dialog.az_hold_frame_count.text()
+
+    dialog.el_hold_curve_step.setValue(4)
+    options = dialog.options()
+    assert options.azimuth_hold_stride_frames == 5
+    assert options.elevation_hold_stride_frames == 4
+
+
+def test_invalid_range_shows_inline_error_and_prevents_accept(
+    dialog: PerformanceReportDialog, qapp,
+) -> None:
+    requests: list[str] = []
+    dialog.export_requested.connect(requests.append)
+    dialog.open()
+    qapp.processEvents()
+
     dialog.az_focus_start.setValue(30)
     dialog.az_focus_stop.setValue(20)
 
     assert dialog.validation_label.isVisibleTo(dialog)
     assert "起始角不能大于终止角" in dialog.validation_label.text()
     dialog.save_button.click()
+    assert requests == []
+    assert dialog.isVisible()
     assert dialog.result() != QtWidgets.QDialog.DialogCode.Accepted
 
     dialog.az_focus_stop.setValue(40)
     assert not dialog.validation_label.isVisibleTo(dialog)
     dialog.save_button.click()
-    assert dialog.result() == QtWidgets.QDialog.DialogCode.Accepted
+    qapp.processEvents()
+    assert requests == ["report"]
+    assert dialog.isVisible()
+    assert dialog.result() != QtWidgets.QDialog.DialogCode.Accepted
 
 
 def test_at_least_one_spectrum_vertical_scale_is_required(
@@ -159,6 +206,7 @@ def test_at_least_one_spectrum_vertical_scale_is_required(
     assert "dB" in dialog.validation_label.text()
     assert "模值" in dialog.validation_label.text()
     assert not dialog.save_button.isEnabled()
+    assert dialog.angle_image_button.isEnabled()
     assert not dialog.spectrum_floor_spin.isEnabled()
 
     dialog.include_spectrum_magnitude_checkbox.setChecked(True)
@@ -188,6 +236,7 @@ def test_axis_capability_disables_irrelevant_controls_and_report_action(
         assert azimuth_only.azimuth_group.isEnabled()
         assert not azimuth_only.elevation_group.isEnabled()
         assert azimuth_only.save_button.isEnabled()
+        assert azimuth_only.angle_image_button.isEnabled()
 
         options = azimuth_only.options()
         assert options.azimuth_focus.start_deg == -70
@@ -196,6 +245,8 @@ def test_axis_capability_disables_irrelevant_controls_and_report_action(
         assert options.elevation_focus.stop_deg == 15
         assert options.elevation_hold.start_deg == -15
         assert options.elevation_hold.stop_deg == 15
+        assert options.azimuth_hold_stride_frames == 1
+        assert options.elevation_hold_stride_frames == 1
     finally:
         azimuth_only.close()
         azimuth_only.deleteLater()
@@ -211,6 +262,7 @@ def test_axis_capability_disables_irrelevant_controls_and_report_action(
         assert not no_axis.azimuth_group.isEnabled()
         assert not no_axis.elevation_group.isEnabled()
         assert not no_axis.save_button.isEnabled()
+        assert not no_axis.angle_image_button.isEnabled()
     finally:
         no_axis.close()
         no_axis.deleteLater()
@@ -223,11 +275,26 @@ def test_axis_capability_disables_irrelevant_controls_and_report_action(
         "save_text",
         "cancel_text",
         "magnitude_text",
+        "hold_count_fragment",
     ),
     (
-        ("zh", "性能报告", "输出报告", "取消", "模值"),
-        ("en", "Performance Report", "Export report", "Cancel", "Magnitude"),
-        ("ja", "性能レポート", "レポートを出力", "キャンセル", "振幅値"),
+        ("zh", "性能报告", "输出报告", "取消", "模值", "范围内 141 帧"),
+        (
+            "en",
+            "Performance Report",
+            "Export report",
+            "Cancel",
+            "Magnitude",
+            "141 frames in range",
+        ),
+        (
+            "ja",
+            "性能レポート",
+            "レポートを出力",
+            "キャンセル",
+            "振幅値",
+            "範囲内 141 フレーム",
+        ),
     ),
 )
 def test_all_supported_languages_are_applied(
@@ -238,6 +305,7 @@ def test_all_supported_languages_are_applied(
     save_text: str,
     cancel_text: str,
     magnitude_text: str,
+    hold_count_fragment: str,
 ) -> None:
     del qapp
     widget = PerformanceReportDialog(
@@ -251,18 +319,19 @@ def test_all_supported_languages_are_applied(
         assert title_fragment in widget.windowTitle()
         assert widget.save_button.text() == save_text
         assert widget.cancel_button.text() == cancel_text
+        assert "PNG" in widget.angle_image_button.text()
         assert widget.include_spectrum_db_checkbox.text() == "dB"
         assert widget.include_spectrum_magnitude_checkbox.text() == magnitude_text
+        assert hold_count_fragment in widget.az_hold_frame_count.text()
         assert widget.options().language == language
     finally:
         widget.close()
         widget.deleteLater()
 
 
-def test_browse_and_accept_normalise_pdf_suffix_without_creating_file(
+def test_browse_and_report_request_normalise_pdf_suffix_without_closing(
     qapp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    del qapp
     selected_without_suffix = tmp_path / "custom-report"
     monkeypatch.setattr(
         QtWidgets.QFileDialog,
@@ -277,13 +346,21 @@ def test_browse_and_accept_normalise_pdf_suffix_without_creating_file(
         elevation_available=True,
     )
     try:
+        requests: list[str] = []
+        widget.export_requested.connect(requests.append)
+        widget.open()
+        qapp.processEvents()
+
         widget.browse_button.click()
         expected = selected_without_suffix.with_suffix(".pdf")
         assert Path(widget.output_path_edit.text()) == expected
         assert not expected.exists()
 
-        widget.accept()
-        assert widget.result() == QtWidgets.QDialog.DialogCode.Accepted
+        widget.save_button.click()
+        qapp.processEvents()
+        assert requests == ["report"]
+        assert widget.isVisible()
+        assert widget.result() != QtWidgets.QDialog.DialogCode.Accepted
         options = widget.options()
         assert options.output_path == expected
         assert options.error_limit_deg == pytest.approx(1.0)
@@ -291,7 +368,118 @@ def test_browse_and_accept_normalise_pdf_suffix_without_creating_file(
         assert options.include_spectrum_db is True
         assert options.include_spectrum_magnitude is False
         assert options.include_raw_data is True
+        assert options.azimuth_hold_stride_frames == 1
+        assert options.elevation_hold_stride_frames == 1
         assert not expected.exists()
     finally:
         widget.close()
         widget.deleteLater()
+
+
+def test_report_then_angle_image_requests_keep_same_dialog_and_configuration(
+    qapp,
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "delivery" / "custom-report.pdf"
+    expected_image_path = report_path.with_name("custom-report_angle_error.png")
+    widget = PerformanceReportDialog(
+        None,
+        language="en",
+        initial_directory=tmp_path,
+        azimuth_available=True,
+        elevation_available=False,
+    )
+    try:
+        requests: list[str] = []
+        widget.export_requested.connect(requests.append)
+        widget.open()
+        qapp.processEvents()
+
+        original_identity = id(widget)
+        widget.output_path_edit.setText(str(report_path))
+        widget.title_edit.setText("Sequential export settings")
+        widget.error_limit_spin.setValue(7.5)
+        widget.az_focus_start.setValue(-44)
+        widget.az_focus_stop.setValue(51)
+        widget.az_hold_curve_step.setValue(5)
+
+        assert widget.save_button.isEnabled()
+        assert widget.angle_image_button.isEnabled()
+
+        widget.save_button.click()
+        qapp.processEvents()
+        report_options = widget.options()
+
+        assert requests == ["report"]
+        assert id(widget) == original_identity
+        assert widget.isVisible()
+        assert widget.result() != QtWidgets.QDialog.DialogCode.Accepted
+        assert report_options.output_path == report_path
+        assert report_options.title == "Sequential export settings"
+        assert report_options.error_limit_deg == pytest.approx(7.5)
+        assert report_options.azimuth_focus.start_deg == -44
+        assert report_options.azimuth_focus.stop_deg == 51
+        assert report_options.azimuth_hold_stride_frames == 5
+
+        # Model one completed worker cycle before requesting the second export.
+        widget.set_export_busy(True)
+        widget.set_export_busy(False)
+        widget.angle_image_button.click()
+        qapp.processEvents()
+
+        assert requests == ["report", "angle_image"]
+        assert id(widget) == original_identity
+        assert widget.isVisible()
+        assert widget.result() != QtWidgets.QDialog.DialogCode.Accepted
+        assert widget.export_kind == "angle_image"
+        options = widget.angle_error_image_options()
+        assert options.output_path == expected_image_path
+        assert options.output_path.parent == report_path.parent
+        assert options.error_limit_deg == pytest.approx(7.5)
+        assert options.language == "en"
+        assert widget.options() == report_options
+        assert not report_path.exists()
+        assert not expected_image_path.exists()
+    finally:
+        widget.close()
+        widget.deleteLater()
+
+
+def test_busy_state_blocks_export_and_close_then_restores_valid_actions(
+    dialog: PerformanceReportDialog, qapp,
+) -> None:
+    requests: list[str] = []
+    dialog.export_requested.connect(requests.append)
+    dialog.open()
+    qapp.processEvents()
+
+    # The report is invalid without a spectrum scale, while standalone PNG
+    # export remains valid.  Restoration must preserve that distinction.
+    dialog.include_spectrum_db_checkbox.setChecked(False)
+    dialog.include_spectrum_magnitude_checkbox.setChecked(False)
+    assert not dialog.save_button.isEnabled()
+    assert dialog.angle_image_button.isEnabled()
+
+    dialog.set_export_busy(True)
+    assert not dialog.save_button.isEnabled()
+    assert not dialog.angle_image_button.isEnabled()
+    assert not dialog.cancel_button.isEnabled()
+
+    dialog.save_button.click()
+    dialog.angle_image_button.click()
+    dialog.reject()
+    assert dialog.close() is False
+    QtTest.QTest.keyClick(dialog, QtCore.Qt.Key.Key_Escape)
+    qapp.processEvents()
+
+    assert requests == []
+    assert dialog.isVisible()
+
+    dialog.set_export_busy(False)
+    assert not dialog.save_button.isEnabled()
+    assert dialog.angle_image_button.isEnabled()
+    assert dialog.cancel_button.isEnabled()
+
+    dialog.cancel_button.click()
+    qapp.processEvents()
+    assert not dialog.isVisible()

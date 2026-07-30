@@ -6,8 +6,10 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore, QtWidgets
 
+from .performance_report import MAX_HOLD_STRIDE_FRAMES, hold_curve_frame_count
+
 if TYPE_CHECKING:
-    from .performance_report import PerformanceReportOptions
+    from .performance_report import AngleErrorImageOptions, PerformanceReportOptions
 
 
 _SUPPORTED_LANGUAGES = {"zh", "en", "ja"}
@@ -65,10 +67,20 @@ _TEXT = {
         "en": "Hold range follows focus range",
         "ja": "Hold 範囲を性能評価範囲に連動",
     },
+    "hold_curve_stride": {
+        "zh": "Hold 曲线间隔",
+        "en": "Hold curve interval",
+        "ja": "Hold 曲線間隔",
+    },
+    "hold_curve_stride_tooltip": {
+        "zh": "当前真实角网格为 1°/帧。1° 表示全部帧；大于 1° 时按间隔绘制，并始终保留范围起止帧。",
+        "en": "The current true-angle grid is 1 deg per frame. Use 1 deg for every frame; larger intervals retain both range endpoints.",
+        "ja": "現在の真角度グリッドは1°/フレームです。1°は全フレームを描画し、それ以上では範囲両端を保持します。",
+    },
     "frame_count": {
-        "zh": "按 1° 步进输出，共 {count} 帧 Hold 曲线。",
-        "en": "1 deg Hold step: {count} frames.",
-        "ja": "1° ステップごとに Hold 曲線を出力（合計 {count} フレーム）。",
+        "zh": "范围内 {range_count} 帧；每 {step}°（{step} 帧）绘制 1 条，共 {curve_count} 条；起止角均保留。",
+        "en": "{range_count} frames in range; plot every {step} deg ({step} frames): {curve_count} curves; endpoints retained.",
+        "ja": "範囲内 {range_count} フレーム；{step}°（{step} フレーム）ごとに描画し、計 {curve_count} 本；両端を保持。",
     },
     "azimuth_plane_note": {
         "zh": "方位 1D DBF 角谱使用主平面切面：俯仰真实角固定为 0°。",
@@ -116,9 +128,19 @@ _TEXT = {
         "ja": "再現可能な生データ（CSV/JSON）も出力",
     },
     "criteria_note": {
-        "zh": "关注范围用于统计最大/均方根误差、门限通过率和可用角域；Hold 范围决定报告中全量保留的逐帧角谱。",
-        "en": "The focus range drives max/RMS error, pass rate, and usable-angle metrics; the Hold range selects the per-frame spectra retained in full.",
-        "ja": "評価範囲は最大/RMS 誤差、合格率、使用可能角度域に使用し、Hold 範囲は全数保持するフレーム別スペクトルを選択します。",
+        "zh": "关注范围用于性能统计；Hold 范围与曲线间隔控制叠加图密度。Max-Hold 包络及 CSV/JSON 数据仍使用范围内全部帧。",
+        "en": "The focus range drives performance metrics; the Hold range and curve interval control overlay density. Max-hold and CSV/JSON data still use every in-range frame.",
+        "ja": "評価範囲は性能統計に使用し、Hold範囲と曲線間隔は重ね合わせ密度を制御します。Max-HoldとCSV/JSONは範囲内全フレームを使用します。",
+    },
+    "save_angle_image": {
+        "zh": "仅输出测角误差 PNG",
+        "en": "Export Angle-error PNG Only",
+        "ja": "測角誤差 PNG のみ出力",
+    },
+    "save_angle_image_tooltip": {
+        "zh": "使用当前误差门限，保存到 PDF 路径所在目录，文件名追加 _angle_error。",
+        "en": "Use the current error limit and save beside the PDF path with _angle_error appended.",
+        "ja": "現在の誤差しきい値を使用し、PDF パスと同じフォルダーへ _angle_error を付けて保存します。",
     },
     "validation_path": {
         "zh": "请选择 PDF 报告的输出路径。",
@@ -156,6 +178,8 @@ def _text(key: str, language: str, **values: Any) -> str:
 class PerformanceReportDialog(QtWidgets.QDialog):
     """Collect performance-report settings without performing any file I/O."""
 
+    export_requested = QtCore.Signal(str)
+
     def __init__(
         self,
         parent: QtWidgets.QWidget | None,
@@ -164,6 +188,7 @@ class PerformanceReportDialog(QtWidgets.QDialog):
         initial_directory: Path,
         azimuth_available: bool,
         elevation_available: bool,
+        initial_error_limit_deg: float = 1.0,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("performanceReportDialog")
@@ -172,6 +197,15 @@ class PerformanceReportDialog(QtWidgets.QDialog):
         self._azimuth_available = bool(azimuth_available)
         self._elevation_available = bool(elevation_available)
         self._initial_directory = Path(initial_directory).expanduser()
+        try:
+            parsed_error_limit = float(initial_error_limit_deg)
+        except (TypeError, ValueError):
+            parsed_error_limit = 1.0
+        if not 0.1 <= parsed_error_limit <= 30.0:
+            parsed_error_limit = 1.0
+        self._initial_error_limit_deg = parsed_error_limit
+        self._selected_export_kind = "report"
+        self._export_busy = False
 
         self.setWindowTitle(_text("dialog_title", self.language))
         self.setModal(True)
@@ -268,7 +302,7 @@ class PerformanceReportDialog(QtWidgets.QDialog):
         self.error_limit_spin.setDecimals(1)
         self.error_limit_spin.setSingleStep(0.1)
         self.error_limit_spin.setSuffix("°")
-        self.error_limit_spin.setValue(1.0)
+        self.error_limit_spin.setValue(self._initial_error_limit_deg)
         self.error_limit_spin.setMaximumWidth(150)
         settings_layout.addRow(_text("error_limit", self.language), self.error_limit_spin)
 
@@ -337,14 +371,22 @@ class PerformanceReportDialog(QtWidgets.QDialog):
         self.cancel_button = self.button_box.button(
             QtWidgets.QDialogButtonBox.StandardButton.Cancel
         )
+        self.angle_image_button = self.button_box.addButton(
+            _text("save_angle_image", self.language),
+            QtWidgets.QDialogButtonBox.ButtonRole.ActionRole,
+        )
         self.save_button.setObjectName("reportSaveButton")
         self.cancel_button.setObjectName("reportCancelButton")
+        self.angle_image_button.setObjectName("reportAngleErrorImageButton")
         self.save_button.setText(_text("save", self.language))
         self.cancel_button.setText(_text("cancel", self.language))
-        self.save_button.setProperty("fluentRole", "primary")
-        self.save_button.setEnabled(
-            self._azimuth_available or self._elevation_available
+        self.angle_image_button.setToolTip(
+            _text("save_angle_image_tooltip", self.language)
         )
+        self.save_button.setProperty("fluentRole", "primary")
+        axis_available = self._azimuth_available or self._elevation_available
+        self.save_button.setEnabled(axis_available)
+        self.angle_image_button.setEnabled(axis_available)
         layout.addWidget(self.button_box)
 
     def _build_axis_group(
@@ -373,7 +415,7 @@ class PerformanceReportDialog(QtWidgets.QDialog):
         grid.setHorizontalSpacing(10)
         grid.setVerticalSpacing(6)
         grid.setColumnStretch(4, 1)
-        grid.setRowStretch(5, 1)
+        grid.setRowStretch(6, 1)
 
         focus_start = self._angle_spin(f"{axis}FocusStart", default_start, group)
         focus_stop = self._angle_spin(f"{axis}FocusStop", default_stop, group)
@@ -398,23 +440,43 @@ class PerformanceReportDialog(QtWidgets.QDialog):
         follow.setChecked(True)
         grid.addWidget(follow, 2, 0, 1, 5)
 
+        curve_stride = QtWidgets.QSpinBox(group)
+        curve_stride.setObjectName(f"{axis}HoldCurveStep")
+        curve_stride.setRange(1, MAX_HOLD_STRIDE_FRAMES)
+        curve_stride.setSingleStep(1)
+        curve_stride.setSuffix("°")
+        curve_stride.setValue(1)
+        curve_stride.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+        curve_stride.setMaximumWidth(120)
+        curve_stride.setToolTip(
+            _text("hold_curve_stride_tooltip", self.language)
+        )
+        curve_stride_label = QtWidgets.QLabel(
+            _text("hold_curve_stride", self.language), group
+        )
+        curve_stride_label.setBuddy(curve_stride)
+        grid.addWidget(curve_stride_label, 3, 0)
+        grid.addWidget(curve_stride, 3, 1)
+
         frame_count = QtWidgets.QLabel(group)
         frame_count.setObjectName(f"{axis}HoldFrameCount")
         frame_count.setProperty("fluentRole", "caption")
-        grid.addWidget(frame_count, 3, 0, 1, 5)
+        frame_count.setWordWrap(True)
+        grid.addWidget(frame_count, 4, 0, 1, 5)
 
         note_key = "azimuth_plane_note" if axis == "az" else "elevation_plane_note"
         plane_note = QtWidgets.QLabel(_text(note_key, self.language), group)
         plane_note.setObjectName(f"{axis}OrthogonalPlaneNote")
         plane_note.setWordWrap(True)
         plane_note.setProperty("fluentRole", "caption")
-        grid.addWidget(plane_note, 4, 0, 1, 5)
+        grid.addWidget(plane_note, 5, 0, 1, 5)
 
         setattr(self, f"{axis}_focus_start", focus_start)
         setattr(self, f"{axis}_focus_stop", focus_stop)
         setattr(self, f"{axis}_hold_start", hold_start)
         setattr(self, f"{axis}_hold_stop", hold_stop)
         setattr(self, f"{axis}_hold_follows_focus", follow)
+        setattr(self, f"{axis}_hold_curve_step", curve_stride)
         setattr(self, f"{axis}_hold_frame_count", frame_count)
 
         hold_start.setEnabled(False)
@@ -442,8 +504,9 @@ class PerformanceReportDialog(QtWidgets.QDialog):
         self.include_spectrum_magnitude_checkbox.toggled.connect(
             self._refresh_validation
         )
-        self.button_box.accepted.connect(self.accept)
+        self.button_box.accepted.connect(self._request_report_export)
         self.button_box.rejected.connect(self.reject)
+        self.angle_image_button.clicked.connect(self._request_angle_image_export)
 
         for axis in ("az", "el"):
             focus_start = getattr(self, f"{axis}_focus_start")
@@ -451,6 +514,7 @@ class PerformanceReportDialog(QtWidgets.QDialog):
             hold_start = getattr(self, f"{axis}_hold_start")
             hold_stop = getattr(self, f"{axis}_hold_stop")
             follow = getattr(self, f"{axis}_hold_follows_focus")
+            curve_stride = getattr(self, f"{axis}_hold_curve_step")
 
             focus_start.valueChanged.connect(
                 lambda _value, current_axis=axis: self._focus_range_changed(current_axis)
@@ -466,6 +530,9 @@ class PerformanceReportDialog(QtWidgets.QDialog):
             )
             follow.toggled.connect(
                 lambda _checked, current_axis=axis: self._follow_toggled(current_axis)
+            )
+            curve_stride.valueChanged.connect(
+                lambda _value, current_axis=axis: self._update_frame_count(current_axis)
             )
 
     @staticmethod
@@ -525,17 +592,28 @@ class PerformanceReportDialog(QtWidgets.QDialog):
     def _update_frame_count(self, axis: str) -> None:
         start = getattr(self, f"{axis}_hold_start").value()
         stop = getattr(self, f"{axis}_hold_stop").value()
-        count = max(0, stop - start + 1)
+        range_count = max(0, stop - start + 1)
+        step = getattr(self, f"{axis}_hold_curve_step").value()
+        curve_count = hold_curve_frame_count(range_count, step)
         getattr(self, f"{axis}_hold_frame_count").setText(
-            _text("frame_count", self.language, count=count)
+            _text(
+                "frame_count",
+                self.language,
+                range_count=range_count,
+                step=step,
+                curve_count=curve_count,
+            )
         )
 
-    def _validation_error(self) -> tuple[str, QtWidgets.QWidget | None]:
+    def _validation_error(
+        self,
+        export_kind: str = "report",
+    ) -> tuple[str, QtWidgets.QWidget | None]:
         if not self.output_path_edit.text().strip():
             return _text("validation_path", self.language), self.output_path_edit
         if not (self._azimuth_available or self._elevation_available):
             return _text("validation_no_axis", self.language), None
-        if not (
+        if export_kind == "report" and not (
             self.include_spectrum_db_checkbox.isChecked()
             or self.include_spectrum_magnitude_checkbox.isChecked()
         ):
@@ -544,28 +622,29 @@ class PerformanceReportDialog(QtWidgets.QDialog):
                 self.include_spectrum_db_checkbox,
             )
 
-        for axis, available in (
-            ("az", self._azimuth_available),
-            ("el", self._elevation_available),
-        ):
-            if not available:
-                continue
-            axis_name = _text(
-                "azimuth" if axis == "az" else "elevation", self.language
-            )
-            for kind in ("focus", "hold"):
-                start = getattr(self, f"{axis}_{kind}_start")
-                stop = getattr(self, f"{axis}_{kind}_stop")
-                if start.value() > stop.value():
-                    return (
-                        _text(
-                            "validation_range",
-                            self.language,
-                            axis=axis_name,
-                            kind=_text(f"{kind}_kind", self.language),
-                        ),
-                        start,
-                    )
+        if export_kind == "report":
+            for axis, available in (
+                ("az", self._azimuth_available),
+                ("el", self._elevation_available),
+            ):
+                if not available:
+                    continue
+                axis_name = _text(
+                    "azimuth" if axis == "az" else "elevation", self.language
+                )
+                for kind in ("focus", "hold"):
+                    start = getattr(self, f"{axis}_{kind}_start")
+                    stop = getattr(self, f"{axis}_{kind}_stop")
+                    if start.value() > stop.value():
+                        return (
+                            _text(
+                                "validation_range",
+                                self.language,
+                                axis=axis_name,
+                                kind=_text(f"{kind}_kind", self.language),
+                            ),
+                            start,
+                        )
         return "", None
 
     def _set_validation_message(self, message: str) -> None:
@@ -573,12 +652,24 @@ class PerformanceReportDialog(QtWidgets.QDialog):
         self.validation_label.setVisible(bool(message))
 
     def _refresh_validation(self, *_args: Any) -> None:
-        message, _widget = self._validation_error()
-        self._set_validation_message(message)
-        self.save_button.setEnabled(not message)
+        report_message, _widget = self._validation_error("report")
+        image_message, _image_widget = self._validation_error("angle_image")
+        self._set_validation_message(report_message)
+        self.save_button.setEnabled(not self._export_busy and not report_message)
+        self.angle_image_button.setEnabled(
+            not self._export_busy and not image_message
+        )
 
-    def accept(self) -> None:
-        message, invalid_widget = self._validation_error()
+    def _request_report_export(self) -> None:
+        self._request_export("report")
+
+    def _request_angle_image_export(self) -> None:
+        self._request_export("angle_image")
+
+    def _request_export(self, export_kind: str) -> None:
+        if self._export_busy:
+            return
+        message, invalid_widget = self._validation_error(export_kind)
         self._set_validation_message(message)
         if message:
             if invalid_widget is not None:
@@ -589,7 +680,47 @@ class PerformanceReportDialog(QtWidgets.QDialog):
             Path(self.output_path_edit.text().strip()).expanduser()
         )
         self.output_path_edit.setText(str(normalised_path))
-        super().accept()
+        self._selected_export_kind = export_kind
+        self.export_requested.emit(export_kind)
+
+    def set_export_busy(self, busy: bool) -> None:
+        """Disable output actions while one background export is active."""
+
+        self._export_busy = bool(busy)
+        self.cancel_button.setEnabled(not self._export_busy)
+        self._refresh_validation()
+
+    def reject(self) -> None:
+        if self._export_busy:
+            return
+        super().reject()
+
+    def closeEvent(self, event: Any) -> None:  # noqa: N802
+        if self._export_busy:
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+    @property
+    def export_kind(self) -> str:
+        """Return the output action that accepted the dialog."""
+
+        return self._selected_export_kind
+
+    def angle_error_image_options(self) -> AngleErrorImageOptions:
+        """Return standalone-image settings inherited from this report form."""
+
+        from .performance_report import AngleErrorImageOptions
+
+        report_path = self._ensure_pdf_suffix(
+            Path(self.output_path_edit.text().strip()).expanduser()
+        )
+        image_path = report_path.with_name(f"{report_path.stem}_angle_error.png")
+        return AngleErrorImageOptions(
+            output_path=image_path,
+            error_limit_deg=self.error_limit_spin.value(),
+            language=self.language,
+        )
 
     def options(self) -> PerformanceReportOptions:
         """Return the selected report options; no directories or files are created."""
@@ -615,6 +746,8 @@ class PerformanceReportDialog(QtWidgets.QDialog):
             elevation_focus=angle_range("el", "focus"),
             azimuth_hold=angle_range("az", "hold"),
             elevation_hold=angle_range("el", "hold"),
+            azimuth_hold_stride_frames=self.az_hold_curve_step.value(),
+            elevation_hold_stride_frames=self.el_hold_curve_step.value(),
             error_limit_deg=self.error_limit_spin.value(),
             spectrum_floor_db=self.spectrum_floor_spin.value(),
             include_spectrum_db=self.include_spectrum_db_checkbox.isChecked(),

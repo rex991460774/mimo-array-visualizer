@@ -418,7 +418,7 @@ def _zh_chapters() -> tuple[ManualChapter, ...]:
         ManualChapter(
             "files_reports",
             "阵面文件与性能报告",
-            "区分可再次编辑的阵面坐标文件、当前会话配置和用于交付的 PDF/CSV/JSON 报告。",
+            "区分可再次编辑的阵面坐标文件、当前会话配置和用于交付的 PDF/PNG/CSV/JSON 报告。",
             (
                 ManualSection(
                     "导入与导出阵面 JSON",
@@ -437,12 +437,24 @@ def _zh_chapters() -> tuple[ManualChapter, ...]:
                 ManualSection(
                     "输出当前配置性能报告",
                     steps=(
-                        "选择“文件 > 输出当前配置性能报告…”。若方位和俯仰都不可用，该功能不可执行。",
+                        "选择“文件 > 输出报告”，直接打开“输出报告”设置窗口。若方位和俯仰都不可用，该功能不可执行。",
                         "选择 PDF 路径并填写报告标题。已有文件会在生成前询问是否覆盖。",
                         "分别设置可用方向的性能关注真角范围；起始角不得大于终止角。",
-                        "设置角谱 Hold 真角范围，或勾选跟随关注范围。界面会显示按 1° 步进的帧数。",
+                        "设置角谱 Hold 真角范围，或勾选跟随关注范围；再为每个方向设置 Hold 曲线间隔。当前 1°/帧，界面会同时显示范围帧数与实际绘制曲线数，并始终保留起止帧。",
                         "设置测角误差门限和 dB 图显示下限，并至少选择 dB 或模值中的一种角谱纵坐标。",
                         "按需勾选“同时导出可复现原始数据（CSV/JSON）”，然后点击“输出报告”。",
+                        "点击“输出报告”或“仅输出测角误差 PNG”不会关闭设置窗口；导出完成后可沿用当前配置继续输出另一种，只有点击“取消”或关闭窗口才退出。",
+                    ),
+                ),
+                ManualSection(
+                    "单独输出测角误差 PNG",
+                    bullets=(
+                        "在“输出报告”设置窗口中确认报告输出目录和测角误差门限，然后点击“仅输出测角误差 PNG”。",
+                        "PNG 继承同一窗口中的报告输出目录和测角误差门限；无需另选保存位置，也不会同时生成 PDF。",
+                        "横轴最多输出 -90°..+90°；若通道幅相或自定义 DBF 字典覆盖不足，则只输出各输入源共同具备的最大角度范围。",
+                        "纵轴取无折叠区内测角误差绝对值峰值与测角误差门限两者的较大值，乘以 1.5 后向上取整；无折叠区外的折返误差不参与量程。",
+                        "独立 PNG 将全部测角误差样本绘制为同一条普通蓝色曲线。无折叠区外的折返误差不参与 Y 轴量程计算；超出纵轴范围的部分由坐标轴自然裁切。",
+                        "独立 PNG 不显示关注范围或无折叠区背景带，不以红色 × 对不可靠帧作特殊标记，也不显示缩放说明；PDF 报告仍保留这些诊断信息。PNG 与 PDF 测角误差页继续共用 plot-kit 视觉规范。",
                     ),
                 ),
                 ManualSection(
@@ -451,9 +463,10 @@ def _zh_chapters() -> tuple[ManualChapter, ...]:
                         "生成在后台执行，进度窗口会显示当前阶段，主窗口不会因绘图而长期无响应。",
                         "点击取消后，会等当前绘图步骤安全结束再停止。",
                         "PDF 包含当前配置摘要、关注范围统计和所选角谱页面；每种角谱单独占页。",
-                        "选择原始数据后，会在报告旁生成数据目录，其中包含 CSV 和报告清单 JSON。",
+                        "Hold 曲线间隔只降低叠加图密度；Max-Hold 包络、性能统计及可复现数据仍使用范围内全部 1° 帧。",
+                        "选择原始数据后，会在报告旁生成数据目录，其中包含全帧 CSV 和记录实际绘制角度的报告清单 JSON。",
                     ),
-                    note="Hold 范围越大、选择的显示方式越多，报告页数和生成时间越长。交付前先用小范围生成一次样例，确认标题和显示下限。",
+                    note="角谱页数由可用方向和所选纵坐标种类决定；Hold 范围越大、曲线间隔越小，叠加图越密，文件和生成时间也可能增加。",
                 ),
             ),
         ),
@@ -904,7 +917,7 @@ def _en_chapters() -> tuple[ManualChapter, ...]:
         ManualChapter(
             "files_reports",
             "Array files and performance reports",
-            "Separate editable coordinate files, current session settings, and PDF/CSV/JSON deliverables.",
+            "Separate editable coordinate files, current session settings, and PDF/PNG/CSV/JSON deliverables.",
             (
                 ManualSection(
                     "Import and export Array JSON",
@@ -923,12 +936,24 @@ def _en_chapters() -> tuple[ManualChapter, ...]:
                 ManualSection(
                     "Export a performance report",
                     steps=(
-                        "Choose File > Export Current Performance Report. It is unavailable when neither axis has angle capability.",
+                        "Choose File > Export Reports to open the Export Reports settings dialog directly. It is unavailable when neither axis has angle capability.",
                         "Choose the PDF path and title. Existing files require overwrite confirmation.",
                         "Set the performance-focus true-angle range for each usable axis; start must not exceed stop.",
-                        "Set the spectrum Hold range or make it follow the focus range. The dialog reports the 1° frame count.",
+                        "Set the spectrum Hold range or make it follow the focus range, then choose a Hold-curve interval for each axis. At 1 deg per frame, the dialog reports both in-range frames and plotted curves and always retains both endpoints.",
                         "Set the angle-error threshold and dB display floor, and select at least one spectrum scale: dB or magnitude.",
                         "Optionally export reproducibility data (CSV/JSON), then select Export Report.",
+                        "Selecting Export Report or Export Angle-error PNG Only keeps the settings dialog open. After an export finishes, reuse the current settings to export the other format; only Cancel or closing the window exits the dialog.",
+                    ),
+                ),
+                ManualSection(
+                    "Export a standalone angle-error PNG",
+                    bullets=(
+                        "In the Export Reports settings dialog, confirm the report output directory and angle-error limit, then select Export Angle-error PNG Only.",
+                        "The PNG inherits that report output directory and angle-error limit; it does not require a separate save location or generate a PDF at the same time.",
+                        "The horizontal range is capped at -90°..+90° and contracts to the largest common coverage when channel data or a custom DBF dictionary is narrower.",
+                        "The symmetric Y-axis limit uses the larger of the absolute error peak inside the detected no-fold range and the configured angle-error limit, multiplies it by 1.5, and rounds upward to a whole degree. Folded errors outside the no-fold range do not set the scale.",
+                        "The standalone PNG draws every angle-error sample as one ordinary blue curve. Folded samples outside the no-fold range do not set the Y-axis scale; portions beyond the resulting limits are clipped naturally by the axes.",
+                        "The standalone PNG shows no focus/no-fold background bands, does not use red x markers to distinguish unreliable frames, and omits the scale explanation. The PDF report retains those diagnostic details, and both outputs continue to use the plot-kit visual contract.",
                     ),
                 ),
                 ManualSection(
@@ -937,9 +962,10 @@ def _en_chapters() -> tuple[ManualChapter, ...]:
                         "Generation runs in the background and reports its stage in a progress dialog.",
                         "Cancel waits for the current rendering step to finish safely before stopping.",
                         "The PDF contains a configuration summary, focus-range statistics, and selected spectrum pages; each spectrum type uses its own page.",
-                        "When raw data is selected, a neighboring directory contains CSV files and a report-manifest JSON.",
+                        "The Hold interval only reduces overlay density; Max-Hold, performance metrics, and reproducibility data still use every in-range 1 deg frame.",
+                        "When raw data is selected, a neighboring directory contains full-frame CSV files and a report-manifest JSON recording the plotted angles.",
                     ),
-                    note="A wider Hold range and more display scales create more pages. Generate a small sample first to verify the title and dB floor.",
+                    note="Page count depends on usable axes and selected vertical scales. A wider Hold range or smaller curve interval creates a denser overlay and may increase file size and rendering time.",
                 ),
             ),
         ),
@@ -1390,7 +1416,7 @@ def _ja_chapters() -> tuple[ManualChapter, ...]:
         ManualChapter(
             "files_reports",
             "アレイファイルと性能レポート",
-            "再編集用座標ファイル、現在セッション設定、提出用 PDF/CSV/JSON を区別します。",
+            "再編集用座標ファイル、現在セッション設定、提出用 PDF/PNG/CSV/JSON を区別します。",
             (
                 ManualSection(
                     "アレイ JSON の読み込み/書き出し",
@@ -1409,12 +1435,24 @@ def _ja_chapters() -> tuple[ManualChapter, ...]:
                 ManualSection(
                     "性能レポートの出力",
                     steps=(
-                        "「ファイル > 現在の設定性能レポートを出力」を選びます。両軸とも利用不可の場合は実行できません。",
+                        "「ファイル > レポート出力」を選ぶと、「レポート出力」設定画面が直接開きます。両軸とも利用不可の場合は実行できません。",
                         "PDF パスとタイトルを指定します。既存ファイルは上書き確認されます。",
                         "利用可能な各軸の性能評価真角度範囲を設定し、開始角度を終了角度以下にします。",
-                        "Hold 真角度範囲を設定するか、評価範囲への連動を選びます。1° ステップのフレーム数が表示されます。",
+                        "Hold 真角度範囲を設定するか評価範囲への連動を選び、各軸の Hold 曲線間隔も指定します。現在は1°/フレームで、範囲内フレーム数と描画曲線数が表示され、両端は必ず保持されます。",
                         "誤差しきい値と dB 表示下限を設定し、dB/振幅の少なくとも一方を選びます。",
                         "必要なら再現用 CSV/JSON を選び、「レポートを出力」を押します。",
+                        "「レポートを出力」または「測角誤差 PNG のみ出力」を選んでも設定画面は閉じません。出力完了後も現在の設定を引き継いでもう一方を出力でき、「キャンセル」または画面を閉じた場合だけ終了します。",
+                    ),
+                ),
+                ManualSection(
+                    "測角誤差 PNG の単独出力",
+                    bullets=(
+                        "「レポート出力」設定画面でレポート出力先フォルダーと測角誤差しきい値を確認し、「測角誤差 PNG のみ出力」を選びます。",
+                        "PNG は同じ画面のレポート出力先フォルダーと測角誤差しきい値を引き継ぎます。別の保存先を選ぶ必要はなく、PDF も同時には生成されません。",
+                        "横軸は最大 -90°..+90°で、チャネルデータまたはカスタム DBF 辞書が狭い場合は全入力に共通する最大範囲へ縮小します。",
+                        "縦軸の対称上限は、非折り返し範囲内の測角誤差絶対値のピークと設定した誤差しきい値の大きい方を 1.5 倍し、整数へ切り上げた値です。非折り返し範囲外の折り返し誤差はスケール計算に含めません。",
+                        "単独 PNG はすべての測角誤差サンプルを同じ通常の青い曲線として描画します。非折り返し範囲外の折り返しサンプルは縦軸スケール計算に含めず、決定した縦軸範囲を超える部分は座標軸で自然にクリップされます。",
+                        "単独 PNG では評価範囲や非折り返し範囲の背景帯を表示せず、信頼性なしフレームを赤い × で特別表示せず、スケール説明も表示しません。PDF レポートにはこれらの診断情報を残し、両方とも plot-kit の表示規約を使用します。",
                     ),
                 ),
                 ManualSection(
@@ -1423,9 +1461,10 @@ def _ja_chapters() -> tuple[ManualChapter, ...]:
                         "生成はバックグラウンドで行われ、進捗画面に処理段階が表示されます。",
                         "キャンセル後は現在の描画ステップが安全に終わってから停止します。",
                         "PDF には設定概要、評価範囲統計、選択した角度スペクトルが入り、各種類は別ページです。",
-                        "生データを選ぶと、隣接ディレクトリに CSV とレポート一覧 JSON が作成されます。",
+                        "Hold 曲線間隔は重ね合わせ密度だけを下げ、Max-Hold、性能統計、再現データは範囲内の全1°フレームを使用します。",
+                        "生データを選ぶと、全フレーム CSV と実際の描画角度を記録したレポート一覧 JSON が隣接ディレクトリに作成されます。",
                     ),
-                    note="Hold 範囲と表示種類を増やすほどページ数と時間が増えます。最初に小範囲でタイトルと dB 下限を確認してください。",
+                    note="ページ数は利用可能な軸と縦軸種類で決まります。Hold 範囲を広げるか曲線間隔を小さくすると重ね合わせが密になり、ファイルサイズと描画時間が増える場合があります。",
                 ),
             ),
         ),

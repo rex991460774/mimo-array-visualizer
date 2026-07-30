@@ -155,10 +155,13 @@ other scans, or both axes scan simultaneously.
 
 Use **File → Export Current Performance Report…** to choose the PDF path,
 the Az/El performance focus ranges, and the true-angle frame ranges included
-in the spectrum hold plots. The report can include dB plots, normalized
-correlation-magnitude plots, or both. Each axis/unit combination gets a full
-page containing one spectrum chart, and every selected 1° frame is retained in
-its overlay. Both units come from the same per-frame signal-to-1D-dictionary
+in the spectrum hold plots. Each axis also has a configurable Hold-curve
+interval; the current 1° grid means an interval of 5° plots every fifth frame,
+while both range endpoints are always retained. The report can include dB
+plots, normalized correlation-magnitude plots, or both. Each axis/unit
+combination gets a full page containing one spectrum chart. Curve sampling
+only reduces overlay density: the Max-Hold envelope and reproducibility data
+still use every selected 1° frame. Both units come from the same per-frame signal-to-1D-dictionary
 normalized correlation (`magnitude = 10^(dB/20)`); they are display forms of
 one calculation rather than separate DBF algorithms. An optional data package
 exports the exact configuration plus per-frame and spectrum CSV files.
@@ -319,9 +322,11 @@ MIMO 阵列可视化工具 — 用于交互式编辑和评估 MIMO 发射/接收
 ### 当前配置性能报告
 
 从 **文件 → 输出当前配置性能报告…** 进入配置对话框，可选报告路径、
-方位/俯仰测角性能关注范围、角谱逐帧 Hold 的真实角范围，以及 dB、
-归一化模值两种纵坐标（可单选或同时输出）。每个“维度 × 纵坐标”组合
-独占一整页且只放一张角谱图，所选 1° 帧全部进入叠加曲线，不会抽帧。
+方位/俯仰测角性能关注范围、角谱 Hold 的真实角范围与曲线间隔，以及 dB、
+归一化模值两种纵坐标（可单选或同时输出）。当前真实角网格为 1°/帧，
+例如间隔设为 5° 即每 5 帧绘制一条，并始终保留范围起止帧。每个“维度 ×
+纵坐标”组合独占一整页且只放一张角谱图；抽稀只降低叠加曲线密度，
+Max-Hold 包络和可复现数据仍使用 Hold 范围内全部 1° 帧。
 dB 与模值来自同一套逐帧“信号—1D DBF 字典”归一化相关结果，模值按
 `10^(dB/20)` 转换，并不是另一套测角算法。
 
@@ -411,7 +416,8 @@ MIMOアレイ可視化ツール — MIMO送信/受信アンテナアレイ配置
 - ヘッダーの **チャネル振幅/位相** ステータスで、振幅と位相をそれぞれ理想・読込・混在として表示。要素パターン読み込み時は振幅を読込扱いにします。
 - チャネルパターン UI を調整：表の値を中央揃え、ホバー情報を最前面表示、Tx/Rx 凡例を小さく透明化、下部ツールバー入力欄を整列。
 - 可読 JSON 配置の読み込み/書き出し（評価メタデータ付き）
-- 現在設定の性能レポート（Az/El 評価範囲、全選択フレーム Hold、
+- 現在設定の性能レポート（Az/El 評価範囲、両端を保持する軸別 Hold 曲線間隔、
+  範囲内全フレームによる Max-Hold と CSV、
   複数ページ PDF、任意の CSV/JSON 再現データ）
 - ローカル状態の永続化
 - PyInstaller onedir Windows パッケージ

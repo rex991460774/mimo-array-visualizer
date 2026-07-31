@@ -466,7 +466,11 @@ def _style_rules(config: dict[str, Any], *, widget_kind: str) -> list[str]:
         rules.append(f"color: {foreground};")
     rules.extend(_font_rules(config.get("font")))
     if widget_kind == "checkbutton":
-        rules.append("border: 0px solid transparent;")
+        # Keep native radio indicators intact.  Setting a widget background or
+        # border through QSS makes Qt's stylesheet engine replace the platform
+        # radio painting; on Windows that reduces the selected indicator to a
+        # lone dot.  With only typography and spacing, radio labels naturally
+        # inherit their parent surface while the native circle remains intact.
         rules.append("spacing: 4px;")
         return rules
     if config.get("selectbackground"):
@@ -544,6 +548,17 @@ def _qss_for_widget(
         default_style,
         overrides=overrides,
     )
+    if widget_kind == "radiobutton":
+        # Transparent QSS propagates into the native indicator on Windows and
+        # removes its outer circle.  Most radios therefore stay entirely native;
+        # a named surface style may request one opaque fill so toolbar controls
+        # blend with their parent without replacing the indicator painting.
+        background = _as_color(config.get("background"))
+        return (
+            f"#{object_name} {{ background-color: {background}; }}"
+            if background
+            else ""
+        )
     maps = _merged_maps(style_name, default_style)
     base_rules = _style_rules(config, widget_kind=widget_kind)
     selector = f"#{object_name}"
@@ -790,6 +805,14 @@ class Widget:
             self._qt.setMinimumHeight(int(height))
         self.configure(**kwargs)
         self._apply_style()
+        # Local QSS is scoped to the widget's object name.  Callers assign
+        # stable names after constructing compatibility widgets, so keep the
+        # selector in sync instead of leaving the control visually unstyled.
+        self._qt.objectNameChanged.connect(self._on_object_name_changed)
+
+    def _on_object_name_changed(self, object_name: str) -> None:
+        if object_name:
+            self._apply_style()
 
     def _layout_margins(self) -> tuple[int, int, int, int]:
         left, top, right, bottom = self._padding
@@ -1605,7 +1628,27 @@ class Toplevel(Widget):
         self._destroying = False
         super().__init__(dialog, parent, **kwargs)
         dialog.resize(640, 480)
-        dialog.show()
+        # A Toplevel is assembled synchronously after construction.  Showing
+        # the empty QDialog here exposes an unlaid-out backing store (black on
+        # Windows) and can leave stale child borders until the next resize.
+        # Defer only to the next event-loop turn so callers keep Tk's modeless
+        # behaviour while the very first visible frame is complete.
+        self._initial_show_timer = QtCore.QTimer(dialog)
+        self._initial_show_timer.setSingleShot(True)
+        self._initial_show_timer.timeout.connect(self._show_when_ready)
+        self._initial_show_timer.start(0)
+
+    def _activate_layout(self) -> None:
+        self._qt.ensurePolished()
+        layout = self._qt.layout()
+        if layout is not None:
+            layout.activate()
+
+    def _show_when_ready(self) -> None:
+        if self._destroying:
+            return
+        self._activate_layout()
+        self._qt.show()
 
     def title(self, text: str) -> None:
         self._qt.setWindowTitle(text)
@@ -1640,6 +1683,8 @@ class Toplevel(Widget):
 
     def wait_window(self) -> None:
         if isinstance(self._qt, QtWidgets.QDialog):
+            self._initial_show_timer.stop()
+            self._activate_layout()
             self._qt.setModal(True)
             self._qt.exec()
 
@@ -1648,6 +1693,7 @@ class Toplevel(Widget):
             self._close_callback = callback
 
     def destroy(self) -> None:
+        self._initial_show_timer.stop()
         self._destroying = True
         if isinstance(self._qt, QtWidgets.QDialog):
             self._qt.accept()
@@ -2021,7 +2067,7 @@ class Entry(Widget):
 class Radiobutton(Widget):
     _winfo_class = "TRadiobutton"
     _default_style = "TRadiobutton"
-    _style_kind = "checkbutton"
+    _style_kind = "radiobutton"
 
     def __init__(
         self,
@@ -2067,6 +2113,259 @@ class Radiobutton(Widget):
         super().configure(**kwargs)
 
 
+class AppleSwitch(QtWidgets.QCheckBox):
+    """Accessible macOS-style switch with an interruptible thumb transition.
+
+    This remains a real :class:`QCheckBox`, so Qt continues to provide the
+    checked state, keyboard handling, focus behavior, and accessibility role.
+    Only its presentation is custom-painted.
+    """
+
+    _TRACK_WIDTH = 36
+    _TRACK_HEIGHT = 20
+    _THUMB_INSET = 2
+    _TEXT_GAP = 8
+    _ANIMATION_DURATION_MS = 180
+
+    def __init__(
+        self,
+        text: str | QtWidgets.QWidget = "",
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
+        if isinstance(text, QtWidgets.QWidget) and parent is None:
+            parent = text
+            text = ""
+        text = str(text)
+        super().__init__(text, parent)
+        self._switch_position = 1.0 if self.isChecked() else 0.0
+        self._switch_animation_target = self._switch_position
+        self._animation_duration_ms = self._ANIMATION_DURATION_MS
+        self._switch_animation = QtCore.QPropertyAnimation(
+            self,
+            b"switch_position",
+            self,
+        )
+        self._switch_animation.setEasingCurve(QtCore.QEasingCurve.Type.OutCubic)
+        self._switch_animation.finished.connect(self._finish_switch_animation)
+        self.toggled.connect(self._animate_to_checked_state)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_Hover, True)
+        self.setMinimumHeight(self._TRACK_HEIGHT + 8)
+        self.setAccessibleName(self._accessible_label(text))
+
+    @staticmethod
+    def _accessible_label(text: str) -> str:
+        escaped_ampersand = "\N{BYTE ORDER MARK}"
+        return (
+            str(text)
+            .replace("&&", escaped_ampersand)
+            .replace("&", "")
+            .replace(escaped_ampersand, "&")
+        )
+
+    def setText(self, text: str) -> None:  # noqa: N802
+        super().setText(text)
+        self.setAccessibleName(self._accessible_label(text))
+        self.updateGeometry()
+        self.update()
+
+    def switchPosition(self) -> float:  # noqa: N802
+        return self._switch_position
+
+    def setSwitchPosition(self, value: float) -> None:  # noqa: N802
+        position = max(0.0, min(1.0, float(value)))
+        if abs(position - self._switch_position) < 0.0001:
+            return
+        self._switch_position = position
+        self.update()
+
+    switch_position = QtCore.Property(
+        float,
+        switchPosition,
+        setSwitchPosition,
+    )
+
+    def animationDuration(self) -> int:  # noqa: N802
+        return self._animation_duration_ms
+
+    def setAnimationDuration(self, duration_ms: int) -> None:  # noqa: N802
+        self._animation_duration_ms = max(0, int(duration_ms))
+
+    def _animations_enabled(self) -> bool:
+        option = QtWidgets.QStyleOption()
+        option.initFrom(self)
+        return bool(
+            self.style().styleHint(
+                QtWidgets.QStyle.StyleHint.SH_Widget_Animate,
+                option,
+                self,
+            )
+        )
+
+    def _animate_to_checked_state(self, checked: bool) -> None:
+        target = 1.0 if checked else 0.0
+        self._switch_animation_target = target
+        self._switch_animation.stop()
+        if (
+            self._animation_duration_ms <= 0
+            or not self.isVisible()
+            or not self._animations_enabled()
+        ):
+            self.setSwitchPosition(target)
+            return
+        # Restart from the live presentation value so rapid reversals never
+        # jump to the previous logical endpoint.
+        self._switch_animation.setStartValue(self._switch_position)
+        self._switch_animation.setEndValue(target)
+        self._switch_animation.setDuration(self._animation_duration_ms)
+        self._switch_animation.start()
+
+    def _finish_switch_animation(self) -> None:
+        self.setSwitchPosition(self._switch_animation_target)
+
+    @staticmethod
+    def _mix_color(start: QtGui.QColor, end: QtGui.QColor, amount: float) -> QtGui.QColor:
+        amount = max(0.0, min(1.0, amount))
+        return QtGui.QColor.fromRgbF(
+            start.redF() + (end.redF() - start.redF()) * amount,
+            start.greenF() + (end.greenF() - start.greenF()) * amount,
+            start.blueF() + (end.blueF() - start.blueF()) * amount,
+            start.alphaF() + (end.alphaF() - start.alphaF()) * amount,
+        )
+
+    def sizeHint(self) -> QtCore.QSize:  # noqa: N802
+        text_width = self.fontMetrics().horizontalAdvance(
+            self._accessible_label(self.text())
+        )
+        width = self._TRACK_WIDTH + 6
+        if text_width:
+            width += self._TEXT_GAP + text_width
+        return QtCore.QSize(
+            max(width, super().sizeHint().width()),
+            max(self._TRACK_HEIGHT + 8, self.fontMetrics().height() + 8),
+        )
+
+    def minimumSizeHint(self) -> QtCore.QSize:  # noqa: N802
+        return self.sizeHint()
+
+    def paintEvent(self, _event: QtGui.QPaintEvent) -> None:  # noqa: N802
+        option = QtWidgets.QStyleOption()
+        option.initFrom(self)
+        painter = QtWidgets.QStylePainter(self)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+        self.style().drawPrimitive(
+            QtWidgets.QStyle.PrimitiveElement.PE_Widget,
+            option,
+            painter,
+            self,
+        )
+
+        track_y = (self.height() - self._TRACK_HEIGHT) // 2
+        logical_track = QtCore.QRect(
+            3,
+            track_y,
+            self._TRACK_WIDTH,
+            self._TRACK_HEIGHT,
+        )
+        track = self.style().visualRect(self.layoutDirection(), self.rect(), logical_track)
+
+        off_color = QtGui.QColor("#B0B0B5")
+        on_color = QtGui.QColor("#34C759")
+        track_color = self._mix_color(off_color, on_color, self._switch_position)
+        if self.isDown():
+            track_color = track_color.darker(112)
+        elif self.underMouse():
+            track_color = track_color.darker(105)
+        if not self.isEnabled():
+            track_color.setAlphaF(0.42)
+
+        radius = self._TRACK_HEIGHT / 2.0
+        if self.hasFocus():
+            focus_rect = QtCore.QRectF(track).adjusted(-2.0, -2.0, 2.0, 2.0)
+            focus_color = QtGui.QColor(TOKENS.focus)
+            focus_color.setAlphaF(0.75 if self.isEnabled() else 0.35)
+            painter.setPen(QtGui.QPen(focus_color, 2.0))
+            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(focus_rect, radius + 2.0, radius + 2.0)
+
+        painter.setPen(QtCore.Qt.PenStyle.NoPen)
+        painter.setBrush(track_color)
+        painter.drawRoundedRect(QtCore.QRectF(track), radius, radius)
+
+        thumb_diameter = self._TRACK_HEIGHT - 2 * self._THUMB_INSET
+        travel = self._TRACK_WIDTH - thumb_diameter - 2 * self._THUMB_INSET
+        visual_position = self._switch_position
+        if self.layoutDirection() == QtCore.Qt.LayoutDirection.RightToLeft:
+            visual_position = 1.0 - visual_position
+        thumb_x = (
+            track.left()
+            + self._THUMB_INSET
+            + travel * visual_position
+        )
+        thumb_y = track.top() + self._THUMB_INSET
+        thumb_rect = QtCore.QRectF(
+            thumb_x,
+            thumb_y,
+            thumb_diameter,
+            thumb_diameter,
+        )
+
+        shadow = QtGui.QColor(0, 0, 0, 52 if self.isEnabled() else 24)
+        painter.setBrush(shadow)
+        painter.drawEllipse(thumb_rect.translated(0.0, 1.0))
+        thumb_color = QtGui.QColor("#FFFFFF")
+        if not self.isEnabled():
+            thumb_color.setAlphaF(0.72)
+        painter.setBrush(thumb_color)
+        painter.setPen(QtGui.QPen(QtGui.QColor(0, 0, 0, 22), 0.7))
+        painter.drawEllipse(thumb_rect)
+
+        if self.text():
+            logical_text = QtCore.QRect(
+                logical_track.right() + 1 + self._TEXT_GAP,
+                0,
+                max(0, self.width() - logical_track.right() - self._TEXT_GAP - 4),
+                self.height(),
+            )
+            text_rect = self.style().visualRect(
+                self.layoutDirection(),
+                self.rect(),
+                logical_text,
+            )
+            color_group = (
+                QtGui.QPalette.ColorGroup.Active
+                if self.isEnabled()
+                else QtGui.QPalette.ColorGroup.Disabled
+            )
+            painter.setPen(
+                self.palette().color(color_group, QtGui.QPalette.ColorRole.WindowText)
+            )
+            flags = (
+                QtCore.Qt.AlignmentFlag.AlignVCenter
+                | QtCore.Qt.AlignmentFlag.AlignLeft
+                | QtCore.Qt.TextFlag.TextShowMnemonic
+            )
+            if self.layoutDirection() == QtCore.Qt.LayoutDirection.RightToLeft:
+                flags &= ~QtCore.Qt.AlignmentFlag.AlignLeft
+                flags |= QtCore.Qt.AlignmentFlag.AlignRight
+            painter.drawText(text_rect, int(flags), self.text())
+
+    def enterEvent(self, event: QtCore.QEvent) -> None:  # noqa: N802
+        super().enterEvent(event)
+        self.update()
+
+    def leaveEvent(self, event: QtCore.QEvent) -> None:  # noqa: N802
+        super().leaveEvent(event)
+        self.update()
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:  # noqa: N802
+        super().mousePressEvent(event)
+        self.update()
+
+    def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:  # noqa: N802
+        super().mouseReleaseEvent(event)
+        self.update()
+
+
 class Checkbutton(Widget):
     _winfo_class = "TCheckbutton"
     _default_style = "TCheckbutton"
@@ -2081,7 +2380,7 @@ class Checkbutton(Widget):
         **kwargs: Any,
     ) -> None:
         self._text_value = str(text)
-        button = QtWidgets.QCheckBox(_qt_button_text(text), _qt_parent(parent))
+        button = AppleSwitch(_qt_button_text(text), _qt_parent(parent))
         super().__init__(button, parent, **kwargs)
         config = _effective_style_config(self._style_name, self._default_style)
         button.setMinimumHeight(
@@ -2404,7 +2703,7 @@ class Notebook(Widget):
                 hover_config[option] = active_value
 
         for config in (selected_config, unselected_config, hover_config):
-            config.setdefault("bordercolor", "#d7e0ea")
+            config.setdefault("bordercolor", TOKENS.border)
             config.setdefault("borderwidth", 1)
 
         tab_font = _font_from_config(tab_config.get("font"))
@@ -2419,7 +2718,7 @@ class Notebook(Widget):
             self._qt.tabBar().setFont(tab_font)
 
         if self._style_name == "Workspace.TNotebook":
-            tab_height = max(38, font_height + 12)
+            tab_height = max(40, font_height + 12)
             self._qt.setDocumentMode(True)
             self._qt.tabBar().setDrawBase(False)
             self._qt.tabBar().setMinimumHeight(tab_height)
@@ -2427,33 +2726,36 @@ class Notebook(Widget):
                 "\n".join(
                     [
                         "QTabWidget::pane { "
-                        f"background: transparent; border: 0; top: 0px; "
+                        f"background: {TOKENS.surface}; border: 0; top: 0px; "
                         "}",
                         "QTabWidget::tab-bar { left: 0px; }",
-                        "QTabBar { background: transparent; border: 0; }",
+                        "QTabBar { "
+                        f"background: {TOKENS.surface}; "
+                        f"border: 0; border-bottom: 1px solid {TOKENS.border}; "
+                        "padding: 0; }",
                         "QTabBar::tab { "
-                        f"min-height: {tab_height - 2}px; padding: 0 16px; "
+                        f"min-height: {tab_height - 2}px; min-width: 120px; padding: 0 20px; "
                         f"background: transparent; color: {TOKENS.text_secondary}; "
                         "font-weight: 600; border: 0; "
-                        "border-bottom: 3px solid transparent; margin-right: 2px; "
-                        "border-top-left-radius: 8px; border-top-right-radius: 8px; "
+                        "border-bottom: 2px solid transparent; border-radius: 0; margin: 0; "
                         "}",
                         "QTabBar::tab:hover:!selected { "
                         f"background: {TOKENS.surface_hover}; color: {TOKENS.text}; "
                         "}",
                         "QTabBar::tab:selected { "
-                        f"background: {TOKENS.accent_tint}; color: {TOKENS.accent_pressed}; "
-                        f"border-bottom: 3px solid {TOKENS.accent}; "
+                        f"background: {TOKENS.surface}; color: {TOKENS.accent_pressed}; "
+                        f"border: 0; border-bottom: 2px solid {TOKENS.accent}; "
                         "}",
                         "QTabBar::tab:focus { "
-                        f"outline: 2px solid {TOKENS.focus}; "
+                        f"background: {TOKENS.accent_tint}; color: {TOKENS.accent_pressed}; "
+                        f"border: 0; border-bottom: 3px solid {TOKENS.accent}; "
                         "}",
                     ]
                 )
             )
             return
 
-        pane_border = "#cfdbe7"
+        pane_border = TOKENS.border
         unselected_rules = _style_rules(
             {**unselected_config, "padding": None},
             widget_kind="button",
@@ -2759,6 +3061,36 @@ class Treeview(Widget):
         self._model.endInsertRows()
         self._sync_tree_dimensions()
         return item_id
+
+    def set_rows(
+        self,
+        rows: list[tuple[Any, ...] | list[Any]],
+        *,
+        iids: list[str] | None = None,
+    ) -> tuple[str, ...]:
+        """Replace all table rows with one model reset.
+
+        Large engineering matrices should not pay the per-row layout cost of
+        repeated ``insert`` calls.  A single reset keeps refresh time linear
+        and gives Qt one opportunity to recompute row geometry.
+        """
+
+        width = len(self._columns)
+        item_ids = list(iids or (f"I{next(_ITEM_IDS)}" for _ in rows))
+        if len(item_ids) != len(rows):
+            raise ValueError("iids must match the number of rows")
+        self._model.beginResetModel()
+        self._items = item_ids
+        self._rows = []
+        self._item_tags = {item_id: () for item_id in item_ids}
+        for values in rows:
+            row_values = [str(value) for value in values[:width]]
+            row_values.extend([""] * (width - len(row_values)))
+            self._rows.append(row_values)
+        self._rebuild_rows()
+        self._model.endResetModel()
+        self._sync_tree_dimensions()
+        return tuple(item_ids)
 
     def delete(self, *items: str) -> None:
         if not items:

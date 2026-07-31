@@ -6,7 +6,9 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore, QtWidgets
 
+from .native_theme import TOKENS, mark_primary, mark_workbench_role
 from .performance_report import MAX_HOLD_STRIDE_FRAMES, hold_curve_frame_count
+from .qt_tk import AppleSwitch
 
 if TYPE_CHECKING:
     from .performance_report import AngleErrorImageOptions, PerformanceReportOptions
@@ -63,13 +65,13 @@ _TEXT = {
     },
     "to": {"zh": "至", "en": "to", "ja": "～"},
     "follow_focus": {
-        "zh": "Hold 范围跟随性能关注范围",
-        "en": "Hold range follows focus range",
-        "ja": "Hold 範囲を性能評価範囲に連動",
+        "zh": "Hold 跟随关注范围",
+        "en": "Match focus range",
+        "ja": "評価範囲に連動",
     },
     "hold_curve_stride": {
         "zh": "Hold 曲线间隔",
-        "en": "Hold curve interval",
+        "en": "Curve interval",
         "ja": "Hold 曲線間隔",
     },
     "hold_curve_stride_tooltip": {
@@ -94,7 +96,7 @@ _TEXT = {
     },
     "settings_group": {
         "zh": "性能判据与数据",
-        "en": "Performance criteria and data",
+        "en": "Criteria and data",
         "ja": "性能判定基準とデータ",
     },
     "error_limit": {
@@ -104,13 +106,18 @@ _TEXT = {
     },
     "spectrum_floor": {
         "zh": "dB 图显示下限",
-        "en": "dB spectrum display floor",
+        "en": "dB display floor",
         "ja": "dB 角度スペクトル表示下限",
     },
     "spectrum_vertical_scale": {
-        "zh": "角谱纵坐标",
-        "en": "Spectrum vertical scale",
-        "ja": "角度スペクトルの縦軸",
+        "zh": "角谱输出（可多选）",
+        "en": "Spectrum pages (select one or both)",
+        "ja": "角度スペクトル出力（複数選択可）",
+    },
+    "spectrum_scale_tooltip": {
+        "zh": "可同时开启：报告将分别输出 dB 角谱页和归一化模值角谱页。",
+        "en": "Both may be enabled; the report then adds separate dB and normalized-magnitude spectrum pages.",
+        "ja": "両方を有効にすると、dB角度スペクトルと正規化振幅スペクトルを別ページで出力します。",
     },
     "spectrum_db": {
         "zh": "dB",
@@ -123,9 +130,9 @@ _TEXT = {
         "ja": "振幅値",
     },
     "include_raw": {
-        "zh": "同时导出可复现原始数据（CSV/JSON）",
-        "en": "Export reproducibility data (CSV/JSON)",
-        "ja": "再現可能な生データ（CSV/JSON）も出力",
+        "zh": "导出 CSV/JSON 数据",
+        "en": "CSV/JSON data",
+        "ja": "CSV/JSON データ",
     },
     "criteria_note": {
         "zh": "关注范围用于性能统计；Hold 范围与曲线间隔控制叠加图密度。Max-Hold 包络及 CSV/JSON 数据仍使用范围内全部帧。",
@@ -192,6 +199,7 @@ class PerformanceReportDialog(QtWidgets.QDialog):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("performanceReportDialog")
+        mark_workbench_role(self, "dialog-shell")
 
         self.language = language if language in _SUPPORTED_LANGUAGES else "zh"
         self._azimuth_available = bool(azimuth_available)
@@ -209,7 +217,7 @@ class PerformanceReportDialog(QtWidgets.QDialog):
 
         self.setWindowTitle(_text("dialog_title", self.language))
         self.setModal(True)
-        self.setMinimumWidth(650)
+        self.setMinimumWidth(820)
 
         self._build_ui()
         self._connect_signals()
@@ -224,14 +232,57 @@ class PerformanceReportDialog(QtWidgets.QDialog):
         layout.setContentsMargins(16, 16, 16, 12)
         layout.setSpacing(10)
 
-        output_group = QtWidgets.QGroupBox(_text("output_group", self.language), self)
+        workspace = QtWidgets.QWidget(self)
+        workspace.setObjectName("performanceReportWorkspace")
+        workspace_layout = QtWidgets.QGridLayout(workspace)
+        workspace_layout.setContentsMargins(0, 0, 0, 0)
+        workspace_layout.setHorizontalSpacing(16)
+        workspace_layout.setVerticalSpacing(0)
+        workspace_layout.setColumnStretch(1, 1)
+
+        rail = QtWidgets.QScrollArea(workspace)
+        rail.setObjectName("performanceReportRail")
+        mark_workbench_role(rail, "dialog-rail")
+        rail.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        rail.setWidgetResizable(True)
+        rail.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        rail.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        rail.viewport().setAutoFillBackground(False)
+        rail_width = 340
+        rail.setMinimumWidth(rail_width)
+        rail.setMaximumWidth(360)
+
+        rail_content = QtWidgets.QWidget(rail)
+        rail_content.setObjectName("performanceReportRailContent")
+        mark_workbench_role(rail_content, "dialog-rail")
+        rail_layout = QtWidgets.QVBoxLayout(rail_content)
+        rail_layout.setContentsMargins(0, 0, 0, 0)
+        rail_layout.setSpacing(8)
+        rail.setWidget(rail_content)
+
+        content_panel = QtWidgets.QWidget(workspace)
+        content_panel.setObjectName("performanceReportContent")
+        mark_workbench_role(content_panel, "dialog-content")
+        content_layout = QtWidgets.QVBoxLayout(content_panel)
+        content_layout.setContentsMargins(12, 10, 12, 10)
+        content_layout.setSpacing(10)
+
+        workspace_layout.addWidget(rail, 0, 0)
+        workspace_layout.addWidget(content_panel, 0, 1)
+        layout.addWidget(workspace, 1)
+
+        output_group = QtWidgets.QGroupBox(
+            _text("output_group", self.language), rail_content
+        )
         output_group.setObjectName("reportOutputGroup")
+        mark_workbench_role(output_group, "dialog-rail")
         output_layout = QtWidgets.QFormLayout(output_group)
         output_layout.setFieldGrowthPolicy(
             QtWidgets.QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow
         )
         output_layout.setHorizontalSpacing(12)
-        output_layout.setVerticalSpacing(8)
+        output_layout.setVerticalSpacing(6)
+        output_layout.setRowWrapPolicy(QtWidgets.QFormLayout.RowWrapPolicy.WrapLongRows)
 
         output_row = QtWidgets.QWidget(output_group)
         output_row_layout = QtWidgets.QHBoxLayout(output_row)
@@ -242,10 +293,18 @@ class PerformanceReportDialog(QtWidgets.QDialog):
         )
         self.output_path_edit.setObjectName("reportOutputPath")
         self.output_path_edit.setClearButtonEnabled(True)
+        self.output_path_edit.setCursorPosition(0)
         self.browse_button = QtWidgets.QPushButton(_text("browse", self.language), output_row)
         self.browse_button.setObjectName("reportBrowseButton")
         output_row_layout.addWidget(self.output_path_edit, 1)
         output_row_layout.addWidget(self.browse_button)
+        # Let the row shrink to its safe minimum before QFormLayout decides to
+        # wrap it. This preserves the compact side-by-side form at 340 px while
+        # long paths remain horizontally scrollable inside the line edit.
+        output_row.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored,
+            QtWidgets.QSizePolicy.Policy.Preferred,
+        )
 
         path_label = QtWidgets.QLabel(_text("output_path", self.language), output_group)
         path_label.setBuddy(self.output_path_edit)
@@ -256,10 +315,16 @@ class PerformanceReportDialog(QtWidgets.QDialog):
         )
         self.title_edit.setObjectName("reportTitle")
         self.title_edit.setMaxLength(100)
+        self.title_edit.setCursorPosition(0)
+        self.title_edit.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Fixed,
+        )
+        self.title_edit.setMinimumWidth(120)
         title_label = QtWidgets.QLabel(_text("report_title", self.language), output_group)
         title_label.setBuddy(self.title_edit)
         output_layout.addRow(title_label, self.title_edit)
-        layout.addWidget(output_group)
+        rail_layout.addWidget(output_group)
 
         self.azimuth_group = self._build_axis_group(
             axis="az",
@@ -273,28 +338,44 @@ class PerformanceReportDialog(QtWidgets.QDialog):
             default_start=-15,
             default_stop=15,
         )
-        self.axis_tabs = QtWidgets.QTabWidget(self)
+        self.axis_tabs = QtWidgets.QTabWidget(content_panel)
         self.axis_tabs.setObjectName("reportAxisTabs")
+        mark_workbench_role(self.axis_tabs, "dialog-content")
+        self.axis_tabs.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding,
+        )
         self.axis_tabs.setStyleSheet(
             "QTabWidget#reportAxisTabs::pane { border: 0; background: transparent; }"
         )
+        self.azimuth_page = self._axis_scroll_page("az", self.azimuth_group)
+        self.elevation_page = self._axis_scroll_page("el", self.elevation_group)
         azimuth_index = self.axis_tabs.addTab(
-            self.azimuth_group, _text("azimuth", self.language)
+            self.azimuth_page, _text("azimuth", self.language)
         )
         elevation_index = self.axis_tabs.addTab(
-            self.elevation_group, _text("elevation", self.language)
+            self.elevation_page, _text("elevation", self.language)
         )
         self.axis_tabs.setTabEnabled(azimuth_index, self._azimuth_available)
         self.axis_tabs.setTabEnabled(elevation_index, self._elevation_available)
         if not self._azimuth_available and self._elevation_available:
             self.axis_tabs.setCurrentIndex(elevation_index)
-        layout.addWidget(self.axis_tabs)
+        content_layout.addWidget(self.axis_tabs, 1)
 
-        settings_group = QtWidgets.QGroupBox(_text("settings_group", self.language), self)
+        settings_group = QtWidgets.QGroupBox(
+            _text("settings_group", self.language), rail_content
+        )
         settings_group.setObjectName("reportPerformanceSettingsGroup")
+        mark_workbench_role(settings_group, "dialog-rail")
         settings_layout = QtWidgets.QFormLayout(settings_group)
         settings_layout.setHorizontalSpacing(12)
-        settings_layout.setVerticalSpacing(8)
+        settings_layout.setVerticalSpacing(6)
+        settings_layout.setFieldGrowthPolicy(
+            QtWidgets.QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow
+        )
+        settings_layout.setRowWrapPolicy(
+            QtWidgets.QFormLayout.RowWrapPolicy.WrapAllRows
+        )
 
         self.error_limit_spin = QtWidgets.QDoubleSpinBox(settings_group)
         self.error_limit_spin.setObjectName("reportErrorLimitDeg")
@@ -303,7 +384,7 @@ class PerformanceReportDialog(QtWidgets.QDialog):
         self.error_limit_spin.setSingleStep(0.1)
         self.error_limit_spin.setSuffix("°")
         self.error_limit_spin.setValue(self._initial_error_limit_deg)
-        self.error_limit_spin.setMaximumWidth(150)
+        self.error_limit_spin.setMaximumWidth(132)
         settings_layout.addRow(_text("error_limit", self.language), self.error_limit_spin)
 
         self.spectrum_floor_spin = QtWidgets.QDoubleSpinBox(settings_group)
@@ -313,33 +394,41 @@ class PerformanceReportDialog(QtWidgets.QDialog):
         self.spectrum_floor_spin.setSingleStep(5.0)
         self.spectrum_floor_spin.setSuffix(" dB")
         self.spectrum_floor_spin.setValue(-40.0)
-        self.spectrum_floor_spin.setMaximumWidth(150)
+        self.spectrum_floor_spin.setMaximumWidth(132)
         settings_layout.addRow(_text("spectrum_floor", self.language), self.spectrum_floor_spin)
 
         spectrum_scale_row = QtWidgets.QWidget(settings_group)
         spectrum_scale_layout = QtWidgets.QHBoxLayout(spectrum_scale_row)
         spectrum_scale_layout.setContentsMargins(0, 0, 0, 0)
         spectrum_scale_layout.setSpacing(16)
-        self.include_spectrum_db_checkbox = QtWidgets.QCheckBox(
+        self.include_spectrum_db_checkbox = AppleSwitch(
             _text("spectrum_db", self.language), spectrum_scale_row
         )
         self.include_spectrum_db_checkbox.setObjectName("reportIncludeSpectrumDb")
         self.include_spectrum_db_checkbox.setChecked(True)
-        self.include_spectrum_magnitude_checkbox = QtWidgets.QCheckBox(
+        self.include_spectrum_magnitude_checkbox = AppleSwitch(
             _text("spectrum_magnitude", self.language), spectrum_scale_row
         )
         self.include_spectrum_magnitude_checkbox.setObjectName(
             "reportIncludeSpectrumMagnitude"
         )
         self.include_spectrum_magnitude_checkbox.setChecked(False)
+        spectrum_scale_tooltip = _text("spectrum_scale_tooltip", self.language)
+        self.include_spectrum_db_checkbox.setToolTip(spectrum_scale_tooltip)
+        self.include_spectrum_magnitude_checkbox.setToolTip(spectrum_scale_tooltip)
+        spectrum_scale_row.setToolTip(spectrum_scale_tooltip)
         spectrum_scale_layout.addWidget(self.include_spectrum_db_checkbox)
         spectrum_scale_layout.addWidget(self.include_spectrum_magnitude_checkbox)
         spectrum_scale_layout.addStretch(1)
-        settings_layout.addRow(
-            _text("spectrum_vertical_scale", self.language), spectrum_scale_row
+        spectrum_scale_label = QtWidgets.QLabel(
+            _text("spectrum_vertical_scale", self.language), settings_group
         )
+        spectrum_scale_label.setObjectName("reportSpectrumScaleLabel")
+        spectrum_scale_label.setWordWrap(True)
+        spectrum_scale_label.setToolTip(spectrum_scale_tooltip)
+        settings_layout.addRow(spectrum_scale_label, spectrum_scale_row)
 
-        self.include_raw_checkbox = QtWidgets.QCheckBox(
+        self.include_raw_checkbox = AppleSwitch(
             _text("include_raw", self.language), settings_group
         )
         self.include_raw_checkbox.setObjectName("reportIncludeRawData")
@@ -349,15 +438,23 @@ class PerformanceReportDialog(QtWidgets.QDialog):
         criteria_note = QtWidgets.QLabel(_text("criteria_note", self.language), settings_group)
         criteria_note.setObjectName("reportCriteriaNote")
         criteria_note.setWordWrap(True)
+        criteria_note.setMinimumWidth(0)
+        criteria_note.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored,
+            QtWidgets.QSizePolicy.Policy.Preferred,
+        )
         criteria_note.setProperty("fluentRole", "caption")
         settings_layout.addRow(criteria_note)
-        layout.addWidget(settings_group)
+        rail_layout.addWidget(settings_group)
 
+        # Validation is a dialog-wide state, so keep it outside the scroll rail.
+        # This prevents long localized messages from being half-clipped at the
+        # bottom of compact windows while leaving the configuration rail usable.
         self.validation_label = QtWidgets.QLabel(self)
         self.validation_label.setObjectName("reportValidationError")
         self.validation_label.setWordWrap(True)
-        self.validation_label.setStyleSheet("color: #c42b1c;")
-        layout.addWidget(self.validation_label)
+        self.validation_label.setStyleSheet(f"color: {TOKENS.danger};")
+        rail_layout.addStretch(1)
 
         self.button_box = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Save
@@ -365,6 +462,7 @@ class PerformanceReportDialog(QtWidgets.QDialog):
             parent=self,
         )
         self.button_box.setObjectName("performanceReportButtonBox")
+        mark_workbench_role(self.button_box, "dialog-footer")
         self.save_button = self.button_box.button(
             QtWidgets.QDialogButtonBox.StandardButton.Save
         )
@@ -383,10 +481,11 @@ class PerformanceReportDialog(QtWidgets.QDialog):
         self.angle_image_button.setToolTip(
             _text("save_angle_image_tooltip", self.language)
         )
-        self.save_button.setProperty("fluentRole", "primary")
+        mark_primary(self.save_button)
         axis_available = self._azimuth_available or self._elevation_available
         self.save_button.setEnabled(axis_available)
         self.angle_image_button.setEnabled(axis_available)
+        layout.addWidget(self.validation_label)
         layout.addWidget(self.button_box)
 
     def _build_axis_group(
@@ -411,11 +510,13 @@ class PerformanceReportDialog(QtWidgets.QDialog):
         group.setObjectName(
             "azimuthReportGroup" if axis == "az" else "elevationReportGroup"
         )
+        mark_workbench_role(group, "dialog-section")
         grid = QtWidgets.QGridLayout(group)
+        grid.setSizeConstraint(QtWidgets.QLayout.SizeConstraint.SetMinimumSize)
         grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(6)
-        grid.setColumnStretch(4, 1)
-        grid.setRowStretch(6, 1)
+        grid.setVerticalSpacing(8)
+        grid.setColumnStretch(3, 1)
+        grid.setRowStretch(7, 1)
 
         focus_start = self._angle_spin(f"{axis}FocusStart", default_start, group)
         focus_stop = self._angle_spin(f"{axis}FocusStop", default_stop, group)
@@ -426,21 +527,33 @@ class PerformanceReportDialog(QtWidgets.QDialog):
         focus_label.setBuddy(focus_start)
         hold_label = QtWidgets.QLabel(_text("hold_range", self.language), group)
         hold_label.setBuddy(hold_start)
-        grid.addWidget(focus_label, 0, 0)
-        grid.addWidget(focus_start, 0, 1)
-        grid.addWidget(QtWidgets.QLabel(_text("to", self.language), group), 0, 2)
-        grid.addWidget(focus_stop, 0, 3)
-        grid.addWidget(hold_label, 1, 0)
-        grid.addWidget(hold_start, 1, 1)
-        grid.addWidget(QtWidgets.QLabel(_text("to", self.language), group), 1, 2)
-        grid.addWidget(hold_stop, 1, 3)
+        grid.addWidget(focus_label, 0, 0, 1, 4)
+        grid.addWidget(focus_start, 1, 0)
+        grid.addWidget(QtWidgets.QLabel(_text("to", self.language), group), 1, 1)
+        grid.addWidget(focus_stop, 1, 2)
+        grid.addWidget(hold_label, 2, 0, 1, 4)
+        grid.addWidget(hold_start, 3, 0)
+        grid.addWidget(QtWidgets.QLabel(_text("to", self.language), group), 3, 1)
+        grid.addWidget(hold_stop, 3, 2)
 
-        follow = QtWidgets.QCheckBox(_text("follow_focus", self.language), group)
+        hold_controls = QtWidgets.QWidget(group)
+        hold_controls.setObjectName(f"{axis}HoldControls")
+        hold_controls_layout = QtWidgets.QVBoxLayout(hold_controls)
+        hold_controls_layout.setContentsMargins(0, 0, 0, 0)
+        hold_controls_layout.setSpacing(8)
+
+        follow = AppleSwitch(
+            _text("follow_focus", self.language), hold_controls
+        )
         follow.setObjectName(f"{axis}HoldFollowsFocus")
         follow.setChecked(True)
-        grid.addWidget(follow, 2, 0, 1, 5)
 
-        curve_stride = QtWidgets.QSpinBox(group)
+        curve_stride_row = QtWidgets.QWidget(hold_controls)
+        curve_stride_row_layout = QtWidgets.QHBoxLayout(curve_stride_row)
+        curve_stride_row_layout.setContentsMargins(0, 0, 0, 0)
+        curve_stride_row_layout.setSpacing(10)
+
+        curve_stride = QtWidgets.QSpinBox(curve_stride_row)
         curve_stride.setObjectName(f"{axis}HoldCurveStep")
         curve_stride.setRange(1, MAX_HOLD_STRIDE_FRAMES)
         curve_stride.setSingleStep(1)
@@ -452,24 +565,28 @@ class PerformanceReportDialog(QtWidgets.QDialog):
             _text("hold_curve_stride_tooltip", self.language)
         )
         curve_stride_label = QtWidgets.QLabel(
-            _text("hold_curve_stride", self.language), group
+            _text("hold_curve_stride", self.language), curve_stride_row
         )
         curve_stride_label.setBuddy(curve_stride)
-        grid.addWidget(curve_stride_label, 3, 0)
-        grid.addWidget(curve_stride, 3, 1)
+        hold_controls_layout.addWidget(follow)
+        curve_stride_row_layout.addWidget(curve_stride_label)
+        curve_stride_row_layout.addWidget(curve_stride)
+        curve_stride_row_layout.addStretch(1)
+        hold_controls_layout.addWidget(curve_stride_row)
+        grid.addWidget(hold_controls, 4, 0, 1, 4)
 
         frame_count = QtWidgets.QLabel(group)
         frame_count.setObjectName(f"{axis}HoldFrameCount")
         frame_count.setProperty("fluentRole", "caption")
         frame_count.setWordWrap(True)
-        grid.addWidget(frame_count, 4, 0, 1, 5)
+        grid.addWidget(frame_count, 5, 0, 1, 4)
 
         note_key = "azimuth_plane_note" if axis == "az" else "elevation_plane_note"
         plane_note = QtWidgets.QLabel(_text(note_key, self.language), group)
         plane_note.setObjectName(f"{axis}OrthogonalPlaneNote")
         plane_note.setWordWrap(True)
         plane_note.setProperty("fluentRole", "caption")
-        grid.addWidget(plane_note, 5, 0, 1, 5)
+        grid.addWidget(plane_note, 6, 0, 1, 4)
 
         setattr(self, f"{axis}_focus_start", focus_start)
         setattr(self, f"{axis}_focus_stop", focus_stop)
@@ -483,6 +600,27 @@ class PerformanceReportDialog(QtWidgets.QDialog):
         hold_stop.setEnabled(False)
         group.setEnabled(available)
         return group
+
+    def _axis_scroll_page(
+        self, axis: str, group: QtWidgets.QGroupBox
+    ) -> QtWidgets.QScrollArea:
+        """Keep range controls intact when a short screen constrains the dialog."""
+
+        page = QtWidgets.QScrollArea(self)
+        page.setObjectName(f"{axis}ReportScrollArea")
+        mark_workbench_role(page, "dialog-content")
+        page.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        page.setWidgetResizable(True)
+        page.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        page.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        page.viewport().setAutoFillBackground(False)
+        page.setStyleSheet(
+            f"QScrollArea#{page.objectName()} {{ border: 0; background: transparent; }}"
+        )
+        page.setWidget(group)
+        return page
 
     @staticmethod
     def _angle_spin(

@@ -14,6 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 QtWidgets = pytest.importorskip("PySide6.QtWidgets")
 QtCore = pytest.importorskip("PySide6.QtCore")
+QtGui = pytest.importorskip("PySide6.QtGui")
 QtTest = pytest.importorskip("PySide6.QtTest")
 
 from scripts.capture_ui_review import (  # noqa: E402
@@ -23,6 +24,7 @@ from scripts.capture_ui_review import (  # noqa: E402
     process_events,
     render_widget,
 )
+from virtual_array.qt_tk import AppleSwitch  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -58,7 +60,10 @@ def _main_tab_labels(session) -> list[str]:
     assert navigator is not None, "canonical GUI must expose its main page navigator"
     tab_source = navigator.tab_widget or navigator.tab_bar
     assert tab_source is not None, "main pages must expose visible tab labels"
-    return [str(tab_source.tabText(index)) for index in range(navigator.count)]
+    return [
+        str(tab_source.tabText(index)).replace("&&", "&")
+        for index in range(navigator.count)
+    ]
 
 
 def _visible_dialogs(session) -> list:
@@ -108,7 +113,16 @@ def _sample_element_pattern():
     )
 
 
-@pytest.mark.parametrize("width,height", [(1100, 650), (1366, 768)])
+@pytest.mark.parametrize(
+    "width,height",
+    [
+        (1024, 650),
+        (1100, 650),
+        (1280, 720),
+        (1366, 768),
+        (1920, 1080),
+    ],
+)
 def test_canonical_gui_renders_at_target_sizes(
     gui_session, tmp_path: Path, width: int, height: int
 ) -> None:
@@ -125,6 +139,54 @@ def test_canonical_gui_renders_at_target_sizes(
     )
     screenshot = render_widget(window, tmp_path / f"main-{width}x{height}.png")
     assert screenshot.stat().st_size > 1_000
+
+
+def test_header_frequency_keeps_common_values_visible_at_compact_width(
+    gui_session,
+) -> None:
+    controller = gui_session.controller
+    window = gui_session.window
+    original_language = controller.language
+    original_frequency = controller.current_frequency_ghz()
+    original_size = window.size()
+
+    try:
+        window.resize(1024, 650)
+        for language in ("zh", "en", "ja"):
+            controller.set_language(language)
+            for frequency in (24.0, 77.0, 999.0):
+                controller._set_frequency_ghz(frequency)
+                controller._refresh_workspace_header()
+                process_events(gui_session.app, cycles=3)
+
+                value_label = controller.header_chip_value_labels[
+                    "chip_frequency"
+                ]._qt
+                expected = f"{int(frequency)} GHz"
+                assert value_label.text() == expected
+                assert value_label.toolTip() == expected
+                assert value_label.fontMetrics().horizontalAdvance(expected) <= (
+                    value_label.width()
+                )
+
+            controller._set_frequency_ghz(12345.123456)
+            controller._refresh_workspace_header()
+            process_events(gui_session.app, cycles=3)
+            value_label = controller.header_chip_value_labels["chip_frequency"]._qt
+            assert value_label.text() != value_label.toolTip()
+            assert value_label.toolTip() == "12345.123456 GHz"
+
+            chip_row = value_label.parentWidget().parentWidget()
+            assert controller.header_title_group._qt.geometry().right() < (
+                chip_row.geometry().left()
+            )
+            assert window.size() == QtCore.QSize(1024, 650)
+    finally:
+        controller.set_language(original_language)
+        controller._set_frequency_ghz(original_frequency)
+        controller._refresh_workspace_header()
+        window.resize(original_size)
+        process_events(gui_session.app, cycles=4)
 
 
 def test_canonical_gui_exposes_and_switches_three_main_pages(
@@ -346,16 +408,26 @@ def test_report_dialog_reuses_one_instance_for_sequential_report_and_png_exports
         process_events(gui_session.app, cycles=3)
 
 
-def test_modern_theme_and_primary_interactions_are_explicit(gui_session) -> None:
+def test_carbon_workbench_theme_and_primary_interactions_are_explicit(gui_session) -> None:
     from PySide6 import QtGui
 
-    from virtual_array.native_theme import TOKENS, application_stylesheet
+    from virtual_array.native_theme import (
+        AppleTokens,
+        TOKENS,
+        WorkbenchTokens,
+        application_stylesheet,
+    )
 
     controller = gui_session.controller
     stylesheet = application_stylesheet()
 
-    assert TOKENS.radius >= 8
-    assert TOKENS.card_radius >= TOKENS.radius
+    assert isinstance(TOKENS, WorkbenchTokens)
+    assert AppleTokens is WorkbenchTokens  # backwards-compatible public alias
+    assert TOKENS.canvas == "#f4f4f4"
+    assert TOKENS.accent == "#0f62fe"
+    assert TOKENS.primary_fill == "#0f62fe"
+    assert TOKENS.radius <= 4
+    assert TOKENS.card_radius <= 4
     assert "QPushButton:focus" in stylesheet
     assert "QScrollBar:vertical" in stylesheet
     assert "QTabBar::tab:selected" in stylesheet
@@ -377,6 +449,8 @@ def test_modern_theme_and_primary_interactions_are_explicit(gui_session) -> None
         return (lighter + 0.05) / (darker + 0.05)
 
     assert contrast_ratio(TOKENS.control_border, TOKENS.surface) >= 3.0
+    assert contrast_ratio(TOKENS.primary_fill, "#ffffff") >= 4.5
+    assert f"background: {TOKENS.primary_fill}" in stylesheet
 
     assert controller.auto_apply_button._qt.isDefault()
     assert controller.physical_action_buttons["physical_delete"]._qt.isCheckable()
@@ -384,6 +458,24 @@ def test_modern_theme_and_primary_interactions_are_explicit(gui_session) -> None
     assert controller.el_chart.play_button._qt.isCheckable()
     assert controller.dbf2d_az_button._qt.isCheckable()
     assert controller.dbf2d_el_button._qt.isCheckable()
+    assert callable(controller.phys_canvas.grab_pointer)
+    assert callable(controller.phys_canvas.release_pointer)
+
+    cancelled_events = []
+    callback_id = controller.phys_canvas.mpl_connect(
+        "pointer_cancel_event", cancelled_events.append
+    )
+    controller.phys_canvas._captured_axis = controller.physical_ax
+    try:
+        controller.phys_canvas.eventFilter(
+            controller.phys_canvas,
+            QtCore.QEvent(QtCore.QEvent.Type.UngrabMouse),
+        )
+        assert len(cancelled_events) == 1
+        assert cancelled_events[0].inaxes is controller.physical_ax
+        assert controller.phys_canvas._captured_axis is None
+    finally:
+        controller.phys_canvas.mpl_disconnect(callback_id)
 
     original_delete_mode = controller.delete_mode
     try:
@@ -413,6 +505,81 @@ def test_callout_role_updates_do_not_grow_local_stylesheets(gui_session) -> None
     assert max(lengths) < 500
     label.deleteLater()
     process_events(gui_session.app, cycles=2)
+
+
+def test_toolbar_selectors_and_evaluation_metrics_use_continuous_surfaces(
+    gui_session,
+) -> None:
+    from virtual_array.gui import THEME
+
+    controller = gui_session.controller
+    process_events(gui_session.app, cycles=2)
+
+    assert THEME["metric_bg"] == THEME["card_bg"]
+    for radio in (
+        controller.dbf_display_db_radio,
+        controller.dbf_display_mag_radio,
+    ):
+        assert radio is not None
+        stylesheet = radio._qt.styleSheet()
+        assert f"background-color: {THEME['status_bar_bg']}" in stylesheet
+        assert "background-color: transparent" not in stylesheet
+        assert "border:" not in stylesheet
+        assert radio.cget("style") == "Toolbar.TRadiobutton"
+        assert (
+            radio._qt.cursor().shape()
+            == QtCore.Qt.CursorShape.PointingHandCursor
+        )
+
+    unselected_radio = next(
+        radio._qt
+        for radio in (
+            controller.dbf_display_db_radio,
+            controller.dbf_display_mag_radio,
+        )
+        if not radio._qt.isChecked()
+    )
+    option = QtWidgets.QStyleOptionButton()
+    unselected_radio.initStyleOption(option)
+    indicator = unselected_radio.style().subElementRect(
+        QtWidgets.QStyle.SubElement.SE_RadioButtonIndicator,
+        option,
+        unselected_radio,
+    )
+    image = QtGui.QImage(
+        unselected_radio.size(),
+        QtGui.QImage.Format.Format_ARGB32_Premultiplied,
+    )
+    image.fill(QtGui.QColor(THEME["status_bar_bg"]))
+    unselected_radio.render(image)
+    visible_indicator_pixels = sum(
+        1
+        for y in range(indicator.top(), indicator.bottom() + 1)
+        for x in range(indicator.left(), indicator.right() + 1)
+        if image.pixelColor(x, y).lightness() < 235
+    )
+    assert visible_indicator_pixels >= 8
+
+    metric_labels = (
+        *controller.primary_name_labels.values(),
+        *controller.primary_value_labels.values(),
+        *controller.secondary_name_labels.values(),
+        *controller.secondary_value_labels.values(),
+    )
+    assert metric_labels
+    assert all(THEME["card_bg"] in label._qt.styleSheet() for label in metric_labels)
+
+
+def test_escape_interrupts_captured_dbf_drags(gui_session) -> None:
+    controller = gui_session.controller
+
+    controller.dbf_drag_mode = "azimuth"
+    assert controller.on_escape_key() == "break"
+    assert controller.dbf_drag_mode is None
+
+    controller.dbf2d_dragging = True
+    assert controller.on_escape_key() == "break"
+    assert controller.dbf2d_dragging is False
 
 
 def test_workspace_tabs_support_keyboard_navigation(gui_session) -> None:
@@ -552,9 +719,26 @@ def test_performance_report_worker_runs_off_the_gui_thread(
                 progress.windowModality()
                 == QtCore.Qt.WindowModality.WindowModal
             )
-            assert progress.minimumWidth() >= 440
+            assert progress.minimumWidth() >= 480
+            assert progress.minimumHeight() >= 160
+            assert progress.property("workbenchRole") == "progress-dialog"
             progress_label = progress.findChild(QtWidgets.QLabel)
             assert progress_label is not None and progress_label.wordWrap()
+            assert progress_label.objectName() == "performanceReportProgressLabel"
+            assert progress_label.property("workbenchRole") == "progress-status"
+            assert progress_label.alignment() & QtCore.Qt.AlignmentFlag.AlignCenter
+            assert "0%" in progress_label.text()
+            progress_bar = progress.findChild(
+                QtWidgets.QProgressBar, "performanceReportProgressBar"
+            )
+            assert progress_bar is not None
+            assert progress_bar.property("workbenchRole") == "report-progress"
+            assert not progress_bar.isTextVisible()
+            assert progress_bar.accessibleName()
+            assert progress_bar.height() >= 12
+            original_progress(65, "正在绘制逐帧 Hold: 方位")
+            assert progress_bar.value() == 65
+            assert progress_label.text() == "正在绘制逐帧 Hold: 方位  ·  65%"
             progress.canceled.connect(lambda: progress_canceled.append(True))
 
             loop = QtCore.QEventLoop()
@@ -614,16 +798,32 @@ def test_performance_report_worker_runs_off_the_gui_thread(
 def test_configuration_and_manual_dialogs_use_native_qt_controls(gui_session) -> None:
     controller = gui_session.controller
     dialog_specs = (
-        (controller.open_dbf_dictionary_dialog, True, False),
-        (controller.open_channel_patterns_dialog, True, False),
-        (controller._show_user_manual_dialog, False, True),
+        (
+            controller.open_dbf_dictionary_dialog,
+            True,
+            False,
+            QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+        ),
+        (
+            controller.open_channel_patterns_dialog,
+            True,
+            False,
+            QtWidgets.QDialogButtonBox.StandardButton.Close,
+        ),
+        (
+            controller._show_user_manual_dialog,
+            False,
+            True,
+            QtWidgets.QDialogButtonBox.StandardButton.Close,
+        ),
     )
 
-    for invocation, expects_table, expects_text_browser in dialog_specs:
+    for invocation, expects_table, expects_text_browser, close_button_kind in dialog_specs:
         dialog = _open_modeless_dialog(gui_session, invocation)
         closed = False
         try:
             assert dialog.windowTitle()
+            assert dialog.property("workbenchRole") == "dialog-shell"
             assert dialog.width() <= gui_session.window.width()
             assert dialog.height() <= gui_session.window.height()
             button_boxes = dialog.findChildren(QtWidgets.QDialogButtonBox)
@@ -637,11 +837,169 @@ def test_configuration_and_manual_dialogs_use_native_qt_controls(gui_session) ->
                 )
                 assert all(table.model().columnCount() > 0 for table in tables)
                 if dialog.objectName() == "channelPatternsDialog":
+                    source_panel = dialog.findChild(
+                        QtWidgets.QWidget, "channelPatternSourcePanel"
+                    )
+                    table_panel = dialog.findChild(
+                        QtWidgets.QWidget, "channelPatternTablePanel"
+                    )
+                    action_bar = dialog.findChild(
+                        QtWidgets.QWidget, "channelPatternActionBar"
+                    )
+                    assert source_panel.property("workbenchRole") == "dialog-rail"
+                    assert table_panel.property("workbenchRole") == "dialog-content"
+                    assert action_bar.property("workbenchRole") == "dialog-footer"
                     for button in dialog.findChildren(QtWidgets.QAbstractButton):
                         if not button.isVisible() or not button.text():
                             continue
                         text_width = button.fontMetrics().horizontalAdvance(button.text())
                         assert text_width + 12 <= button.width(), button.text()
+                elif dialog.objectName() == "dbfDictionaryDialog":
+                    mode_panel = dialog.findChild(
+                        QtWidgets.QWidget, "dbfModePanel"
+                    )
+                    custom_panel = dialog.findChild(
+                        QtWidgets.QWidget, "dbfCustomImportPanel"
+                    )
+                    custom_scroll = dialog.findChild(
+                        QtWidgets.QScrollArea, "dbfCustomImportScroll"
+                    )
+                    import_disclosure = dialog.findChild(
+                        QtWidgets.QPushButton, "dbfImportDisclosure"
+                    )
+                    toolbar = dialog.findChild(QtWidgets.QWidget, "dbfPreviewToolbar")
+                    az_button = dialog.findChild(
+                        QtWidgets.QAbstractButton, "dbfPreviewAzButton"
+                    )
+                    el_button = dialog.findChild(
+                        QtWidgets.QAbstractButton, "dbfPreviewElButton"
+                    )
+                    preview_table = dialog.findChild(
+                        QtWidgets.QTableView, "dbfPreviewTable"
+                    )
+                    preview_panel = dialog.findChild(
+                        QtWidgets.QWidget, "dbfPreviewPanel"
+                    )
+                    preview_header = dialog.findChild(
+                        QtWidgets.QWidget, "dbfPreviewHeader"
+                    )
+                    action_bar = dialog.findChild(
+                        QtWidgets.QWidget, "dbfDictionaryActionBar"
+                    )
+                    phase_reverse_toggle = dialog.findChild(
+                        AppleSwitch, "dbfPhaseReverseToggle"
+                    )
+                    zero_calibrate_toggle = dialog.findChild(
+                        AppleSwitch, "dbfZeroCalibrateToggle"
+                    )
+                    custom_mode = dialog.findChild(
+                        QtWidgets.QRadioButton, "dbfMode_custom"
+                    )
+                    ideal_mode = dialog.findChild(
+                        QtWidgets.QRadioButton, "dbfMode_ideal"
+                    )
+                    az_load_button = dialog.findChild(
+                        QtWidgets.QPushButton, "dbfLoadAzButton"
+                    )
+                    az_clear_button = dialog.findChild(
+                        QtWidgets.QPushButton, "dbfClearAzButton"
+                    )
+                    el_load_button = dialog.findChild(
+                        QtWidgets.QPushButton, "dbfLoadElButton"
+                    )
+                    el_clear_button = dialog.findChild(
+                        QtWidgets.QPushButton, "dbfClearElButton"
+                    )
+                    fit_columns_button = dialog.findChild(
+                        QtWidgets.QPushButton, "dbfFitColumnsButton"
+                    )
+                    calibration_separator = dialog.findChild(
+                        QtWidgets.QFrame, "dbfCalibrationSeparator"
+                    )
+                    button_box = button_boxes[0]
+                    apply_button = button_box.button(
+                        QtWidgets.QDialogButtonBox.StandardButton.Apply
+                    )
+                    assert all(
+                        widget is not None
+                        for widget in (
+                            mode_panel,
+                            custom_panel,
+                            custom_scroll,
+                            toolbar,
+                            az_button,
+                            el_button,
+                            preview_table,
+                            preview_panel,
+                            preview_header,
+                            action_bar,
+                            phase_reverse_toggle,
+                            zero_calibrate_toggle,
+                            custom_mode,
+                            ideal_mode,
+                            az_load_button,
+                            az_clear_button,
+                            el_load_button,
+                            el_clear_button,
+                            fit_columns_button,
+                            calibration_separator,
+                            apply_button,
+                        )
+                    )
+                    assert mode_panel.property("workbenchRole") == "dialog-rail"
+                    assert custom_panel.property("workbenchRole") == "dialog-rail"
+                    assert preview_panel.property("workbenchRole") == "dialog-content"
+                    assert preview_header.property("workbenchRole") == "dialog-header"
+                    assert action_bar.property("workbenchRole") == "dialog-footer"
+                    for toggle in (phase_reverse_toggle, zero_calibrate_toggle):
+                        assert isinstance(toggle, QtWidgets.QCheckBox)
+                        assert not toggle.isTristate()
+                    assert not custom_panel.isVisible()
+                    assert not custom_scroll.isVisible()
+                    assert import_disclosure is None
+                    assert az_button.isChecked() and not el_button.isChecked()
+                    custom_mode.click()
+                    process_events(gui_session.app, cycles=3)
+                    assert custom_panel.isVisible()
+                    assert custom_scroll.isVisible()
+                    assert not apply_button.isEnabled()
+                    for button in (
+                        az_load_button,
+                        az_clear_button,
+                        el_load_button,
+                        el_clear_button,
+                    ):
+                        stylesheet = button.styleSheet()
+                        assert f"#{button.objectName()} {{" in stylesheet
+                        assert "border: 1px solid" in stylesheet
+                    assert fit_columns_button.toolTip()
+                    fit_columns_button.click()
+                    process_events(gui_session.app, cycles=2)
+                    header = preview_table.horizontalHeader()
+                    for section in range(preview_table.model().columnCount()):
+                        assert header.sectionResizeMode(section) == (
+                            QtWidgets.QHeaderView.ResizeMode.Interactive
+                        )
+                    assert 68 <= preview_table.columnWidth(0) <= 86
+                    for section in range(1, preview_table.model().columnCount()):
+                        assert 64 <= preview_table.columnWidth(section) <= 96
+                    dialog.resize(820, 540)
+                    process_events(gui_session.app, cycles=4)
+                    assert custom_scroll.horizontalScrollBar().maximum() == 0
+                    assert custom_scroll.verticalScrollBar().maximum() > 0
+                    assert custom_panel.height() >= custom_panel.minimumSizeHint().height()
+                    assert calibration_separator.geometry().top() > max(
+                        el_load_button.geometry().bottom(),
+                        el_clear_button.geometry().bottom(),
+                    )
+                    dialog.resize(1240, 780)
+                    process_events(gui_session.app, cycles=4)
+                    assert custom_scroll.verticalScrollBar().maximum() == 0
+                    ideal_mode.click()
+                    process_events(gui_session.app, cycles=3)
+                    assert not custom_panel.isVisible()
+                    assert not custom_scroll.isVisible()
+                    assert apply_button.isEnabled()
             if expects_text_browser:
                 from virtual_array.user_manual import manual_chapters
 
@@ -663,11 +1021,19 @@ def test_configuration_and_manual_dialogs_use_native_qt_controls(gui_session) ->
                 )
                 assert splitter is not None
                 assert "<h2" in browsers[0].toHtml().lower()
+                header = dialog.findChild(QtWidgets.QWidget, "manualHeader")
+                contents = dialog.findChild(
+                    QtWidgets.QWidget, "manualContentsPanel"
+                )
+                assert header.property("workbenchRole") == "dialog-header"
+                assert contents.property("workbenchRole") == "dialog-rail"
+                assert browsers[0].property("workbenchRole") == "dialog-content"
+                assert button_boxes[0].property("workbenchRole") == "dialog-footer"
 
             _close_with_standard_button(
                 gui_session,
                 dialog,
-                QtWidgets.QDialogButtonBox.StandardButton.Close,
+                close_button_kind,
             )
             closed = True
         finally:
@@ -823,6 +1189,13 @@ def test_element_pattern_confirmation_dialog_can_be_cancelled_modally(
         try:
             observation["modal"] = dialog.isModal()
             observation["size"] = (dialog.width(), dialog.height())
+            observation["shell_role"] = dialog.property("workbenchRole")
+            action_bar = dialog.findChild(
+                QtWidgets.QWidget, "elementPatternActionBar"
+            )
+            observation["footer_role"] = (
+                action_bar.property("workbenchRole") if action_bar is not None else None
+            )
             boxes = dialog.findChildren(QtWidgets.QDialogButtonBox)
             observation["button_box_count"] = len(boxes)
             cancel_buttons = [
@@ -852,6 +1225,8 @@ def test_element_pattern_confirmation_dialog_can_be_cancelled_modally(
         raise error
     assert result is None
     assert observation.get("modal") is True
+    assert observation.get("shell_role") == "dialog-shell"
+    assert observation.get("footer_role") == "dialog-footer"
     assert observation.get("button_box_count", 0) >= 1
     assert observation.get("has_cancel") is True
     width, height = observation["size"]

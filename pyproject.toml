@@ -33,6 +33,13 @@ virtual-array-case4 = "virtual_array.examples.case4_5tx7rx_sel:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+virtual_array = [
+    "assets/*.png",
+    "assets/*.ico",
+    "assets/*.icns",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py39"

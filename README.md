@@ -6,9 +6,12 @@ Desktop tool for interactively editing and evaluating MIMO Tx/Rx antenna array
 layouts. Computes virtual array geometry, 2D array factor, and radar-performance
 metrics (PSL, beamwidth, ISLR, grating lobes, elevation ambiguity).
 
-The desktop UI is a native **PySide6 / pyqtgraph** application with a Fluent 2
-light theme. It has one maintained implementation, `virtual_array.gui`, and a
-resizable three-page workspace. `GUI.py`, `GUI_mod.py`, and the installed
+The desktop UI is a native **PySide6 / pyqtgraph** application with a
+Carbon-led engineering-workbench appearance and Apple-inspired interaction:
+dense neutral surfaces, system typography, clear focus states, and restrained motion. It intentionally
+does **not** imitate a macOS shell; the application keeps native Qt controls and
+platform behavior. It has one maintained implementation, `virtual_array.gui`,
+and a resizable three-page workspace. `GUI.py`, `GUI_mod.py`, and the installed
 console command all start this same interface; `GUI_mod.py` remains only as a
 compatibility alias for existing shortcuts.
 
@@ -44,10 +47,10 @@ compatibility alias for existing shortcuts.
 - Local state persistence (last paths, frequency, window geometry, layout).
 - PyInstaller onedir packaging for Windows.
 
-### Fluent 2 Desktop Interface
+### Carbon-Led Native Desktop Interface
 
-- Resizable window: **1366 × 768** default, **1100 × 650** minimum, clamped to
-  the available screen area when restored.
+- Resizable window: **1366 × 768** default, **1024 × 650 logical px** minimum
+  (**1100 × 650** recommended), clamped to the available screen area when restored.
 - Three localized tab pages:
   - **Physical & Virtual** — Physical and virtual array side by side (1:1).
   - **1D DBF** — Azimuth and elevation response spectra side by side (1:1).
@@ -57,7 +60,13 @@ compatibility alias for existing shortcuts.
   - Channel count, virtual channels, aperture, resolution.
   - Angle evaluation: no-fold range, max error, peak margin, cut reason.
 - Native Qt menus, dialogs, tables, status bar, keyboard focus, and standard
-  action icons, styled through one Fluent 2 token/QSS theme.
+  action icons, styled through one Carbon-led token/QSS theme.
+- Direct array manipulation preserves the pointer-to-element grab offset,
+  captures the pointer for uninterrupted dragging, coalesces drag redraws to
+  about 16 ms, and snaps to the grid only on release. This removes cursor jumps
+  and grid-step jitter without changing stored layout geometry.
+- Subtle hover/pressed feedback and visible keyboard focus provide responsive
+  state changes without decorative bounce or data-obscuring animation.
 - Neutral capability guidance replaces misleading flat spectra or heatmaps when
   an array has no usable aperture in one or both axes.
 - Cross-platform Chinese font support (macOS / Windows / Linux).
@@ -279,9 +288,11 @@ tests/              → pytest suite
 
 MIMO 阵列可视化工具 — 用于交互式编辑和评估 MIMO 发射/接收天线阵列布局的桌面应用。可计算虚拟阵列几何、2D 阵列因子以及雷达性能指标（旁瓣电平、波束宽度、ISLR、栅瓣、俯仰模糊）。
 
-桌面端采用原生 **PySide6 / pyqtgraph** 和 Fluent 2 浅色主题，并只维护
-`virtual_array.gui` 一套实现。`GUI.py`、`GUI_mod.py` 与安装后的控制台命令
-均打开同一个三页界面；`GUI_mod.py` 仅用于兼容已有快捷方式。
+桌面端采用原生 **PySide6 / pyqtgraph** 与 Carbon-led 工程工作台视觉，并保留
+Apple-inspired 的直接操控与即时反馈：紧凑中性色表面、系统字体、清晰焦点和低干扰动效。它不会伪装成
+macOS 外壳，而是保留 Qt 原生控件与平台行为。项目只维护
+`virtual_array.gui` 一套实现；`GUI.py`、`GUI_mod.py` 与安装后的控制台命令
+均打开同一个三页界面，`GUI_mod.py` 仅用于兼容已有快捷方式。
 
 ## 功能特性
 
@@ -304,9 +315,9 @@ MIMO 阵列可视化工具 — 用于交互式编辑和评估 MIMO 发射/接收
 - 本地状态持久化（最近路径、频率、窗口几何、布局）。
 - PyInstaller onedir Windows 打包。
 
-### Fluent 2 桌面界面
+### Carbon-led 原生桌面界面
 
-- 可缩放窗口：默认 **1366 × 768**，最小 **1100 × 650**；恢复窗口时自动限制在屏幕可用区域内。
+- 可缩放窗口：默认 **1366 × 768**，最小 **1024 × 650 逻辑像素**（推荐 **1100 × 650**）；恢复窗口时自动限制在屏幕可用区域内。
 - 三个已本地化的子页面：
   - **Physical & Virtual** — 物理阵列与虚拟阵列左右并排（1:1）。
   - **1D DBF** — 方位与俯仰响应曲线左右并排（1:1）。
@@ -314,7 +325,9 @@ MIMO 阵列可视化工具 — 用于交互式编辑和评估 MIMO 发射/接收
 - 主工作区与右侧 **Overview** 通过可拖动分隔条布局，侧栏保持 280–360 px 的可读宽度：
   - 通道数、虚拟通道、口径、分辨率。
   - 测角评估：不模糊范围、最大误差、竞争峰裕量、截断原因。
-- 原生 Qt 菜单、弹窗、表格、状态栏、键盘焦点和标准操作图标，统一由 Fluent 2 token/QSS 主题控制。
+- 原生 Qt 菜单、弹窗、表格、状态栏、键盘焦点和标准操作图标，统一由 Carbon-led token/QSS 主题控制。
+- 阵元拖拽保留指针与阵元的抓取偏移，拖动期间捕获指针并以约 16 ms 合并重绘，松开时才吸附网格；因此不会出现阵元跳到指针中心或逐格抖动。
+- hover、pressed 与键盘焦点反馈即时但克制，不加入装饰性弹跳，也不让动画干扰工程数据阅读。
 - 阵列在某方向无有效孔径时显示中性能力提示，不再显示误导性的平直角谱或整片热图。
 - 跨平台中文字体（macOS / Windows / Linux）。
 - 预配置 OpenCode 技能和 ruff/pyright 工具。
@@ -398,7 +411,7 @@ python scripts/capture_ui_review.py --output-dir outputs/ui-review-8t8r --skip-d
 
 MIMOアレイ可視化ツール — MIMO送信/受信アンテナアレイ配置を対話的に編集・評価するデスクトップアプリです。仮想アレイ形状、2Dアレイファクタ、レーダ性能指標（PSL、ビーム幅、ISLR、グレーティングローブ、仰角曖昧性）を計算します。
 
-デスクトップ UI はネイティブ **PySide6 / pyqtgraph** と Fluent 2 のライトテーマを採用し、`virtual_array.gui` の 1 実装だけを保守します。`GUI.py`、`GUI_mod.py`、インストール済みコンソールコマンドはすべて同じ 3 ページ画面を起動し、`GUI_mod.py` は既存ショートカット用の互換エイリアスです。
+デスクトップ UI はネイティブ **PySide6 / pyqtgraph** と Carbon-led のエンジニアリングワークベンチ外観を採用し、Apple-inspired の直接操作と即時フィードバックを維持します。コンパクトなニュートラル面、システム書体、明瞭なフォーカス、控えめなモーションを使いますが、macOS の外殻を模倣するものではなく、Qt ネイティブの部品とプラットフォーム動作を維持します。保守する実装は `virtual_array.gui` の 1 つだけです。`GUI.py`、`GUI_mod.py`、インストール済みコンソールコマンドはすべて同じ 3 ページ画面を起動し、`GUI_mod.py` は既存ショートカット用の互換エイリアスです。
 
 ## 機能
 
@@ -422,15 +435,17 @@ MIMOアレイ可視化ツール — MIMO送信/受信アンテナアレイ配置
 - ローカル状態の永続化
 - PyInstaller onedir Windows パッケージ
 
-### Fluent 2 デスクトップ UI
+### Carbon-led ネイティブデスクトップ UI
 
-- リサイズ可能：既定 **1366 × 768**、最小 **1100 × 650**。復元時は利用可能な画面領域内に収めます。
+- リサイズ可能：既定 **1366 × 768**、最小 **1024 × 650 論理 px**（推奨 **1100 × 650**）。復元時は利用可能な画面領域内に収めます。
 - ローカライズ済みの 3 ページ：
   - **Physical & Virtual** — 物理/仮想アレイ左右 1:1
   - **1D DBF** — 方位/仰角応答スペクトル左右 1:1
   - **2D DBF** — タブ全体の 2D ヒートマップ
 - メイン領域と右側 **Overview** はドラッグ可能なスプリッターで構成し、側面パネルは 280–360 px の読みやすい幅を維持
-- ネイティブ Qt のメニュー、ダイアログ、テーブル、ステータスバー、キーボードフォーカス、標準アクションアイコンを単一の Fluent 2 token/QSS テーマで統一
+- ネイティブ Qt のメニュー、ダイアログ、テーブル、ステータスバー、キーボードフォーカス、標準アクションアイコンを単一の Carbon-led token/QSS テーマで統一
+- 配置ドラッグはポインターと素子の相対位置を保持し、ドラッグ中はポインターをキャプチャして約 16 ms 単位で再描画をまとめ、リリース時だけグリッドへスナップします。カーソル中心へのジャンプや段階的な揺れを防ぎます。
+- hover、pressed、キーボードフォーカスは即時かつ控えめに示し、装飾的なバウンドやデータを邪魔するアニメーションは使いません。
 - 有効な開口がない軸では、誤解を招く平坦スペクトルやヒートマップの代わりに中立的な案内を表示
 - クロスプラットフォーム中国語フォント対応
 - OpenCode スキル・ruff/pyright ツール設定済み

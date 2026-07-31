@@ -428,6 +428,7 @@ def _capture_dialog_invocation(
     session: GuiSession,
     invocation: Callable[[], Any],
     output_path: Path,
+    prepare_dialog: Callable[[Any], None] | None = None,
     timeout_ms: int = 5000,
 ) -> bool:
     """Capture modal or modeless dialog calls without blocking on exec()."""
@@ -461,6 +462,9 @@ def _capture_dialog_invocation(
         if current is not candidate:
             candidate = current
             settled_polls = 0
+            if prepare_dialog is not None:
+                prepare_dialog(current)
+                process_events(session.app, cycles=2)
             return
         settled_polls += 1
         if settled_polls < 2:
@@ -513,20 +517,50 @@ def _sample_element_pattern() -> Any:
     )
 
 
-def capture_dialogs(session: GuiSession, output_dir: Path) -> list[Path]:
-    """Capture the four custom dialogs named in the visual acceptance plan."""
+def _select_dbf_import_mode(dialog: Any) -> None:
+    """Expose the import rail and both visual switch states for review."""
+
+    _QtCore, _QtGui, QtWidgets = _qt_modules()
+    custom_mode = dialog.findChild(QtWidgets.QRadioButton, "dbfMode_custom")
+    if custom_mode is not None:
+        custom_mode.click()
+    phase_reverse = dialog.findChild(QtWidgets.QCheckBox, "dbfPhaseReverseToggle")
+    if phase_reverse is not None:
+        phase_reverse.setChecked(True)
+
+
+def capture_dialogs(
+    session: GuiSession,
+    output_dir: Path,
+    *,
+    dbf_import_mode: bool = False,
+) -> list[Path]:
+    """Capture the five custom dialogs named in the visual acceptance plan."""
 
     controller = session.controller
-    specs: list[tuple[str, Sequence[str], Callable[[Callable[..., Any]], Callable[[], Any]]]] = [
+    specs: list[
+        tuple[
+            str,
+            Sequence[str],
+            Callable[[Callable[..., Any]], Callable[[], Any]],
+            Callable[[Any], None] | None,
+        ]
+    ] = [
         (
-            "04-dbf-dictionary.png",
+            (
+                "04-dbf-dictionary-import.png"
+                if dbf_import_mode
+                else "04-dbf-dictionary.png"
+            ),
             ("open_dbf_dictionary_dialog", "show_dbf_dictionary_dialog"),
             lambda method: method,
+            _select_dbf_import_mode if dbf_import_mode else None,
         ),
         (
             "05-channel-amplitude-phase.png",
             ("open_channel_patterns_dialog", "show_channel_patterns_dialog"),
             lambda method: method,
+            None,
         ),
         (
             "06-element-pattern-confirmation.png",
@@ -535,15 +569,23 @@ def capture_dialogs(session: GuiSession, output_dir: Path) -> list[Path]:
                 "show_element_pattern_confirmation",
             ),
             lambda method: lambda: method(_sample_element_pattern()),
+            None,
         ),
         (
             "07-user-manual.png",
             ("_show_user_manual_dialog", "show_user_manual_dialog"),
             lambda method: method,
+            None,
+        ),
+        (
+            "08-performance-report.png",
+            ("open_performance_report_dialog",),
+            lambda method: method,
+            None,
         ),
     ]
     captured: list[Path] = []
-    for filename, method_names, invocation_factory in specs:
+    for filename, method_names, invocation_factory, prepare_dialog in specs:
         method = _first_callable(controller, method_names)
         if method is None:
             continue
@@ -552,6 +594,7 @@ def capture_dialogs(session: GuiSession, output_dir: Path) -> list[Path]:
             session,
             invocation_factory(method),
             output_path,
+            prepare_dialog=prepare_dialog,
         ):
             captured.append(output_path)
     return captured
@@ -571,6 +614,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--skip-dialogs",
         action="store_true",
         help="Capture only the three main pages.",
+    )
+    parser.add_argument(
+        "--dbf-import-mode",
+        action="store_true",
+        help="Show the DBF CSV/XLSX import rail in its dialog screenshot.",
     )
     parser.add_argument(
         "--width",
@@ -622,7 +670,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             process_events(session.app, cycles=8)
             captured = capture_main_pages(session, output_dir)
             if not args.skip_dialogs:
-                captured.extend(capture_dialogs(session, output_dir))
+                captured.extend(
+                    capture_dialogs(
+                        session,
+                        output_dir,
+                        dbf_import_mode=args.dbf_import_mode,
+                    )
+                )
         finally:
             close_gui_session(session)
 

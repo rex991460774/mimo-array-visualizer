@@ -77,6 +77,7 @@ from .native_theme import (
     mark_callout,
     mark_primary,
     mark_quiet,
+    mark_workbench_role,
 )
 from .qt_plot import Figure, FigureCanvasTkAgg, MplButton, Rectangle, rcParams
 from .qt_tk import filedialog, messagebox, tk, ttk
@@ -102,16 +103,32 @@ APP_LOGO_PNG_PATH = _resource_path("assets", "mimo_array_logo_256.png")
 APP_LOGO_ICO_PATH = _resource_path("assets", "mimo_array_logo.ico")
 APP_LOGO_ICNS_PATH = _resource_path("assets", "mimo_array_logo.icns")
 
-rcParams["font.sans-serif"] = [
-    "PingFang SC",
-    "Heiti SC",
-    "STHeiti",
-    "Microsoft YaHei",
-    "SimHei",
-    "WenQuanYi Micro Hei",
-    "Noto Sans CJK SC",
-    "DejaVu Sans",
-]
+if sys.platform.startswith("win"):
+    rcParams["font.sans-serif"] = [
+        "Microsoft YaHei UI",
+        "Microsoft YaHei",
+        "Segoe UI Variable Text",
+        "Segoe UI",
+        "SimHei",
+        "Noto Sans CJK SC",
+        "DejaVu Sans",
+    ]
+elif sys.platform == "darwin":
+    rcParams["font.sans-serif"] = [
+        "SF Pro Display",
+        "SF Pro Text",
+        "PingFang SC",
+        "Heiti SC",
+        "STHeiti",
+        "Arial Unicode MS",
+    ]
+else:
+    rcParams["font.sans-serif"] = [
+        "Noto Sans CJK SC",
+        "Noto Sans",
+        "WenQuanYi Micro Hei",
+        "DejaVu Sans",
+    ]
 rcParams["axes.unicode_minus"] = False
 
 # ── Global constants ──────────────────────────────────────────────────
@@ -161,13 +178,13 @@ PHYSICAL_MAJOR_GRID_STEP_LAMBDA = 1.0
 PHYSICAL_AXIS_MIN_SPAN_LAMBDA = 4.0
 PHYSICAL_AXIS_PADDING_LAMBDA = 2.0
 TOOLBAR_ENTRY_WIDTH = 6
-TOOLBAR_GROUP_PAD_X = 6
-TOOLBAR_GROUP_PAD_Y = 4
+TOOLBAR_GROUP_PAD_X = 0
+TOOLBAR_GROUP_PAD_Y = 0
 
 # Window geometry
 WINDOW_WIDTH = 1366
 WINDOW_HEIGHT = 768
-WINDOW_MIN_WIDTH = 1100
+WINDOW_MIN_WIDTH = 1024
 WINDOW_MIN_HEIGHT = 650
 WINDOW_GEOMETRY_RE = re.compile(
     r"^(?P<width>\d+)x(?P<height>\d+)(?:(?P<x>[+-]\d+)(?P<y>[+-]\d+))?$"
@@ -230,7 +247,7 @@ UI_TEXT = {
     },
     "main_tab_physical_virtual": {
         "zh": "物理与虚拟阵列",
-        "en": "Physical & Virtual",
+        "en": "Physical && Virtual",
         "ja": "物理・仮想アレイ",
     },
     "main_tab_1d": {"zh": "1D DBF", "en": "1D DBF", "ja": "1D DBF"},
@@ -271,8 +288,12 @@ UI_TEXT = {
         "ja": "1D DBF を開く",
     },
     "chip_frequency": {"zh": "频率", "en": "Frequency", "ja": "周波数"},
-    "chip_dictionary": {"zh": "DBF字典", "en": "DBF Dictionary", "ja": "DBF辞書"},
-    "chip_pattern": {"zh": "通道幅相", "en": "Ch Amp/Phase", "ja": "チャネル振幅/位相"},
+    "chip_dictionary": {"zh": "DBF", "en": "DBF", "ja": "DBF"},
+    "chip_pattern": {"zh": "幅相", "en": "Amp / Phase", "ja": "振幅/位相"},
+    "chip_dict_ideal": {"zh": "理想", "en": "Ideal", "ja": "理想"},
+    "chip_dict_reversed": {"zh": "反向相位", "en": "Reversed", "ja": "逆位相"},
+    "chip_dict_channel": {"zh": "通道校准", "en": "Channel cal", "ja": "チャネル校正"},
+    "chip_dict_custom": {"zh": "已导入", "en": "Imported", "ja": "読込済み"},
     "chip_virtual_channels": {"zh": "虚拟通道", "en": "Virtual", "ja": "仮想"},
     "chip_az_resolution": {"zh": "方位分辨率", "en": "Az Res", "ja": "方位分解能"},
     "chip_el_resolution": {"zh": "俯仰分辨率", "en": "El Res", "ja": "仰角分解能"},
@@ -659,6 +680,32 @@ UI_TEXT = {
         "en": "DBF Dictionary",
         "ja": "DBF辞書設定",
     },
+    "dbf_dict_source_title": {"zh": "字典来源", "en": "Dictionary Source", "ja": "辞書ソース"},
+    "dbf_dict_import_title": {"zh": "导入配置", "en": "Import Setup", "ja": "読込設定"},
+    "dbf_dict_calibration_title": {"zh": "校准选项", "en": "Calibration", "ja": "校正オプション"},
+    "dbf_dict_locate_angle": {"zh": "定位角度", "en": "Locate angle", "ja": "角度を検索"},
+    "dbf_dict_fit_columns": {"zh": "自动列宽", "en": "Auto width", "ja": "自動列幅"},
+    "dbf_dict_fit_columns_tooltip": {
+        "zh": "根据表头和单元格内容重新计算预览列宽；不会修改字典数据。",
+        "en": "Resize preview columns from their headers and cell contents; dictionary data is unchanged.",
+        "ja": "見出しとセル内容に合わせてプレビュー列幅を再計算します。辞書データは変更しません。",
+    },
+    "dbf_dict_pending": {
+        "zh": "待应用：{mode}",
+        "en": "Pending: {mode}",
+        "ja": "適用待ち：{mode}",
+    },
+    "dbf_dict_cancel": {"zh": "取消", "en": "Cancel", "ja": "キャンセル"},
+    "dbf_dict_builtin_file_state": {
+        "zh": "文件状态：内置字典 · {rows}行 × {cols}列",
+        "en": "File status: built-in dictionary · {rows} rows × {cols} columns",
+        "ja": "ファイル状態：内蔵辞書 · {rows}行 × {cols}列",
+    },
+    "dbf_dict_custom_file_state": {
+        "zh": "文件状态：方位 {az} · 俯仰 {el}",
+        "en": "File status: Az {az} · El {el}",
+        "ja": "ファイル状態：方位 {az} · 仰角 {el}",
+    },
     "dbf_dictionary_mode_title": {"zh": "  字典模式  ", "en": "  Dictionary Mode  ", "ja": "  辞書モード  "},
     "dbf_dictionary_preview_title": {"zh": "  字典预览  ", "en": "  Dictionary Preview  ", "ja": "  辞書プレビュー  "},
     "dbf_dict_ideal": {"zh": "理想几何字典", "en": "Ideal geometric", "ja": "理想幾何辞書"},
@@ -678,8 +725,8 @@ UI_TEXT = {
     },
     "dbf_dict_axis": {"zh": "预览轴", "en": "Preview axis", "ja": "プレビュー軸"},
     "dbf_dict_load": {"zh": "加载CSV/XLSX", "en": "Load CSV/XLSX", "ja": "CSV/XLSX読込"},
-    "dbf_dict_load_az": {"zh": "加载方位字典", "en": "Load Az Dictionary", "ja": "方位辞書読込"},
-    "dbf_dict_load_el": {"zh": "加载俯仰字典", "en": "Load El Dictionary", "ja": "仰角辞書読込"},
+    "dbf_dict_load_az": {"zh": "加载方位字典", "en": "Load Az", "ja": "方位辞書読込"},
+    "dbf_dict_load_el": {"zh": "加载俯仰字典", "en": "Load El", "ja": "仰角辞書読込"},
     "dbf_dict_clear": {"zh": "清除导入字典", "en": "Clear imported", "ja": "読込辞書をクリア"},
     "dbf_dict_clear_az": {"zh": "清除方位", "en": "Clear Az", "ja": "方位クリア"},
     "dbf_dict_clear_el": {"zh": "清除俯仰", "en": "Clear El", "ja": "仰角クリア"},
@@ -873,6 +920,7 @@ UI_TEXT = {
     "select_element_hint": {"zh": "已清除选择。点击一个天线通道可重新选择。", "en": "Selection cleared. Click an antenna element to select.", "ja": "選択を解除しました。アンテナチャネルをクリックして再選択できます。"},
     "delete_click_element": {"zh": "删除模式：请直接点击TX/RX通道。", "en": "Delete mode: click directly on a Tx/Rx element.", "ja": "削除モード：TX/RXチャネルを直接クリックしてください。"},
     "selected_element": {"zh": "已选中{element} | x={x:g} λ | y={y:g} λ", "en": "Selected {element} | x={x:g} λ | y={y:g} λ", "ja": "{element}を選択 | x={x:g} λ | y={y:g} λ"},
+    "moving_element": {"zh": "移动{element}：x={x:g} λ, y={y:g} λ", "en": "Move {element}: x={x:g} λ, y={y:g} λ", "ja": "{element}を移動：x={x:g} λ, y={y:g} λ"},
     "snap_element": {"zh": "吸附{element}：x={x:g} λ, y={y:g} λ", "en": "Snap {element}: x={x:g} λ, y={y:g} λ", "ja": "{element}をスナップ：x={x:g} λ, y={y:g} λ"},
     "placed_element": {"zh": "{element}：x={x:g} λ, y={y:g} λ", "en": "{element}: x={x:g} λ, y={y:g} λ", "ja": "{element}：x={x:g} λ, y={y:g} λ"},
     "export_layout_title": {"zh": "导出阵面布局", "en": "Export antenna layout", "ja": "アレイ配置を書き出し"},
@@ -1030,23 +1078,25 @@ THEME = {
     # Base
     "bg": TOKENS.canvas,
     "card_bg": TOKENS.surface,
-    "metric_bg": TOKENS.surface_subtle,
+    # Metric rows belong to one continuous information surface.  Using the
+    # card colour avoids a stack of disconnected gray pills in the overview.
+    "metric_bg": TOKENS.surface,
     "panel_bg": TOKENS.canvas,
     "panel_alt_bg": TOKENS.surface_muted,
     "card_border": TOKENS.border,
     "metric_border": TOKENS.border,
-    "status_bar_bg": TOKENS.surface,
+    "status_bar_bg": TOKENS.chrome_surface,
     "toolbar_group_bg": TOKENS.surface,
     "input_bg": TOKENS.surface,
     "disabled_bg": TOKENS.disabled,
-    "app_menu_bg": TOKENS.surface,
+    "app_menu_bg": TOKENS.chrome_surface,
     "app_menu_hover": TOKENS.surface_hover,
     "app_menu_text": TOKENS.text_secondary,
     "app_menu_text_active": TOKENS.accent_pressed,
-    "header_bg": TOKENS.surface,
+    "header_bg": TOKENS.chrome_surface,
     "header_panel_bg": TOKENS.surface_subtle,
     "header_border": TOKENS.border,
-    "chip_bg": TOKENS.surface_subtle,
+    "chip_bg": TOKENS.surface_muted,
     "chip_border": TOKENS.border,
     "app_logo_bg": TOKENS.accent,
     # Accent
@@ -1054,13 +1104,16 @@ THEME = {
     "accent_hover": TOKENS.accent_hover,
     "accent_pressed": TOKENS.accent_pressed,
     "accent_light": TOKENS.accent_tint,
-    "secondary_accent": "#3a96dd",
+    "primary_fill": TOKENS.primary_fill,
+    "primary_hover": TOKENS.primary_hover,
+    "primary_pressed": TOKENS.primary_pressed,
+    "secondary_accent": "#4589ff",
     "secondary_light": TOKENS.accent_tint,
     "danger": TOKENS.danger,
-    "danger_hover": "#d13438",
-    "danger_pressed": "#a4262c",
+    "danger_hover": "#ba1b23",
+    "danger_pressed": "#750e13",
     "danger_light": TOKENS.danger_fill,
-    "danger_border": "#f3b6bd",
+    "danger_border": "#fa4d56",
     "warning": TOKENS.warning,
     "warning_light": TOKENS.warning_fill,
     "success": TOKENS.success,
@@ -1068,47 +1121,47 @@ THEME = {
     # Text
     "text_primary": TOKENS.text,
     "text_secondary": TOKENS.text_secondary,
-    "text_muted": TOKENS.text_secondary,
+    "text_muted": TOKENS.text_tertiary,
     "text_inverse": "#ffffff",
-    "text_inverse_muted": "#d7ecff",
+    "text_inverse_muted": "#d6e8ff",
     # Typography
-    "font_family": "Microsoft YaHei UI",
-    "font_family_mono": "Cascadia Mono",
+    "font_family": "Microsoft YaHei UI" if sys.platform.startswith("win") else "sans-serif",
+    "font_family_mono": "Cascadia Mono" if sys.platform.startswith("win") else "monospace",
     "font_size_sm": 9,
     "font_size_base": 10,
     "font_size_lg": 13,
     # Matplotlib
-    "plot_bg": TOKENS.surface_subtle,
-    "grid_color": "#dbe5ef",
-    "grid_major_color": "#bfd1e2",
-    "grid_minor_color": "#edf2f7",
-    "grid_alpha": 0.30,
+    "plot_bg": TOKENS.surface,
+    "grid_color": "#e0e0e0",
+    "grid_major_color": "#c6c6c6",
+    "grid_minor_color": "#f4f4f4",
+    "grid_alpha": 0.34,
     "axis_spine": TOKENS.border_strong,
-    "tx_color": "#f05261",
-    "tx_edge": "#9f1239",
-    "rx_color": "#0f6cbd",
-    "rx_edge": "#0b5cab",
-    "selection": "#0078d4",
+    "tx_color": "#fa4d56",
+    "tx_edge": "#a2191f",
+    "rx_color": TOKENS.accent,
+    "rx_edge": TOKENS.accent_pressed,
+    "selection": TOKENS.accent,
     "selection_fill": TOKENS.accent_tint,
     "hover_fill": TOKENS.surface_hover,
     "response_line": TOKENS.accent,
-    "response_secondary_line": "#64748b",
-    "sidelobe": "#f59e0b",
+    "response_secondary_line": "#6f6f6f",
+    "sidelobe": "#f1c21b",
     # MplButton
     "mpl_btn_bg": "#ffffff",
     "mpl_btn_hover": TOKENS.surface_hover,
     "mpl_btn_text": "#171717",
-    "mpl_btn_border": "#d9dde3",
+    "mpl_btn_border": TOKENS.border,
     # ttk buttons
     "button_bg": "#ffffff",
     "button_hover": TOKENS.surface_hover,
     "button_pressed": TOKENS.surface_pressed,
     "button_border": TOKENS.control_border,
-    "dialog_button_hover": "#f0f1ee",
-    "dialog_button_pressed": "#e5e7e2",
+    "dialog_button_hover": TOKENS.surface_hover,
+    "dialog_button_pressed": TOKENS.surface_pressed,
     "menu_hover": TOKENS.surface_hover,
     "focus": TOKENS.focus,
-    "focus_soft": "#78b9e6",
+    "focus_soft": "#78a9ff",
 }
 
 
@@ -1757,10 +1810,6 @@ def _style_popup_menu(menu: tk.Menu) -> None:
             relief=tk.SOLID,
             font=(THEME["font_family"], THEME["font_size_base"]),
         )
-        try:
-            menu.configure(cursor="hand2")
-        except tk.TclError:
-            pass
     except tk.TclError:
         LOGGER.debug("Menu did not accept all themed options", exc_info=True)
 
@@ -1793,26 +1842,6 @@ def _build_popup_menu(parent: tk.Widget) -> tk.Menu:
     menu = tk.Menu(parent, tearoff=False)
     _style_popup_menu(menu)
     return menu
-
-
-def _apply_interactive_cursors(widget: tk.Widget) -> None:
-    for child in widget.winfo_children():
-        if isinstance(
-            child,
-            (
-                ttk.Button,
-                ttk.Checkbutton,
-                ttk.Combobox,
-                ttk.Menubutton,
-                ttk.Radiobutton,
-                ttk.Scale,
-            ),
-        ):
-            try:
-                child.configure(cursor="hand2")
-            except tk.TclError:
-                LOGGER.debug("Interactive widget did not accept cursor option", exc_info=True)
-        _apply_interactive_cursors(child)
 
 
 def _style_canvas_widget(widget: tk.Widget) -> None:
@@ -1971,6 +2000,30 @@ def _snap_to_grid_inside(value: float, low: float, high: float) -> float:
     elif snapped > high:
         snapped = np.floor(high / GRID_STEP) * GRID_STEP
     return _clip_to_bounds(float(snapped), low, high)
+
+
+def _drag_position_with_offset(
+    pointer_x: float,
+    pointer_y: float,
+    grab_offset: tuple[float, float] | None,
+    bounds: tuple[float, float, float, float] | None,
+) -> tuple[float, float]:
+    """Return a continuous drag position while preserving the grab point.
+
+    Grid snapping is intentionally deferred until release. This keeps the
+    element glued to the pointer instead of jumping one grid cell per move.
+    """
+
+    offset_x, offset_y = grab_offset or (0.0, 0.0)
+    x = float(pointer_x) + float(offset_x)
+    y = float(pointer_y) + float(offset_y)
+    if bounds is None:
+        return x, y
+    min_x, max_x, min_y, max_y = bounds
+    return (
+        _clip_to_bounds(x, min_x, max_x),
+        _clip_to_bounds(y, min_y, max_y),
+    )
 
 
 def _drag_axis_bounds_from_limits(
@@ -2230,6 +2283,17 @@ def _dbf_dictionary_mode_label(mode: str, language: str = LANGUAGE_ZH) -> str:
     return _text_for_language(labels.get(mode, "dbf_dict_ideal"), language)
 
 
+def _dbf_dictionary_chip_label(mode: str, language: str = LANGUAGE_ZH) -> str:
+    labels = {
+        DBF_DICT_IDEAL: "chip_dict_ideal",
+        DBF_DICT_IDEAL_REVERSED: "chip_dict_reversed",
+        DBF_DICT_CHANNEL_PATTERN: "chip_dict_channel",
+        DBF_DICT_CHANNEL_PATTERN_ZERO_REF: "chip_dict_channel",
+        DBF_DICT_CUSTOM: "chip_dict_custom",
+    }
+    return _text_for_language(labels.get(mode, "chip_dict_ideal"), language)
+
+
 def _format_dbf_angle_label(angle: float, language: str = LANGUAGE_ZH) -> str:
     if abs(angle) < 0.05:
         return "0°" if language != LANGUAGE_EN else "0 deg"
@@ -2300,6 +2364,8 @@ class VirtualArrayGui:
         self.drag_bounds: tuple[float, float, float, float] | None = None
         self.drag_axis_limits: tuple[tuple[float, float], tuple[float, float]] | None = None
         self.drag_start_snapshot: LayoutSnapshot | None = None
+        self.drag_grab_offset: tuple[float, float] | None = None
+        self._physical_drag_after_id: str | None = None
         self.selected_element: EditableElement | None = None
         self.delete_mode = False
         self.undo_stack: deque[LayoutSnapshot] = deque(maxlen=MAX_HISTORY_STATES)
@@ -2418,6 +2484,7 @@ class VirtualArrayGui:
         self.header_subtitle_label: ttk.Label | None = None
         self.header_title_group: ttk.Frame | None = None
         self.header_chip_labels: dict[str, ttk.Label] = {}
+        self.header_chip_value_labels: dict[str, ttk.Label] = {}
         self.last_layout_dir = Path("outputs").resolve()
         self.last_report_dir = Path("outputs").resolve()
         self.last_report_error_limit_deg = 1.0
@@ -2463,32 +2530,50 @@ class VirtualArrayGui:
         style.configure(
             "PlotPanel.TFrame",
             background=THEME["card_bg"],
-            bordercolor=THEME["card_border"],
+            bordercolor=THEME["card_bg"],
             lightcolor="#ffffff",
-            darkcolor=THEME["card_border"],
-            relief="solid",
-            borderwidth=1,
+            darkcolor=THEME["card_bg"],
+            relief="flat",
+            borderwidth=0,
         )
+        style.configure("ChartPane.TFrame", background=THEME["card_bg"], borderwidth=0)
         style.configure("Card.TFrame", background=THEME["card_bg"])
         style.configure("Dialog.TFrame", background=THEME["bg"])
+        style.configure(
+            "DialogRail.TLabelframe",
+            background=THEME["panel_bg"],
+            foreground=THEME["text_primary"],
+            font=(_f, THEME["font_size_base"], "bold"),
+            relief="flat",
+            borderwidth=0,
+        )
+        style.configure(
+            "DialogContent.TLabelframe",
+            background=THEME["card_bg"],
+            foreground=THEME["text_primary"],
+            font=(_f, THEME["font_size_base"], "bold"),
+            relief="flat",
+            borderwidth=0,
+        )
         style.configure("Toolbar.TFrame", background=THEME["status_bar_bg"])
         style.configure("AppMenu.TFrame", background=THEME["app_menu_bg"])
         style.configure("Header.TFrame", background=THEME["header_bg"])
         style.configure("Workspace.TPanedwindow", background=THEME["bg"])
         style.configure(
             "HeaderChip.TFrame",
-            background=THEME["chip_bg"],
-            bordercolor=THEME["chip_bg"],
+            background=THEME["header_bg"],
+            bordercolor=THEME["header_bg"],
             lightcolor="#ffffff",
-            darkcolor=THEME["chip_bg"],
-            relief="solid",
-            borderwidth=1,
+            darkcolor=THEME["header_bg"],
+            relief="flat",
+            borderwidth=0,
         )
         style.configure(
             "ToolbarGroup.TFrame",
-            background=THEME["toolbar_group_bg"],
+            background=THEME["status_bar_bg"],
             borderwidth=0,
         )
+        style.configure("PreviewToolbar.TFrame", background=THEME["card_bg"], borderwidth=0)
         style.configure("ChartFooter.TFrame", background=THEME["panel_alt_bg"])
         style.configure("Status.TFrame", background=THEME["status_bar_bg"])
         style.configure("StatusInner.TFrame", background=THEME["status_bar_bg"])
@@ -2501,9 +2586,21 @@ class VirtualArrayGui:
         )
         style.configure(
             "Toolbar.TLabel",
-            background=THEME["toolbar_group_bg"],
+            background=THEME["status_bar_bg"],
             foreground=THEME["text_secondary"],
             font=(_f, THEME["font_size_sm"], "bold"),
+        )
+        style.configure(
+            "DialogSectionTitle.TLabel",
+            background="transparent",
+            foreground=THEME["text_primary"],
+            font=(_f, THEME["font_size_base"], "bold"),
+        )
+        style.configure(
+            "DialogSummary.TLabel",
+            background="transparent",
+            foreground=THEME["text_secondary"],
+            font=(_f, THEME["font_size_sm"]),
         )
         style.configure(
             "Status.TLabel",
@@ -2515,7 +2612,7 @@ class VirtualArrayGui:
             "HeaderTitle.TLabel",
             background=THEME["header_bg"],
             foreground=THEME["text_primary"],
-            font=(_f, 14, "bold"),
+            font=(_f, 13, "bold"),
         )
         style.configure(
             "HeaderSubtitle.TLabel",
@@ -2525,19 +2622,19 @@ class VirtualArrayGui:
         )
         style.configure(
             "HeaderChipName.TLabel",
-            background=THEME["chip_bg"],
+            background=THEME["header_bg"],
             foreground=THEME["text_secondary"],
             font=(_f, THEME["font_size_sm"], "bold"),
         )
         style.configure(
             "HeaderChipValue.TLabel",
-            background=THEME["chip_bg"],
+            background=THEME["header_bg"],
             foreground=THEME["accent"],
             font=(_fm, THEME["font_size_sm"], "bold"),
         )
         style.configure(
             "HeaderChipPatternValue.TLabel",
-            background=THEME["chip_bg"],
+            background=THEME["header_bg"],
             foreground=THEME["accent"],
             font=(_f, THEME["font_size_sm"], "bold"),
         )
@@ -2567,7 +2664,7 @@ class VirtualArrayGui:
         )
         style.configure(
             "Muted.TLabel",
-            background=THEME["toolbar_group_bg"],
+            background="transparent",
             foreground=THEME["text_muted"],
             font=(_f, THEME["font_size_sm"]),
         )
@@ -2613,8 +2710,8 @@ class VirtualArrayGui:
             bordercolor=THEME["metric_bg"],
             lightcolor="#ffffff",
             darkcolor=THEME["metric_bg"],
-            relief="solid",
-            borderwidth=1,
+            relief="flat",
+            borderwidth=0,
         )
         style.configure(
             "MetricName.TLabel",
@@ -2660,7 +2757,7 @@ class VirtualArrayGui:
         )
 
         button_base = {
-            "padding": (12, 7),
+            "padding": (10, 5),
             "relief": "flat",
             "borderwidth": 1,
             "focuscolor": THEME["focus"],
@@ -2699,23 +2796,23 @@ class VirtualArrayGui:
             "Accent.TButton",
             **button_base,
             font=(_f, THEME["font_size_base"], "bold"),
-            background=THEME["accent"],
+            background=THEME["primary_fill"],
             foreground=THEME["text_inverse"],
-            bordercolor=THEME["accent"],
-            lightcolor=THEME["accent"],
-            darkcolor=THEME["accent_pressed"],
+            bordercolor=THEME["primary_fill"],
+            lightcolor=THEME["primary_fill"],
+            darkcolor=THEME["primary_pressed"],
         )
         style.map(
             "Accent.TButton",
             background=[
                 ("disabled", "#9ca3af"),
-                ("pressed", THEME["accent_pressed"]),
-                ("active", THEME["accent_hover"]),
+                ("pressed", THEME["primary_pressed"]),
+                ("active", THEME["primary_hover"]),
             ],
             foreground=[("disabled", "#f8fafc"), ("active", THEME["text_inverse"])],
-            bordercolor=[("focus", THEME["focus"]), ("active", THEME["accent_hover"])],
-            lightcolor=[("pressed", THEME["accent_pressed"]), ("active", THEME["accent_hover"])],
-            darkcolor=[("pressed", THEME["accent_pressed"]), ("active", THEME["accent_hover"])],
+            bordercolor=[("focus", THEME["focus"]), ("active", THEME["primary_hover"])],
+            lightcolor=[("pressed", THEME["primary_pressed"]), ("active", THEME["primary_hover"])],
+            darkcolor=[("pressed", THEME["primary_pressed"]), ("active", THEME["primary_hover"])],
         )
         large_button_map = {
             "background": [
@@ -2754,7 +2851,7 @@ class VirtualArrayGui:
         style.map("Large.TButton", **large_button_map)
         compact_button_base = {
             **button_base,
-            "padding": (8, 4),
+            "padding": (8, 3),
         }
         style.configure(
             "Compact.TButton",
@@ -2898,29 +2995,29 @@ class VirtualArrayGui:
         )
         style.configure(
             "ToolbarPrimary.TButton",
-            **{**compact_button_base, "padding": (14, 5)},
+            **{**compact_button_base, "padding": (14, 4)},
             font=(_f, THEME["font_size_sm"], "bold"),
-            background=THEME["accent"],
+            background=THEME["primary_fill"],
             foreground=THEME["text_inverse"],
-            bordercolor=THEME["accent"],
-            lightcolor=THEME["accent"],
-            darkcolor=THEME["accent_pressed"],
+            bordercolor=THEME["primary_fill"],
+            lightcolor=THEME["primary_fill"],
+            darkcolor=THEME["primary_pressed"],
         )
         style.map(
             "ToolbarPrimary.TButton",
             background=[
                 ("disabled", "#9ca3af"),
-                ("pressed", THEME["accent_pressed"]),
-                ("active", THEME["accent_hover"]),
+                ("pressed", THEME["primary_pressed"]),
+                ("active", THEME["primary_hover"]),
             ],
             foreground=[("disabled", "#f8fafc"), ("active", THEME["text_inverse"])],
             bordercolor=[
                 ("disabled", THEME["button_border"]),
                 ("focus", THEME["focus"]),
-                ("active", THEME["accent_hover"]),
+                ("active", THEME["primary_hover"]),
             ],
-            lightcolor=[("pressed", THEME["accent_pressed"]), ("active", THEME["accent_hover"])],
-            darkcolor=[("pressed", THEME["accent_pressed"]), ("active", THEME["accent_hover"])],
+            lightcolor=[("pressed", THEME["primary_pressed"]), ("active", THEME["primary_hover"])],
+            darkcolor=[("pressed", THEME["primary_pressed"]), ("active", THEME["primary_hover"])],
         )
         style.configure(
             "CompactDanger.TButton",
@@ -3170,7 +3267,9 @@ class VirtualArrayGui:
         for selector_style in ("TRadiobutton", "TCheckbutton"):
             style.configure(
                 selector_style,
-                background=THEME["card_bg"],
+                # Leave the base background unset so Qt paints the native
+                # indicator while the control inherits its parent surface.
+                background=None,
                 foreground=THEME["text_primary"],
                 font=(_f, THEME["font_size_base"]),
                 focuscolor=THEME["focus_soft"],
@@ -3204,6 +3303,10 @@ class VirtualArrayGui:
                 ],
             )
         style.configure(
+            "Toolbar.TRadiobutton",
+            background=THEME["status_bar_bg"],
+        )
+        style.configure(
             "Horizontal.TScale",
             background=THEME["panel_alt_bg"],
             troughcolor="#e2e6ec",
@@ -3224,7 +3327,7 @@ class VirtualArrayGui:
             background=THEME["card_bg"],
             fieldbackground=THEME["card_bg"],
             foreground=THEME["text_primary"],
-            rowheight=27,
+            rowheight=32,
             bordercolor=THEME["card_border"],
             borderwidth=0,
             font=(_f, THEME["font_size_base"]),
@@ -3257,7 +3360,7 @@ class VirtualArrayGui:
             "Workspace.TNotebook",
             background=THEME["panel_bg"],
             borderwidth=0,
-            tabmargins=(0, 0, 0, 6),
+            tabmargins=(0, 0, 0, 8),
         )
         style.configure(
             "Workspace.TNotebook.Tab",
@@ -3272,16 +3375,16 @@ class VirtualArrayGui:
         style.map(
             "Workspace.TNotebook.Tab",
             background=[
-                ("selected", THEME["accent_light"]),
+                ("selected", THEME["card_bg"]),
                 ("active", THEME["button_hover"]),
             ],
             foreground=[
-                ("selected", THEME["accent_pressed"]),
+                ("selected", THEME["text_primary"]),
                 ("active", THEME["text_primary"]),
             ],
             bordercolor=[
-                ("selected", THEME["focus_soft"]),
-                ("active", THEME["focus_soft"]),
+                ("selected", THEME["card_border"]),
+                ("active", THEME["card_border"]),
             ],
         )
         style.configure(
@@ -3297,16 +3400,16 @@ class VirtualArrayGui:
         style.map(
             "Eval.TNotebook.Tab",
             background=[
-                ("selected", THEME["accent_light"]),
+                ("selected", THEME["card_bg"]),
                 ("active", THEME["button_hover"]),
             ],
             foreground=[
-                ("selected", THEME["accent_pressed"]),
+                ("selected", THEME["text_primary"]),
                 ("active", THEME["text_primary"]),
             ],
             bordercolor=[
-                ("selected", THEME["focus_soft"]),
-                ("active", THEME["focus_soft"]),
+                ("selected", THEME["card_border"]),
+                ("active", THEME["card_border"]),
             ],
         )
         style.configure(
@@ -3333,21 +3436,21 @@ class VirtualArrayGui:
             "WorkspaceTabSelected.TButton",
             padding=(18, 8),
             relief="flat",
-            borderwidth=0,
+            borderwidth=1,
             font=(_f, THEME["font_size_base"], "bold"),
-            background=THEME["accent_light"],
-            foreground=THEME["accent_pressed"],
-            bordercolor=THEME["accent_light"],
-            lightcolor=THEME["accent_light"],
-            darkcolor=THEME["accent_light"],
+            background=THEME["card_bg"],
+            foreground=THEME["text_primary"],
+            bordercolor=THEME["card_border"],
+            lightcolor=THEME["card_bg"],
+            darkcolor=THEME["card_border"],
         )
         style.map(
             "WorkspaceTabSelected.TButton",
             background=[
-                ("pressed", THEME["accent_light"]),
-                ("active", THEME["accent_light"]),
+                ("pressed", THEME["button_pressed"]),
+                ("active", THEME["card_bg"]),
             ],
-            foreground=[("active", THEME["accent_pressed"])],
+            foreground=[("active", THEME["text_primary"])],
         )
 
         self._build_app_menu(root)
@@ -3368,14 +3471,14 @@ class VirtualArrayGui:
         workspace_pane.grid(row=0, column=0, sticky="nsew")
         self.workspace_splitter = workspace_pane._qt
         self.workspace_splitter.setChildrenCollapsible(False)
-        self.workspace_splitter.setHandleWidth(10)
+        self.workspace_splitter.setHandleWidth(8)
 
         workspace_content = ttk.Frame(workspace_pane, style="Panel.TFrame")
         workspace_content.grid_rowconfigure(0, weight=1)
         workspace_content.grid_columnconfigure(0, weight=1)
 
         self.main_notebook = ttk.Notebook(workspace_content, style="Workspace.TNotebook")
-        self.main_notebook.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        self.main_notebook.grid(row=0, column=0, sticky="nsew")
         self.main_notebook.bind("<<NotebookTabChanged>>", self._on_main_tab_changed, add="+")
         self.main_notebook._qt.tabBar().setAccessibleName(
             self._t("accessibility_workspace_pages")
@@ -3384,35 +3487,37 @@ class VirtualArrayGui:
         overview_panel = ttk.Frame(
             workspace_pane,
             style="Panel.TFrame",
-            padding=(0, 2, 0, 2),
-            width=320,
+            padding=(0, 0, 0, 0),
+            width=304,
         )
         overview_panel.grid_rowconfigure(0, weight=1)
         overview_panel.grid_columnconfigure(0, weight=1)
-        overview_panel._qt.setMinimumWidth(292)
-        overview_panel._qt.setMaximumWidth(380)
-        workspace_content._qt.setMinimumWidth(720)
+        overview_panel._qt.setMinimumWidth(288)
+        overview_panel._qt.setMaximumWidth(360)
+        workspace_content._qt.setMinimumWidth(696)
         workspace_pane.add(workspace_content, weight=4)
         workspace_pane.add(overview_panel, weight=1)
         self._build_evaluation_panel(overview_panel)
         self.root.after_idle(self._restore_workspace_splitter)
 
         # ── Tab 1: Physical Array + Virtual Array (1:1) ──────────
-        tab1 = ttk.Frame(self.main_notebook, style="Panel.TFrame")
+        tab1 = ttk.Frame(self.main_notebook, style="Card.TFrame")
         self.main_notebook.add(tab1, text=self._t("main_tab_physical_virtual"))
         tab1.grid_columnconfigure(0, weight=1)
-        tab1.grid_columnconfigure(1, weight=1)
+        tab1.grid_columnconfigure(1, weight=0, minsize=1)
+        tab1.grid_columnconfigure(2, weight=1)
         tab1.grid_rowconfigure(0, weight=1)
 
-        phys_frame = ttk.Frame(tab1, style="PlotPanel.TFrame", padding=(8, 6, 2, 6))
+        phys_frame = ttk.Frame(tab1, style="ChartPane.TFrame", padding=(12, 8, 12, 8))
         phys_frame.grid(row=0, column=0, sticky="nsew")
         phys_frame.grid_rowconfigure(0, weight=0)
         phys_frame.grid_rowconfigure(1, weight=1)
         phys_frame.grid_columnconfigure(0, weight=1)
         self._build_physical_toolbar(phys_frame)
 
-        virt_frame = ttk.Frame(tab1, style="PlotPanel.TFrame", padding=(2, 6, 8, 6))
-        virt_frame.grid(row=0, column=1, sticky="nsew")
+        ttk.Separator(tab1, orient=tk.VERTICAL).grid(row=0, column=1, sticky="ns")
+        virt_frame = ttk.Frame(tab1, style="ChartPane.TFrame", padding=(12, 8, 12, 8))
+        virt_frame.grid(row=0, column=2, sticky="nsew")
         virt_frame.grid_rowconfigure(0, weight=1)
         virt_frame.grid_columnconfigure(0, weight=1)
 
@@ -3461,24 +3566,24 @@ class VirtualArrayGui:
         # ── Row 2: Controls ───────────────────────────────────────
         controls_outer = ttk.Frame(root, style="Status.TFrame")
         controls_outer.grid(row=3, column=0, columnspan=3, sticky="ew")
-        controls = ttk.Frame(controls_outer, style="Status.TFrame", padding=(12, 7, 12, 7))
+        controls = ttk.Frame(controls_outer, style="Status.TFrame", padding=(16, 6, 16, 6))
         controls.pack(fill=tk.X)
 
-        controls.grid_rowconfigure(0, minsize=38)
+        controls.grid_rowconfigure(0, minsize=32)
         controls.grid_columnconfigure(4, weight=1)
 
         def toolbar_group(
             column: int,
             *,
             sticky: str = "nsew",
-            padx: tuple[int, int] = (0, 4),
+            padx: tuple[int, int] = (0, 12),
         ) -> ttk.Frame:
             group = ttk.Frame(
                 controls,
                 style="ToolbarGroup.TFrame",
                 padding=(TOOLBAR_GROUP_PAD_X, TOOLBAR_GROUP_PAD_Y),
             )
-            group.grid(row=0, column=column, sticky=sticky, padx=padx, pady=(0, 4))
+            group.grid(row=0, column=column, sticky=sticky, padx=padx)
             return group
 
         freq_group = toolbar_group(0)
@@ -3573,6 +3678,7 @@ class VirtualArrayGui:
             variable=self.dbf_display_mode,
             value=DBF_DISPLAY_DB,
             command=self.on_dbf_display_mode_changed,
+            style="Toolbar.TRadiobutton",
         )
         self.dbf_display_db_radio.pack(side=tk.LEFT, padx=(0, 4))
         self.dbf_display_mag_radio = ttk.Radiobutton(
@@ -3581,6 +3687,7 @@ class VirtualArrayGui:
             variable=self.dbf_display_mode,
             value=DBF_DISPLAY_MAGNITUDE,
             command=self.on_dbf_display_mode_changed,
+            style="Toolbar.TRadiobutton",
         )
         self.dbf_display_mag_radio.pack(side=tk.LEFT)
 
@@ -3589,6 +3696,9 @@ class VirtualArrayGui:
         self.phys_canvas.mpl_connect("button_press_event", self.on_press)
         self.phys_canvas.mpl_connect("motion_notify_event", self.on_motion)
         self.phys_canvas.mpl_connect("button_release_event", self.on_release)
+        self.phys_canvas.mpl_connect(
+            "pointer_cancel_event", self.on_physical_pointer_cancel
+        )
         # Virtual array: hover only
         self.virt_canvas.mpl_connect("motion_notify_event", self.on_motion)
         # Az/El response: hover only
@@ -3610,6 +3720,12 @@ class VirtualArrayGui:
                 ),
             )
             chart.canvas.mpl_connect(
+                "pointer_cancel_event",
+                lambda _event, chart_mode=mode: self.on_dbf_true_line_cancel(
+                    chart_mode
+                ),
+            )
+            chart.canvas.mpl_connect(
                 "figure_leave_event",
                 lambda _event, response_chart=chart: self._on_response_figure_leave(
                     response_chart
@@ -3619,6 +3735,9 @@ class VirtualArrayGui:
             self.dbf2d_canvas.mpl_connect("button_press_event", self.on_dbf2d_crosshair_press)
             self.dbf2d_canvas.mpl_connect("motion_notify_event", self.on_dbf2d_crosshair_motion)
             self.dbf2d_canvas.mpl_connect("button_release_event", self.on_dbf2d_crosshair_release)
+            self.dbf2d_canvas.mpl_connect(
+                "pointer_cancel_event", self.on_dbf2d_pointer_cancel
+            )
             self.dbf2d_canvas.mpl_connect("figure_leave_event", self.on_dbf2d_figure_leave)
 
         self.root.bind("<Left>", self.on_arrow_key)
@@ -3628,7 +3747,6 @@ class VirtualArrayGui:
         self.root.bind("<Delete>", self.on_delete_key)
         self._bind_keyboard_shortcuts()
 
-        _apply_interactive_cursors(self.root)
         self._refresh_language_texts()
         self.generate_virtual_array()
         self._resize_filter = _DebouncedResizeFilter(
@@ -3901,14 +4019,17 @@ class VirtualArrayGui:
         dialog = QtWidgets.QDialog(self.root._window)
         dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
         dialog.setObjectName("userManualDialog")
+        mark_workbench_role(dialog, "dialog-shell")
         dialog.setWindowTitle(self._t("manual_title"))
         layout = QtWidgets.QVBoxLayout(dialog)
         layout.setContentsMargins(18, 16, 18, 14)
         layout.setSpacing(12)
 
         header = QtWidgets.QWidget(dialog)
+        header.setObjectName("manualHeader")
+        mark_workbench_role(header, "dialog-header")
         header_layout = QtWidgets.QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setContentsMargins(12, 8, 12, 8)
         header_layout.setSpacing(12)
         title = QtWidgets.QLabel(self._t("manual_title"), header)
         title_font = title.font()
@@ -3965,10 +4086,13 @@ class VirtualArrayGui:
         content_splitter.setHandleWidth(6)
 
         contents_group = QtWidgets.QGroupBox(self._t("manual_contents"), content_splitter)
+        contents_group.setObjectName("manualContentsPanel")
+        mark_workbench_role(contents_group, "dialog-rail")
         contents_layout = QtWidgets.QVBoxLayout(contents_group)
         contents_layout.setContentsMargins(8, 10, 8, 8)
         chapter_list = QtWidgets.QListWidget(contents_group)
         chapter_list.setObjectName("manualChapterList")
+        chapter_list.setProperty("pointingHandItems", True)
         chapter_list.setAccessibleName(self._t("manual_contents_accessible"))
         chapter_list.setUniformItemSizes(True)
         chapter_list.setHorizontalScrollBarPolicy(
@@ -3984,6 +4108,7 @@ class VirtualArrayGui:
 
         browser = QtWidgets.QTextBrowser(dialog)
         browser.setObjectName("manualBrowser")
+        mark_workbench_role(browser, "dialog-content")
         browser.setOpenExternalLinks(False)
         browser.setAccessibleName(self._t("manual_body_accessible"))
         content_splitter.addWidget(browser)
@@ -4121,11 +4246,13 @@ class VirtualArrayGui:
         close_button.setText(self._t("done"))
         close_button.setAutoDefault(False)
         close_button.setDefault(False)
+        mark_primary(close_button)
+        mark_workbench_role(buttons, "dialog-footer")
         layout.addWidget(buttons)
         fit_dialog_to_parent(
             dialog,
             self.root._window,
-            preferred_size=(1000, 680),
+            preferred_size=(1120, 720),
             minimum_size=(760, 520),
         )
         self._manual_dialog = dialog
@@ -4201,7 +4328,7 @@ class VirtualArrayGui:
             )
 
     def _build_workspace_header(self, parent: tk.Widget) -> None:
-        header = ttk.Frame(parent, style="Header.TFrame", padding=(18, 8, 18, 8))
+        header = ttk.Frame(parent, style="Header.TFrame", padding=(16, 9, 16, 9))
         header.grid(row=1, column=0, columnspan=3, sticky="ew")
         header.grid_columnconfigure(0, weight=0)
         header.grid_columnconfigure(1, weight=0)
@@ -4214,12 +4341,12 @@ class VirtualArrayGui:
             style="HeaderLogo.TLabel",
         )
         logo_label.grid(row=0, column=0, sticky="w", padx=(0, 10))
-        logo_label._qt.setFixedSize(42, 42)
+        logo_label._qt.setFixedSize(38, 38)
         logo_label._qt.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         logo_label._qt.setAccessibleName("MAV")
         if self.app_logo_image is not None and not self.app_logo_image.pixmap.isNull():
             pixel_ratio = max(1.0, logo_label._qt.devicePixelRatioF())
-            physical_size = max(36, round(36 * pixel_ratio))
+            physical_size = max(32, round(32 * pixel_ratio))
             logo_pixmap = self.app_logo_image.pixmap.scaled(
                 physical_size,
                 physical_size,
@@ -4231,7 +4358,7 @@ class VirtualArrayGui:
 
         title_group = ttk.Frame(header, style="Header.TFrame")
         self.header_title_group = title_group
-        title_group.grid(row=0, column=1, sticky="w", padx=(0, 20))
+        title_group.grid(row=0, column=1, sticky="w", padx=(0, 18))
         title_group.grid_columnconfigure(0, weight=1)
         self._update_header_title_group_width()
         self.header_title_label = ttk.Label(
@@ -4257,19 +4384,23 @@ class VirtualArrayGui:
         self._set_header_subtitle_text()
 
         chip_row = ttk.Frame(header, style="Header.TFrame")
-        chip_row.grid(row=0, column=2, sticky="ew")
+        chip_row._qt.setObjectName("workspaceHeaderChipRow")
+        chip_row.grid(row=0, column=2, sticky="e")
         chip_specs = (
-            ("chip_frequency", self.header_frequency_text, 94),
-            ("chip_dictionary", self.header_dictionary_text, 146),
-            ("chip_pattern", self.header_pattern_text, 184),
+            ("chip_frequency", self.header_frequency_text, 90, 96),
+            ("chip_dictionary", self.header_dictionary_text, 128, None),
+            ("chip_pattern", self.header_pattern_text, 170, None),
         )
-        for column, (label_key, value_var, min_width) in enumerate(chip_specs):
+        for column, (label_key, value_var, min_width, value_width) in enumerate(
+            chip_specs
+        ):
             self._build_header_chip(
                 chip_row,
                 column,
                 label_key,
                 value_var,
                 min_width=min_width,
+                value_width=value_width,
                 compact=True,
             )
 
@@ -4281,23 +4412,26 @@ class VirtualArrayGui:
         value_var: tk.StringVar,
         *,
         min_width: int = 160,
+        value_width: int | None = None,
         compact: bool = False,
     ) -> None:
         parent.grid_columnconfigure(column, minsize=min_width)
         chip = ttk.Frame(
             parent,
             style="HeaderChip.TFrame",
-            padding=(9, 4) if compact else (10, 6),
+            padding=(8, 4) if compact else (10, 6),
         )
+        chip._qt.setObjectName(f"headerChip_{label_key}")
         chip.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 6, 0))
-        chip.grid_columnconfigure(0, weight=1)
+        chip.grid_columnconfigure(1, weight=1)
         label = ttk.Label(
             chip,
             text=self._t(label_key),
             style="HeaderChipName.TLabel",
             anchor="w",
         )
-        label.grid(row=0, column=0, sticky="ew")
+        label._qt.setObjectName(f"headerChipName_{label_key}")
+        label.grid(row=0, column=0, sticky="w")
         value_style = (
             "HeaderChipPatternValue.TLabel"
             if label_key == "chip_pattern"
@@ -4309,13 +4443,20 @@ class VirtualArrayGui:
             style=value_style,
             anchor="w",
         )
-        value_label.grid(row=1, column=0, sticky="ew", pady=(2, 0))
+        value_label._qt.setObjectName(f"headerChipValue_{label_key}")
+        value_label.grid(row=0, column=1, sticky="ew", padx=(7, 0))
         value_label._qt.setWordWrap(False)
+        if value_width is not None:
+            value_label._qt.setFixedWidth(value_width)
 
         def sync_tooltip(value: object) -> None:
             full_text = str(value)
             value_label._qt.setToolTip(full_text)
-            available = max(72, min_width - 22)
+            if value_width is None:
+                label_width = label._qt.sizeHint().width()
+                available = max(44, min_width - label_width - 31)
+            else:
+                available = value_width
             value_label._qt.setText(
                 value_label._qt.fontMetrics().elidedText(
                     full_text,
@@ -4326,6 +4467,7 @@ class VirtualArrayGui:
 
         value_var._connect(sync_tooltip)
         self.header_chip_labels[label_key] = label
+        self.header_chip_value_labels[label_key] = value_label
 
     def _restore_workspace_splitter(self) -> None:
         splitter = self.workspace_splitter
@@ -4336,7 +4478,7 @@ class VirtualArrayGui:
             splitter.setSizes(sizes)
             return
         total = max(splitter.width(), WINDOW_WIDTH - 32)
-        splitter.setSizes([max(720, total - 312), 312])
+        splitter.setSizes([max(720, total - 304), 304])
 
     def _refresh_workspace_header(self) -> None:
         self._update_header_title_group_width()
@@ -4351,9 +4493,30 @@ class VirtualArrayGui:
             f"{_format_frequency_ghz(self.current_frequency_ghz())} GHz"
         )
         self.header_dictionary_text.set(
-            _dbf_dictionary_mode_label(self.dbf_dictionary.mode, self.language)
+            _dbf_dictionary_chip_label(self.dbf_dictionary.mode, self.language)
         )
-        self.header_pattern_text.set(self.pattern_status.get())
+        physical_names = self._physical_channel_names()
+        virtual_names = self._virtual_channel_names()
+        amplitude = self._t(
+            self._channel_pattern_state_key(
+                physical_names,
+                virtual_names,
+                PATTERN_KIND_AMPLITUDE,
+            )
+        )
+        phase = self._t(
+            self._channel_pattern_state_key(
+                physical_names,
+                virtual_names,
+                PATTERN_KIND_PHASE,
+            )
+        )
+        if self.language == LANGUAGE_EN:
+            amplitude = amplitude.title()
+            phase = phase.title()
+        self.header_pattern_text.set(
+            amplitude if amplitude == phase else f"{amplitude} / {phase}"
+        )
 
     def _header_title_width(self) -> int:
         return {
@@ -5122,14 +5285,55 @@ class VirtualArrayGui:
     def _clear_interaction_state(self) -> None:
         self.delete_mode = False
         self.selected_element = None
-        self.dragging = None
-        self.drag_bounds = None
-        self.drag_axis_limits = None
-        self.drag_start_snapshot = None
+        self._reset_physical_drag_state()
         self._sync_auto_count_inputs()
         self._update_delete_button_state()
         if hasattr(self, "phys_canvas"):
             self._set_physical_cursor("")
+
+    def _release_physical_pointer(self) -> None:
+        release_pointer = getattr(
+            getattr(self, "phys_canvas", None), "release_pointer", None
+        )
+        if callable(release_pointer):
+            release_pointer()
+
+    def _reset_physical_drag_state(self) -> None:
+        """Clear every physical-drag resource, including capture and timers."""
+
+        self._cancel_physical_drag_redraw()
+        self.dragging = None
+        self.drag_bounds = None
+        self.drag_axis_limits = None
+        self.drag_start_snapshot = None
+        self.drag_grab_offset = None
+        self._release_physical_pointer()
+
+    def _schedule_physical_drag_redraw(self) -> None:
+        """Coalesce high-frequency pointer moves to roughly one frame."""
+
+        if self._physical_drag_after_id is not None:
+            return
+        self._physical_drag_after_id = self.root.after(
+            16, self._flush_physical_drag_redraw
+        )
+
+    def _flush_physical_drag_redraw(self) -> None:
+        self._physical_drag_after_id = None
+        if self.dragging is None:
+            return
+        self._draw_physical_array()
+        self.phys_canvas.draw_idle()
+
+    def _cancel_physical_drag_redraw(self) -> None:
+        after_id = getattr(self, "_physical_drag_after_id", None)
+        if after_id is None:
+            return
+        self._physical_drag_after_id = None
+        try:
+            self.root.after_cancel(after_id)
+        except (RuntimeError, tk.TclError):
+            pass
 
     def _layout_snapshot_for(
         self,
@@ -5176,10 +5380,20 @@ class VirtualArrayGui:
                 if key == snapshot.selected_key:
                     self.selected_element = element
                     break
-        self.dragging = None
-        self.drag_bounds = None
-        self.drag_axis_limits = None
-        self.drag_start_snapshot = None
+        self._reset_physical_drag_state()
+
+    def _cancel_physical_drag(self) -> bool:
+        """Restore the press-time layout and release all drag resources."""
+
+        snapshot = self.drag_start_snapshot
+        had_drag = self.dragging is not None or snapshot is not None
+        if snapshot is not None:
+            self._restore_layout_snapshot(snapshot)
+        else:
+            self._reset_physical_drag_state()
+        if had_drag:
+            self.generate_virtual_array()
+        return had_drag
 
     def undo_layout_change(self, event=None) -> str | None:  # noqa: ANN001
         if event is not None and _event_widget_is_text_input(event):
@@ -5266,10 +5480,7 @@ class VirtualArrayGui:
         self.selected_element = element
         self._renumber_elements()
         self.delete_mode = False
-        self.dragging = None
-        self.drag_bounds = None
-        self.drag_axis_limits = None
-        self.drag_start_snapshot = None
+        self._reset_physical_drag_state()
         self._sync_auto_count_inputs()
         self._update_delete_button_state()
         self.generate_virtual_array()
@@ -5297,10 +5508,7 @@ class VirtualArrayGui:
 
     def toggle_delete_mode(self, _event=None) -> None:  # noqa: ANN001
         self.delete_mode = not self.delete_mode
-        self.dragging = None
-        self.drag_bounds = None
-        self.drag_axis_limits = None
-        self.drag_start_snapshot = None
+        self._reset_physical_drag_state()
         if self.delete_mode:
             self.status.set(self._t("delete_mode_on"))
         else:
@@ -5364,10 +5572,7 @@ class VirtualArrayGui:
         self._push_undo_snapshot()
         self.elements = [candidate for candidate in self.elements if candidate is not element]
         self.selected_element = None
-        self.dragging = None
-        self.drag_bounds = None
-        self.drag_axis_limits = None
-        self.drag_start_snapshot = None
+        self._reset_physical_drag_state()
         self._renumber_elements()
         self._sync_auto_count_inputs()
         self.generate_virtual_array()
@@ -5438,23 +5643,33 @@ class VirtualArrayGui:
         return "break"
 
     def on_escape_key(self, _event=None) -> str:  # noqa: ANN001
+        dbf_mode = getattr(self, "dbf_drag_mode", None)
+        if dbf_mode is not None:
+            chart = self._chart_for_dbf_mode(dbf_mode)
+            chart.canvas.release_pointer()
+            self.on_dbf_true_line_cancel(dbf_mode)
+            self.status.set(self._t("drag_cancel"))
+            return "break"
+
+        if getattr(self, "dbf2d_dragging", False):
+            if self.dbf2d_canvas is not None:
+                self.dbf2d_canvas.release_pointer()
+            self.on_dbf2d_pointer_cancel()
+            self.status.set(self._t("drag_cancel"))
+            return "break"
+
         if self.delete_mode:
             self.delete_mode = False
+            self._reset_physical_drag_state()
             self.status.set(self._t("delete_mode_off"))
             self._update_delete_button_state()
             self._set_physical_cursor("")
             return "break"
 
-        if self.dragging is not None and self.drag_start_snapshot is not None:
-            self._restore_layout_snapshot(self.drag_start_snapshot)
-            self.generate_virtual_array()
+        if self._cancel_physical_drag():
             self.status.set(self._t("drag_cancel"))
             return "break"
 
-        self.dragging = None
-        self.drag_bounds = None
-        self.drag_axis_limits = None
-        self.drag_start_snapshot = None
         if self.selected_element is None:
             self.status.set(self._t("no_selection"))
             return "break"
@@ -5463,6 +5678,10 @@ class VirtualArrayGui:
         self.phys_canvas.draw_idle()
         self.status.set(self._t("selection_cleared"))
         return "break"
+
+    def on_physical_pointer_cancel(self, _event=None) -> None:  # noqa: ANN001
+        if self._cancel_physical_drag():
+            self.status.set(self._t("drag_cancel"))
 
     def _event_dbf_angle(self, event, chart: ResponseChart) -> float | None:  # noqa: ANN001
         if event.xdata is not None:
@@ -5568,6 +5787,7 @@ class VirtualArrayGui:
         if angle is None:
             return
         self.dbf_drag_mode = mode
+        chart.canvas.grab_pointer(chart.ax)
         self._set_chart_cursor(chart, "hand2")
         self._hide_response_hover(chart)
         self._set_dbf_scan_angle(mode, angle)
@@ -5588,7 +5808,14 @@ class VirtualArrayGui:
         self._drag_dbf_true_line(event)
         self.dbf_drag_mode = None
         chart = self._chart_for_dbf_mode(mode)
+        chart.canvas.release_pointer()
         self._update_response_cursor(event, chart)
+
+    def on_dbf_true_line_cancel(self, mode: str) -> None:
+        if self.dbf_drag_mode != mode:
+            return
+        self.dbf_drag_mode = None
+        self._set_chart_cursor(self._chart_for_dbf_mode(mode), "")
 
     def toggle_az_dbf_animation(self, _event=None) -> None:  # noqa: ANN001
         self.toggle_dbf_scan_animation("azimuth")
@@ -6118,6 +6345,8 @@ class VirtualArrayGui:
         if angles is None:
             return
         self.dbf2d_dragging = True
+        if self.dbf2d_canvas is not None:
+            self.dbf2d_canvas.grab_pointer(self.dbf2d_ax)
         self._set_dbf2d_cursor("hand2")
         self._hide_dbf2d_hover()
         self._set_dbf2d_angles(*angles)
@@ -6140,7 +6369,15 @@ class VirtualArrayGui:
         if angles is not None:
             self._set_dbf2d_angles(*angles)
         self.dbf2d_dragging = False
+        if self.dbf2d_canvas is not None:
+            self.dbf2d_canvas.release_pointer()
         self._update_dbf2d_cursor(event)
+
+    def on_dbf2d_pointer_cancel(self, _event=None) -> None:  # noqa: ANN001
+        if not self.dbf2d_dragging:
+            return
+        self.dbf2d_dragging = False
+        self._set_dbf2d_cursor("")
 
     def on_dbf2d_figure_leave(self, _event) -> None:  # noqa: ANN001
         if not self.dbf2d_dragging:
@@ -6423,18 +6660,19 @@ class VirtualArrayGui:
         dialog = tk.Toplevel(self.root)
         _style_toplevel(dialog)
         dialog._qt.setObjectName("dbfDictionaryDialog")
+        mark_workbench_role(dialog._qt, "dialog-shell")
         dialog.title(self._t("dbf_dictionary_title"))
         dialog.transient(self.root)
         fit_dialog_to_parent(
             dialog._qt,
             self.root._window,
-            preferred_size=(1120, 680),
-            minimum_size=(760, 520),
+            preferred_size=(1240, 720),
+            minimum_size=(820, 540),
         )
 
-        root_frame = ttk.Frame(dialog, style="Dialog.TFrame", padding=12)
+        root_frame = ttk.Frame(dialog, style="Dialog.TFrame", padding=16)
         root_frame.pack(fill=tk.BOTH, expand=True)
-        mode_column_width = 360 if self.language == LANGUAGE_EN else 330
+        mode_column_width = 320 if self.language == LANGUAGE_EN else 304
         root_frame.grid_columnconfigure(0, weight=0, minsize=mode_column_width)
         root_frame.grid_columnconfigure(1, weight=1)
         root_frame.grid_rowconfigure(0, weight=1)
@@ -6456,163 +6694,312 @@ class VirtualArrayGui:
         az_file_var = tk.StringVar()
         el_file_var = tk.StringVar()
 
-        mode_frame = ttk.LabelFrame(
+        mode_frame = ttk.Frame(
             root_frame,
-            text=self._t("dbf_dictionary_mode_title"),
-            padding=(8, 6),
+            style="Panel.TFrame",
+            padding=(8, 8),
         )
-        mode_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        mode_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
+        mode_frame._qt.setObjectName("dbfModePanel")
+        mode_frame.configure(style="Panel.TFrame")
+        mark_workbench_role(mode_frame._qt, "dialog-rail")
         for column in range(2):
             mode_frame.grid_columnconfigure(
                 column, weight=1, uniform="dbf_dictionary_buttons"
             )
-        mode_row = 0
+        ttk.Label(
+            mode_frame,
+            text=self._t("dbf_dict_source_title"),
+            style="DialogSectionTitle.TLabel",
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        mode_row = 1
         for mode in (
             DBF_DICT_IDEAL,
             DBF_DICT_IDEAL_REVERSED,
             DBF_DICT_CHANNEL_PATTERN,
             DBF_DICT_CUSTOM,
         ):
-            ttk.Radiobutton(
+            mode_button = ttk.Radiobutton(
                 mode_frame,
                 text=_dbf_dictionary_mode_label(mode, self.language),
                 variable=mode_var,
                 value=mode,
-                command=lambda: redraw_preview(),
-            ).grid(row=mode_row, column=0, sticky="w", pady=(0, 5))
+                command=lambda: sync_dialog_state(),
+            )
+            mode_button.grid(
+                row=mode_row,
+                column=0,
+                columnspan=2,
+                sticky="w",
+                pady=(0, 7),
+            )
+            mode_button._qt.setObjectName(f"dbfMode_{mode}")
             mode_row += 1
 
-        ttk.Separator(mode_frame).grid(row=mode_row, column=0, sticky="ew", pady=6)
-        mode_row += 1
-        ttk.Label(
-            mode_frame,
-            text=self._t("dbf_dict_axis"),
-            style="Muted.TLabel",
-        ).grid(row=mode_row, column=0, sticky="w")
-        mode_row += 1
-        ttk.Radiobutton(
-            mode_frame,
-            text=self._t("az_short"),
-            variable=axis_var,
-            value="azimuth",
-            command=lambda: redraw_preview(),
-        ).grid(row=mode_row, column=0, sticky="w", pady=(4, 0))
-        mode_row += 1
-        ttk.Radiobutton(
-            mode_frame,
-            text=self._t("el_short"),
-            variable=axis_var,
-            value="elevation",
-            command=lambda: redraw_preview(),
-        ).grid(row=mode_row, column=0, sticky="w", pady=(2, 0))
-        mode_row += 1
+        custom_import_scroll = QtWidgets.QScrollArea(mode_frame._qt)
+        custom_import_scroll.setObjectName("dbfCustomImportScroll")
+        custom_import_scroll.setWidgetResizable(True)
+        custom_import_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        custom_import_scroll.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        custom_import_scroll.setVerticalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        custom_import_scroll.viewport().setAutoFillBackground(True)
+        scroll_palette = custom_import_scroll.viewport().palette()
+        scroll_palette.setColor(
+            QtGui.QPalette.ColorRole.Window,
+            QtGui.QColor(THEME["panel_bg"]),
+        )
+        custom_import_scroll.viewport().setPalette(scroll_palette)
+        mode_frame._ensure_grid_layout().addWidget(
+            custom_import_scroll,
+            mode_row,
+            0,
+            1,
+            2,
+        )
+        mode_frame.grid_rowconfigure(mode_row, weight=1)
 
-        ttk.Separator(mode_frame).grid(row=mode_row, column=0, columnspan=2, sticky="ew", pady=8)
-        mode_row += 1
+        custom_import_frame = ttk.Frame(mode_frame, style="Panel.TFrame")
+        custom_import_frame._qt.setObjectName("dbfCustomImportPanel")
+        custom_import_frame.configure(style="Panel.TFrame")
+        mark_workbench_role(custom_import_frame._qt, "dialog-rail")
+        custom_import_scroll.setWidget(custom_import_frame._qt)
+        custom_import_frame.grid_columnconfigure(0, weight=1)
+        custom_import_frame.grid_columnconfigure(1, weight=1)
+        custom_row = 0
+
         ttk.Label(
-            mode_frame,
+            custom_import_frame,
+            text=self._t("dbf_dict_import_title"),
+            style="DialogSectionTitle.TLabel",
+        ).grid(row=custom_row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        custom_row += 1
+        ttk.Label(
+            custom_import_frame,
             text=self._t("summary_target_label"),
             style="Muted.TLabel",
-        ).grid(row=mode_row, column=0, columnspan=2, sticky="w")
-        mode_row += 1
+        ).grid(row=custom_row, column=0, columnspan=2, sticky="w")
+        custom_row += 1
         ttk.Radiobutton(
-            mode_frame,
+            custom_import_frame,
             text=self._t("summary_target_physical"),
             variable=dictionary_target_var,
             value=CHANNEL_PATTERN_TARGET_PHYSICAL,
-        ).grid(row=mode_row, column=0, sticky="w", pady=(4, 0))
+        ).grid(row=custom_row, column=0, sticky="w", pady=(4, 0))
         ttk.Radiobutton(
-            mode_frame,
+            custom_import_frame,
             text=self._t("summary_target_virtual"),
             variable=dictionary_target_var,
             value=CHANNEL_PATTERN_TARGET_VIRTUAL,
-        ).grid(row=mode_row, column=1, sticky="w", pady=(4, 0))
-        mode_row += 1
+        ).grid(row=custom_row, column=1, sticky="w", pady=(4, 0))
+        custom_row += 1
 
-        ttk.Separator(mode_frame).grid(row=mode_row, column=0, columnspan=2, sticky="ew", pady=8)
-        mode_row += 1
+        ttk.Separator(custom_import_frame).grid(
+            row=custom_row, column=0, columnspan=2, sticky="ew", pady=8
+        )
+        custom_row += 1
         az_file_label = ttk.Label(
-            mode_frame,
+            custom_import_frame,
             textvariable=az_file_var,
             style="Muted.TLabel",
         )
         az_file_label.grid(
-            row=mode_row, column=0, columnspan=2, sticky="ew", pady=(0, 3)
+            row=custom_row, column=0, columnspan=2, sticky="ew", pady=(0, 3)
         )
-        mode_row += 1
-        ttk.Button(
-            mode_frame,
+        custom_row += 1
+        az_load_button = ttk.Button(
+            custom_import_frame,
             text=self._t("dbf_dict_load_az"),
             command=lambda: load_custom_dictionary("azimuth"),
             style="DialogButton.TButton",
-        ).grid(row=mode_row, column=0, sticky="ew", pady=(0, 4))
-        ttk.Button(
-            mode_frame,
+        )
+        az_load_button._qt.setObjectName("dbfLoadAzButton")
+        az_load_button.grid(row=custom_row, column=0, sticky="ew", pady=(0, 4))
+        az_clear_button = ttk.Button(
+            custom_import_frame,
             text=self._t("dbf_dict_clear_az"),
             command=lambda: clear_custom_dictionary("azimuth"),
             style="DialogButton.TButton",
-        ).grid(row=mode_row, column=1, sticky="ew", padx=(6, 0), pady=(0, 4))
-        mode_row += 1
+        )
+        az_clear_button._qt.setObjectName("dbfClearAzButton")
+        az_clear_button.grid(
+            row=custom_row, column=1, sticky="ew", padx=(6, 0), pady=(0, 4)
+        )
+        custom_row += 1
         el_file_label = ttk.Label(
-            mode_frame,
+            custom_import_frame,
             textvariable=el_file_var,
             style="Muted.TLabel",
         )
         el_file_label.grid(
-            row=mode_row, column=0, columnspan=2, sticky="ew", pady=(3, 3)
+            row=custom_row, column=0, columnspan=2, sticky="ew", pady=(3, 3)
         )
-        mode_row += 1
-        ttk.Button(
-            mode_frame,
+        custom_row += 1
+        el_load_button = ttk.Button(
+            custom_import_frame,
             text=self._t("dbf_dict_load_el"),
             command=lambda: load_custom_dictionary("elevation"),
             style="DialogButton.TButton",
-        ).grid(row=mode_row, column=0, sticky="ew")
-        ttk.Button(
-            mode_frame,
+        )
+        el_load_button._qt.setObjectName("dbfLoadElButton")
+        el_load_button.grid(row=custom_row, column=0, sticky="ew")
+        el_clear_button = ttk.Button(
+            custom_import_frame,
             text=self._t("dbf_dict_clear_el"),
             command=lambda: clear_custom_dictionary("elevation"),
             style="DialogButton.TButton",
-        ).grid(row=mode_row, column=1, sticky="ew", padx=(6, 0))
-        mode_row += 1
+        )
+        el_clear_button._qt.setObjectName("dbfClearElButton")
+        el_clear_button.grid(row=custom_row, column=1, sticky="ew", padx=(6, 0))
+        custom_row += 1
 
-        ttk.Separator(mode_frame).grid(row=mode_row, column=0, columnspan=2, sticky="ew", pady=8)
-        mode_row += 1
+        calibration_separator = ttk.Separator(custom_import_frame)
+        calibration_separator._qt.setObjectName("dbfCalibrationSeparator")
+        calibration_separator.grid(
+            row=custom_row, column=0, columnspan=2, sticky="ew", pady=8
+        )
+        custom_row += 1
         ttk.Label(
-            mode_frame,
-            text=self._t("dbf_dict_custom_options"),
-            style="Muted.TLabel",
-        ).grid(row=mode_row, column=0, columnspan=2, sticky="w")
-        mode_row += 1
-        ttk.Checkbutton(
-            mode_frame,
+            custom_import_frame,
+            text=self._t("dbf_dict_calibration_title"),
+            style="DialogSectionTitle.TLabel",
+        ).grid(row=custom_row, column=0, columnspan=2, sticky="w")
+        custom_row += 1
+        phase_reverse_toggle = ttk.Checkbutton(
+            custom_import_frame,
             text=self._t("dbf_dict_phase_reverse"),
             variable=phase_reverse_var,
             command=lambda: redraw_preview(),
-        ).grid(row=mode_row, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        mode_row += 1
-        ttk.Checkbutton(
-            mode_frame,
+        )
+        phase_reverse_toggle._qt.setObjectName("dbfPhaseReverseToggle")
+        phase_reverse_toggle.grid(
+            row=custom_row, column=0, columnspan=2, sticky="w", pady=(4, 0)
+        )
+        custom_row += 1
+        zero_calibrate_toggle = ttk.Checkbutton(
+            custom_import_frame,
             text=self._t("dbf_dict_zero_calibrate"),
             variable=zero_calibrate_var,
             command=lambda: redraw_preview(),
-        ).grid(row=mode_row, column=0, columnspan=2, sticky="w", pady=(2, 0))
-
-        preview_frame = ttk.LabelFrame(
-            root_frame,
-            text=self._t("dbf_dictionary_preview_title"),
-            padding=(8, 6),
         )
+        zero_calibrate_toggle._qt.setObjectName("dbfZeroCalibrateToggle")
+        zero_calibrate_toggle.grid(
+            row=custom_row, column=0, columnspan=2, sticky="w", pady=(2, 0)
+        )
+
+        preview_frame = ttk.Frame(
+            root_frame,
+            style="Card.TFrame",
+        )
+        preview_frame._qt.setObjectName("dbfPreviewPanel")
+        preview_frame.configure(style="Card.TFrame")
+        mark_workbench_role(preview_frame._qt, "dialog-content")
         preview_frame.grid(row=0, column=1, sticky="nsew")
-        preview_frame.grid_rowconfigure(0, weight=1)
+        preview_frame.grid_rowconfigure(2, weight=1)
         preview_frame.grid_columnconfigure(0, weight=1)
 
+        preview_header = ttk.Frame(
+            preview_frame, style="Card.TFrame", padding=(12, 8, 12, 6)
+        )
+        preview_header._qt.setObjectName("dbfPreviewHeader")
+        preview_header.configure(style="Card.TFrame")
+        mark_workbench_role(preview_header._qt, "dialog-header")
+        preview_header.grid(row=0, column=0, sticky="ew")
+        preview_header.grid_columnconfigure(1, weight=1)
+        ttk.Label(
+            preview_header,
+            text=self._t("dbf_dictionary_preview_title").strip(),
+            style="DialogSectionTitle.TLabel",
+        ).grid(row=0, column=0, sticky="w")
+
+        preview_status = ttk.Label(
+            preview_header,
+            text="",
+            style="DialogSummary.TLabel",
+            anchor="e",
+        )
+        preview_status.grid(row=0, column=1, sticky="ew", padx=(12, 0))
+        preview_status._qt.setMinimumWidth(0)
+        preview_status._qt.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored,
+            QtWidgets.QSizePolicy.Policy.Preferred,
+        )
+
+        preview_toolbar = ttk.Frame(
+            preview_frame, style="PreviewToolbar.TFrame", padding=(12, 4, 12, 8)
+        )
+        preview_toolbar.grid(row=1, column=0, sticky="ew")
+        preview_toolbar._qt.setObjectName("dbfPreviewToolbar")
+
+        az_axis_button = ttk.Button(
+            preview_toolbar,
+            text=self._t("az_short"),
+            command=lambda: select_preview_axis("azimuth"),
+            style="DialogButton.TButton",
+            width=8,
+        )
+        az_axis_button.pack(side=tk.LEFT)
+        az_axis_button._qt.setObjectName("dbfPreviewAzButton")
+        az_axis_button._qt.setCheckable(True)
+        az_axis_button._qt.setFixedWidth(92)
+        el_axis_button = ttk.Button(
+            preview_toolbar,
+            text=self._t("el_short"),
+            command=lambda: select_preview_axis("elevation"),
+            style="DialogButton.TButton",
+            width=8,
+        )
+        el_axis_button.pack(side=tk.LEFT, padx=(0, 12))
+        el_axis_button._qt.setObjectName("dbfPreviewElButton")
+        el_axis_button._qt.setCheckable(True)
+        el_axis_button._qt.setFixedWidth(92)
+        axis_button_group = QtWidgets.QButtonGroup(dialog._qt)
+        axis_button_group.setExclusive(True)
+        axis_button_group.addButton(az_axis_button._qt)
+        axis_button_group.addButton(el_axis_button._qt)
+
+        angle_locator_var = tk.StringVar()
+        angle_locator = ttk.Entry(
+            preview_toolbar,
+            textvariable=angle_locator_var,
+            width=16,
+            justify="right",
+        )
+        angle_locator.pack(side=tk.LEFT)
+        angle_locator._qt.setPlaceholderText(self._t("dbf_dict_locate_angle"))
+        angle_locator._qt.setAccessibleName(self._t("dbf_dict_locate_angle"))
+        angle_locator._qt.setMinimumWidth(180)
+        angle_locator._qt.setMaximumWidth(260)
+        angle_locator.bind("<Return>", lambda _event=None: locate_preview_angle())
+        fit_columns_button = ttk.Button(
+            preview_toolbar,
+            text=self._t("dbf_dict_fit_columns"),
+            command=lambda: fit_preview_columns(),
+            style="DialogButton.TButton",
+        )
+        fit_columns_button.pack(side=tk.RIGHT)
+        fit_columns_button._qt.setObjectName("dbfFitColumnsButton")
+        fit_columns_button._qt.setToolTip(self._t("dbf_dict_fit_columns_tooltip"))
+        fit_columns_button._qt.setAccessibleName(self._t("dbf_dict_fit_columns"))
+        fit_columns_button._qt.setAccessibleDescription(
+            self._t("dbf_dict_fit_columns_tooltip")
+        )
+        fit_columns_button._qt.setFixedWidth(112)
+
         matrix_area = ttk.Frame(preview_frame, style="Card.TFrame")
-        matrix_area.grid(row=0, column=0, sticky="nsew")
+        matrix_area.grid(row=2, column=0, sticky="nsew")
         matrix_area.grid_rowconfigure(0, weight=1)
         matrix_area.grid_columnconfigure(0, weight=1)
-        matrix_tree = ttk.Treeview(matrix_area, show="headings", height=18)
+        matrix_tree = ttk.Treeview(matrix_area, show="headings", height=10)
         matrix_tree.grid(row=0, column=0, sticky="nsew")
+        matrix_tree._qt.setObjectName("dbfPreviewTable")
+        matrix_tree._qt.setSortingEnabled(False)
+        matrix_tree._qt.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.NoSelection
+        )
         matrix_y_scroll = ttk.Scrollbar(
             matrix_area, orient=tk.VERTICAL, command=matrix_tree.yview
         )
@@ -6626,25 +7013,12 @@ class VirtualArrayGui:
             xscrollcommand=matrix_x_scroll.set,
         )
 
-        preview_status = ttk.Label(
-            preview_frame,
-            text="",
-            style="Card.TLabel",
-            font=(THEME["font_family_mono"], THEME["font_size_sm"]),
-        )
-        preview_status.grid(row=1, column=0, sticky="ew", pady=(6, 0))
-        preview_status._qt.setMinimumWidth(0)
-        preview_status._qt.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Ignored,
-            QtWidgets.QSizePolicy.Policy.Preferred,
-        )
-
         def set_preview_status_text(text: str) -> None:
             label = preview_status._qt
             label.setToolTip(text)
             available_width = max(
                 240,
-                dialog._qt.width() - mode_column_width - 72,
+                dialog._qt.width() - mode_column_width - 110,
             )
             label.setText(
                 label.fontMetrics().elidedText(
@@ -6654,19 +7028,81 @@ class VirtualArrayGui:
                 )
             )
 
+        file_state_label = ttk.Label(
+            preview_frame,
+            text="",
+            style="DialogSummary.TLabel",
+            anchor="w",
+        )
+        file_state_label.grid(row=3, column=0, sticky="ew", padx=12, pady=(6, 0))
+        file_state_label._qt.setObjectName("dbfFileState")
+
         quality_status = ttk.Label(
             preview_frame,
             text="",
             style="Card.TLabel",
-            wraplength=680,
+            wraplength=720,
         )
-        quality_status.grid(row=2, column=0, sticky="ew", pady=(4, 0))
+        quality_status.grid(row=4, column=0, sticky="ew", padx=12, pady=(6, 10))
+        quality_status._qt.setObjectName("dbfQualityCallout")
         quality_status._qt.setWordWrap(True)
-        quality_status._qt.setMinimumHeight(54)
+        quality_status._qt.setMinimumHeight(48)
 
-        button_row = ttk.Frame(root_frame, style="Dialog.TFrame")
+        button_row = ttk.Frame(root_frame, style="Card.TFrame")
         button_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        button_row._qt.setObjectName("dbfDictionaryActionBar")
+        mark_workbench_role(button_row._qt, "dialog-footer")
         button_row.grid_columnconfigure(0, weight=1)
+
+        pending_label = ttk.Label(
+            button_row,
+            text="",
+            style="DialogSummary.TLabel",
+            anchor="w",
+        )
+        pending_label.grid(row=0, column=0, sticky="ew")
+
+        def select_preview_axis(axis: str) -> None:
+            axis_var.set(axis)
+            az_axis_button._qt.setChecked(axis == "azimuth")
+            el_axis_button._qt.setChecked(axis == "elevation")
+            redraw_preview()
+
+        def fit_preview_columns() -> None:
+            table = matrix_tree._qt
+            header = table.horizontalHeader()
+            for section in range(table.model().columnCount()):
+                header.setSectionResizeMode(
+                    section, QtWidgets.QHeaderView.ResizeMode.Interactive
+                )
+            table.resizeColumnsToContents()
+            if table.model().columnCount() > 0:
+                table.setColumnWidth(0, max(68, min(86, table.columnWidth(0))))
+            for section in range(1, table.model().columnCount()):
+                table.setColumnWidth(section, max(64, min(96, table.columnWidth(section))))
+
+        def locate_preview_angle() -> None:
+            text = angle_locator_var.get().strip().replace("\N{DEGREE SIGN}", "")
+            if not text:
+                return
+            try:
+                requested = float(text)
+            except ValueError:
+                angle_locator._qt.selectAll()
+                return
+            row_count = matrix_tree._qt.model().rowCount()
+            if row_count <= 0:
+                return
+            bounded = min(max(requested, DBF_SCAN_FOV[0]), DBF_SCAN_FOV[1])
+            span = DBF_SCAN_FOV[1] - DBF_SCAN_FOV[0]
+            row = round((bounded - DBF_SCAN_FOV[0]) / span * (row_count - 1))
+            index = matrix_tree._qt.model().index(row, 0)
+            matrix_tree._qt.selectRow(row)
+            matrix_tree._qt.scrollTo(
+                index,
+                QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter,
+            )
+            angle_locator_var.set(f"{bounded:+.0f}\N{DEGREE SIGN}")
 
         def refresh_file_labels() -> None:
             def table_label(table: DbfDictionaryTable | None) -> str:
@@ -6704,6 +7140,24 @@ class VirtualArrayGui:
                         285,
                     )
                 )
+            az_clear_button._qt.setEnabled(custom_holder["azimuth"] is not None)
+            el_clear_button._qt.setEnabled(custom_holder["elevation"] is not None)
+
+            if mode_var.get() == DBF_DICT_CUSTOM:
+                file_state_text = self._t(
+                    "dbf_dict_custom_file_state",
+                    az=az_file,
+                    el=el_file,
+                )
+            else:
+                file_state_text = self._t(
+                    "dbf_dict_builtin_file_state",
+                    rows=DBF_SCAN_GRID_SIZE,
+                    cols=max(1, len(self.current_array().virtual_points())),
+                )
+            file_state_label.configure(text=file_state_text)
+            file_state_label._qt.setToolTip(file_state_text)
+            file_state_label._qt.setContentsMargins(12, 0, 12, 0)
 
         def current_config(require_complete: bool = False) -> DbfDictionaryConfig:
             mode = mode_var.get()
@@ -6722,11 +7176,10 @@ class VirtualArrayGui:
             )
 
         def show_matrix_message(message: str) -> None:
-            matrix_tree.delete(*matrix_tree.get_children())
             matrix_tree.configure(columns=("message",), displaycolumns=("message",))
             matrix_tree.heading("message", text=self._t("dbf_dictionary_preview_title").strip())
             matrix_tree.column("message", width=520, anchor="center", stretch=True)
-            matrix_tree.insert("", tk.END, values=(message,))
+            matrix_tree.set_rows([(message,)])
             set_preview_status_text(message)
             quality_status.configure(
                 text=self._t("dbf_dict_quality_unavailable"),
@@ -6791,7 +7244,6 @@ class VirtualArrayGui:
                 columns = ("angle",) + tuple(
                     f"CH{index + 1}" for index in range(phase.shape[1])
                 )
-                matrix_tree.delete(*matrix_tree.get_children())
                 matrix_tree.configure(columns=columns, displaycolumns=columns)
                 matrix_tree.heading("angle", text="Angle")
                 matrix_tree.column("angle", width=74, anchor="e", stretch=False)
@@ -6811,23 +7263,30 @@ class VirtualArrayGui:
                             else QtWidgets.QHeaderView.ResizeMode.Interactive
                         ),
                     )
-                for angle, row_values in zip(angles, phase):
-                    matrix_tree.insert(
-                        "",
-                        tk.END,
-                        values=(f"{angle:+.0f}", *[f"{value:+.1f}" for value in row_values]),
-                    )
+                matrix_tree.set_rows(
+                    [
+                        (
+                            f"{angle:+.0f}",
+                            *[f"{value:+.1f}" for value in row_values],
+                        )
+                        for angle, row_values in zip(angles, phase)
+                    ]
+                )
                 axis_label = _dbf_short_label(axis_var.get(), self.language)
-                title = f"{self._t('dbf_dict_preview_phase')} - {axis_label}"
                 set_preview_status_text(
-                    f"{title} | "
-                    + self._t(
-                        "dbf_dict_preview_status",
-                        mode=_dbf_dictionary_mode_label(config.mode, self.language),
+                    f"{axis_label} \N{MIDDLE DOT} "
+                    f"{_dbf_dictionary_mode_label(config.mode, self.language)} "
+                    f"\N{MIDDLE DOT} {matrix.shape[0]} "
+                    f"\N{MULTIPLICATION SIGN} {matrix.shape[1]}"
+                )
+                if config.mode != DBF_DICT_CUSTOM:
+                    file_state_text = self._t(
+                        "dbf_dict_builtin_file_state",
                         rows=matrix.shape[0],
                         cols=matrix.shape[1],
                     )
-                )
+                    file_state_label.configure(text=file_state_text)
+                    file_state_label._qt.setToolTip(file_state_text)
             except Exception as exc:
                 show_matrix_message(str(exc))
 
@@ -6867,7 +7326,6 @@ class VirtualArrayGui:
             custom_holder[axis] = table
             mode_var.set(DBF_DICT_CUSTOM)
             axis_var.set(axis)
-            refresh_file_labels()
             self.status.set(
                 self._t(
                     "dbf_dict_custom_loaded",
@@ -6875,18 +7333,11 @@ class VirtualArrayGui:
                     file=Path(filename).name,
                 )
             )
-            redraw_preview()
+            sync_dialog_state()
 
         def clear_custom_dictionary(axis: str) -> None:
             custom_holder[axis] = None
-            if (
-                mode_var.get() == DBF_DICT_CUSTOM
-                and custom_holder["azimuth"] is None
-                and custom_holder["elevation"] is None
-            ):
-                mode_var.set(DBF_DICT_IDEAL)
-            refresh_file_labels()
-            redraw_preview()
+            sync_dialog_state()
 
         def apply_dictionary() -> None:
             try:
@@ -6906,7 +7357,7 @@ class VirtualArrayGui:
 
         button_box = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Apply
-            | QtWidgets.QDialogButtonBox.StandardButton.Close,
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
             parent=button_row._qt,
         )
         button_row._qt.layout().addWidget(
@@ -6920,53 +7371,90 @@ class VirtualArrayGui:
         apply_button = button_box.button(
             QtWidgets.QDialogButtonBox.StandardButton.Apply
         )
-        close_button = button_box.button(
-            QtWidgets.QDialogButtonBox.StandardButton.Close
+        cancel_button = button_box.button(
+            QtWidgets.QDialogButtonBox.StandardButton.Cancel
         )
         apply_button.setText(self._t("dbf_dict_apply"))
-        close_button.setText(self._t("done"))
+        cancel_button.setText(self._t("dbf_dict_cancel"))
         apply_button.clicked.connect(apply_dictionary)
-        close_button.clicked.connect(dialog.destroy)
+        cancel_button.clicked.connect(dialog.destroy)
         mark_primary(apply_button)
         apply_button.setIcon(QtGui.QIcon())
+        apply_button.setDefault(True)
+        apply_button.setAutoDefault(True)
+        apply_button.setAccessibleName(self._t("dbf_dict_apply"))
+        cancel_button.setAccessibleName(self._t("dbf_dict_cancel"))
 
-        refresh_file_labels()
-        redraw_preview()
-        _apply_interactive_cursors(dialog)
+        def sync_dialog_state() -> None:
+            is_custom = mode_var.get() == DBF_DICT_CUSTOM
+            custom_import_scroll.setVisible(is_custom)
+            az_axis_button._qt.setChecked(axis_var.get() == "azimuth")
+            el_axis_button._qt.setChecked(axis_var.get() == "elevation")
+            apply_button.setEnabled(
+                not is_custom
+                or custom_holder["azimuth"] is not None
+                or custom_holder["elevation"] is not None
+            )
+            pending_label.configure(
+                text=self._t(
+                    "dbf_dict_pending",
+                    mode=_dbf_dictionary_mode_label(mode_var.get(), self.language),
+                )
+            )
+            refresh_file_labels()
+            redraw_preview()
+
+        custom_layout = custom_import_frame._qt.layout()
+        if custom_layout is not None:
+            custom_layout.activate()
+        custom_import_frame._qt.setMinimumHeight(
+            custom_import_frame._qt.minimumSizeHint().height()
+        )
+        sync_dialog_state()
+        dialog_layout = dialog._qt.layout()
+        if dialog_layout is not None:
+            dialog_layout.activate()
         fit_dialog_to_parent(
             dialog._qt,
             self.root._window,
-            preferred_size=(1120, 680),
-            minimum_size=(760, 520),
+            preferred_size=(1240, max(720, dialog._qt.sizeHint().height())),
+            minimum_size=(820, 540),
         )
 
     def open_channel_patterns_dialog(self) -> None:
         dialog = tk.Toplevel(self.root)
         _style_toplevel(dialog)
         dialog._qt.setObjectName("channelPatternsDialog")
+        mark_workbench_role(dialog._qt, "dialog-shell")
         dialog.title(self._t("channel_dialog_title"))
         dialog.transient(self.root)
         fit_dialog_to_parent(
             dialog._qt,
             self.root._window,
-            preferred_size=(1060, 520),
-            minimum_size=(760, 460),
+            preferred_size=(1180, 650),
+            minimum_size=(820, 520),
         )
         compact_channel_actions = dialog._qt.width() < 920
 
-        root_frame = ttk.Frame(dialog, style="Dialog.TFrame", padding=12)
+        root_frame = ttk.Frame(dialog, style="Dialog.TFrame", padding=16)
         root_frame.pack(fill=tk.BOTH, expand=True)
-        root_frame.grid_columnconfigure(0, weight=1)
-        root_frame.grid_rowconfigure(1, weight=1)
+        rail_width = 320 if self.language == LANGUAGE_EN else 304
+        root_frame.grid_columnconfigure(0, weight=0, minsize=rail_width)
+        root_frame.grid_columnconfigure(1, weight=1)
+        root_frame.grid_rowconfigure(0, weight=1)
 
         summary_frame = ttk.LabelFrame(
             root_frame,
             text=self._t("summary_csv_title"),
             padding=(8, 6),
+            style="DialogRail.TLabelframe",
         )
-        summary_frame.grid(row=0, column=0, sticky="ew")
-        summary_column_count = 2 if compact_channel_actions else 5
-        for column in range(summary_column_count):
+        summary_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
+        summary_frame._qt.setObjectName("channelPatternSourcePanel")
+        summary_frame.configure(style="DialogRail.TLabelframe")
+        mark_workbench_role(summary_frame._qt, "dialog-rail")
+        summary_frame._qt.setMaximumWidth(rail_width)
+        for column in range(2):
             summary_frame.grid_columnconfigure(column, weight=1, uniform="summary_buttons")
         summary_target_var = tk.StringVar(value=CHANNEL_PATTERN_TARGET_PHYSICAL)
         summary_target_label = ttk.Label(
@@ -6988,26 +7476,15 @@ class VirtualArrayGui:
             value=CHANNEL_PATTERN_TARGET_VIRTUAL,
             command=lambda: refresh_tree(),
         )
-        if compact_channel_actions:
-            summary_target_label.grid(
-                row=0, column=0, columnspan=2, sticky="w", pady=(0, 4)
-            )
-            physical_target_button.grid(
-                row=1, column=0, sticky="w", padx=(0, 8), pady=(0, 6)
-            )
-            virtual_target_button.grid(
-                row=1, column=1, sticky="w", pady=(0, 6)
-            )
-        else:
-            summary_target_label.grid(
-                row=0, column=0, sticky="w", padx=(0, 8), pady=(0, 6)
-            )
-            physical_target_button.grid(
-                row=0, column=1, sticky="w", padx=(0, 8), pady=(0, 6)
-            )
-            virtual_target_button.grid(
-                row=0, column=2, sticky="w", padx=(0, 8), pady=(0, 6)
-            )
+        summary_target_label.grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 4)
+        )
+        physical_target_button.grid(
+            row=1, column=0, sticky="w", padx=(0, 8), pady=(0, 6)
+        )
+        virtual_target_button.grid(
+            row=1, column=1, sticky="w", pady=(0, 6)
+        )
 
         summary_specs = (
             (_pattern_slot_label(PATTERN_KIND_AMPLITUDE, PATTERN_PLANE_HORIZONTAL, self.language), PATTERN_KIND_AMPLITUDE, PATTERN_PLANE_HORIZONTAL),
@@ -7016,8 +7493,8 @@ class VirtualArrayGui:
             (_pattern_slot_label(PATTERN_KIND_PHASE, PATTERN_PLANE_ELEVATION, self.language), PATTERN_KIND_PHASE, PATTERN_PLANE_ELEVATION),
         )
         for index, (label, kind, plane) in enumerate(summary_specs):
-            action_row = 2 + index // 2 if compact_channel_actions else 1
-            action_column = index % 2 if compact_channel_actions else index
+            action_row = 2 + index // 2
+            action_column = index % 2
             ttk.Button(
                 summary_frame,
                 text=self._t("load_summary", label=label),
@@ -7030,7 +7507,7 @@ class VirtualArrayGui:
                 column=action_column,
                 sticky="ew",
                 padx=(0 if action_column == 0 else 6, 0),
-                pady=(0, 5) if compact_channel_actions else 0,
+                pady=(0, 5),
             )
 
         clear_all_button = ttk.Button(
@@ -7039,24 +7516,26 @@ class VirtualArrayGui:
             command=lambda: clear_all_patterns(),
             style="CompactDanger.TButton",
         )
-        if compact_channel_actions:
-            clear_all_button.grid(
-                row=4, column=0, columnspan=2, sticky="ew", pady=(0, 1)
-            )
-        else:
-            clear_all_button.grid(row=1, column=4, sticky="ew", padx=(6, 0))
+        clear_all_button.grid(
+            row=4, column=0, columnspan=2, sticky="ew", pady=(0, 1)
+        )
 
         table_frame = ttk.LabelFrame(
             root_frame,
             text=self._t("physical_channels_title"),
             padding=(8, 6),
+            style="DialogContent.TLabelframe",
         )
-        table_frame.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+        table_frame.grid(row=0, column=1, sticky="nsew")
+        table_frame._qt.setObjectName("channelPatternTablePanel")
+        table_frame.configure(style="DialogContent.TLabelframe")
+        mark_workbench_role(table_frame._qt, "dialog-content")
         table_frame.grid_rowconfigure(0, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
 
         columns = ("channel", "amp_h", "amp_e", "phase_h", "phase_e")
         tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=8)
+        tree._qt.setProperty("pointingHandItems", True)
         tree.tag_configure("odd", background=THEME["panel_alt_bg"])
         tree.tag_configure("even", background=THEME["card_bg"])
         headings = {
@@ -7087,7 +7566,10 @@ class VirtualArrayGui:
         tree.configure(yscrollcommand=scrollbar.set)
 
         button_row = ttk.Frame(root_frame, style="Dialog.TFrame")
-        button_row.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        button_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        button_row._qt.setObjectName("channelPatternActionBar")
+        button_row.configure(style="Dialog.TFrame")
+        mark_workbench_role(button_row._qt, "dialog-footer")
         bottom_column_count = 2 if compact_channel_actions else 6
         for column in range(bottom_column_count):
             button_row.grid_columnconfigure(column, weight=1, uniform="channel_buttons")
@@ -7127,6 +7609,7 @@ class VirtualArrayGui:
         )
         close_button.setText(self._t("done"))
         close_button.clicked.connect(dialog.destroy)
+        mark_primary(close_button)
         if compact_channel_actions:
             button_row._qt.layout().addWidget(close_box, 2, 1)
         else:
@@ -7182,12 +7665,11 @@ class VirtualArrayGui:
             first = tree.get_children()[0]
             tree.selection_set(first)
             tree.focus(first)
-        _apply_interactive_cursors(dialog)
         fit_dialog_to_parent(
             dialog._qt,
             self.root._window,
-            preferred_size=(1060, 520),
-            minimum_size=(760 if compact_channel_actions else 920, 460),
+            preferred_size=(1180, 650),
+            minimum_size=(820 if compact_channel_actions else 920, 520),
         )
 
     def _physical_channel_names(self) -> list[str]:
@@ -7440,6 +7922,7 @@ class VirtualArrayGui:
         dialog = tk.Toplevel(self.root)
         _style_toplevel(dialog)
         dialog._qt.setObjectName("elementPatternConfirmationDialog")
+        mark_workbench_role(dialog._qt, "dialog-shell")
         dialog.title(self._t("element_pattern_confirm_title"))
         dialog.transient(self.root)
         dialog.grab_set()
@@ -7605,6 +8088,8 @@ class VirtualArrayGui:
             redraw_preview()
 
         button_row = ttk.Frame(dialog)
+        button_row._qt.setObjectName("elementPatternActionBar")
+        mark_workbench_role(button_row._qt, "dialog-footer")
         button_row.pack(fill=tk.X, padx=10, pady=(0, 10))
         button_layout = QtWidgets.QHBoxLayout(button_row._qt)
         button_layout.setContentsMargins(0, 0, 0, 0)
@@ -7667,11 +8152,15 @@ class VirtualArrayGui:
             elevation_available=elevation_available,
             initial_error_limit_deg=self.last_report_error_limit_deg,
         )
+        dialog.ensurePolished()
+        if dialog.layout() is not None:
+            dialog.layout().activate()
         fit_dialog_to_parent(
             dialog,
             self.root._window,
-            preferred_size=(780, 700),
-            minimum_size=(650, 520),
+            preferred_size=(920, 600),
+            minimum_size=(820, 540),
+            margin=12,
         )
         dialog.export_requested.connect(
             lambda export_kind, current=dialog: (
@@ -7819,11 +8308,23 @@ class VirtualArrayGui:
         progress.setMinimumDuration(0)
         progress.setAutoClose(False)
         progress.setAutoReset(False)
-        progress.setMinimumWidth(440)
+        mark_workbench_role(progress, "progress-dialog")
+        progress.setMinimumSize(480, 160)
         progress.setValue(0)
         progress_label = progress.findChild(QtWidgets.QLabel)
         if progress_label is not None:
+            progress_label.setObjectName("performanceReportProgressLabel")
+            mark_workbench_role(progress_label, "progress-status")
             progress_label.setWordWrap(True)
+            progress_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            progress_label.setMinimumHeight(32)
+            progress.setLabelText(f"{self._t(exporting_key)}  ·  0%")
+        progress_bar = progress.findChild(QtWidgets.QProgressBar)
+        if progress_bar is not None:
+            progress_bar.setObjectName("performanceReportProgressBar")
+            mark_workbench_role(progress_bar, "report-progress")
+            progress_bar.setTextVisible(False)
+            progress_bar.setAccessibleName(self._t(progress_title_key))
         cancel_button = progress.findChild(QtWidgets.QPushButton)
         if cancel_button is not None:
             cancel_button.setObjectName("performanceReportCancelButton")
@@ -7856,10 +8357,11 @@ class VirtualArrayGui:
     def _on_performance_report_progress(self, percent: int, message: str) -> None:
         progress = self._performance_report_progress
         if progress is not None:
-            progress.setLabelText(message)
             # QProgressDialog treats its maximum as a terminal/reset state.  The
             # worker's terminal signal owns closure, so progress stays at 99 here.
-            progress.setValue(max(0, min(99, int(percent))))
+            visible_percent = max(0, min(99, int(percent)))
+            progress.setLabelText(f"{message}  ·  {visible_percent}%")
+            progress.setValue(visible_percent)
         self.status.set(message)
 
     @QtCore.Slot()
@@ -9307,11 +9809,16 @@ class VirtualArrayGui:
         self.dragging = self._nearest_element(internal_x, internal_y)
         if self.dragging is not None:
             self.drag_start_snapshot = self._capture_layout_snapshot()
+            self.drag_grab_offset = (
+                self.dragging.x - internal_x,
+                self.dragging.y - internal_y,
+            )
             x_limits = tuple(float(value) for value in self.physical_ax.get_xlim())
             y_limits = tuple(float(value) for value in self.physical_ax.get_ylim())
             self.drag_axis_limits = (x_limits, y_limits)
             self.drag_bounds = _drag_axis_bounds_from_limits(self.drag_axis_limits)
             self.selected_element = self.dragging
+            self.phys_canvas.grab_pointer(self.physical_ax)
             self.status.set(
                 self._t(
                     "selected_element",
@@ -9321,13 +9828,13 @@ class VirtualArrayGui:
                 )
             )
             self._draw_physical_array()
-            self.phys_canvas.draw()
+            self.phys_canvas.draw_idle()
         elif self.selected_element is not None:
             self.drag_start_snapshot = None
             self.selected_element = None
             self.status.set(self._t("select_element_hint"))
             self._draw_physical_array()
-            self.phys_canvas.draw()
+            self.phys_canvas.draw_idle()
         else:
             self.drag_start_snapshot = None
 
@@ -9345,8 +9852,14 @@ class VirtualArrayGui:
             display_x, display_y = self.physical_ax.transData.inverted().transform(
                 (event.x, event.y)
             )
-            internal_x = _to_internal_half_lambda(float(display_x))
-            internal_y = _to_internal_half_lambda(float(display_y))
+            pointer_x = _to_internal_half_lambda(float(display_x))
+            pointer_y = _to_internal_half_lambda(float(display_y))
+            internal_x, internal_y = _drag_position_with_offset(
+                pointer_x,
+                pointer_y,
+                self.drag_grab_offset,
+                None,
+            )
             if self.drag_bounds is not None:
                 if self.drag_axis_limits is not None:
                     expanded_limits = _expanded_physical_drag_limits(
@@ -9357,26 +9870,23 @@ class VirtualArrayGui:
                     if expanded_limits is not None:
                         self.drag_axis_limits = expanded_limits
                         self.drag_bounds = _drag_axis_bounds_from_limits(expanded_limits)
-                min_x, max_x, min_y, max_y = self.drag_bounds
-                internal_x = _clip_to_bounds(internal_x, min_x, max_x)
-                internal_y = _clip_to_bounds(internal_y, min_y, max_y)
-                internal_x = _snap_to_grid_inside(internal_x, min_x, max_x)
-                internal_y = _snap_to_grid_inside(internal_y, min_y, max_y)
-            else:
-                internal_x = snap_to_grid(internal_x)
-                internal_y = snap_to_grid(internal_y)
+                internal_x, internal_y = _drag_position_with_offset(
+                    pointer_x,
+                    pointer_y,
+                    self.drag_grab_offset,
+                    self.drag_bounds,
+                )
             self.dragging.x = internal_x
             self.dragging.y = internal_y
             self.status.set(
                 self._t(
-                    "snap_element",
+                    "moving_element",
                     element=self.dragging.name,
                     x=self.dragging.x * DISPLAY_SCALE_LAMBDA,
                     y=self.dragging.y * DISPLAY_SCALE_LAMBDA,
                 )
             )
-            self._draw_physical_array()
-            self.phys_canvas.draw()
+            self._schedule_physical_drag_redraw()
             return
 
         self._update_physical_hover(event)
@@ -9393,6 +9903,7 @@ class VirtualArrayGui:
 
     def on_release(self, event) -> None:  # noqa: ANN001
         if self.dragging is not None:
+            self._cancel_physical_drag_redraw()
             if self.drag_bounds is not None:
                 min_x, max_x, min_y, max_y = self.drag_bounds
                 self.dragging.x = _snap_to_grid_inside(
@@ -9426,11 +9937,13 @@ class VirtualArrayGui:
             self.dragging = None
             self.drag_bounds = None
             self.drag_start_snapshot = None
+            self.drag_grab_offset = None
             try:
                 self.drag_axis_limits = released_axis_limits
                 self.generate_virtual_array()
             finally:
                 self.drag_axis_limits = None
+                self._release_physical_pointer()
             self._set_physical_cursor("openhand")
 
     def on_arrow_key(self, event) -> str | None:

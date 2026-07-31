@@ -8,6 +8,8 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from .native_theme import TOKENS
+
 
 pg.setConfigOptions(antialias=True)
 
@@ -1459,6 +1461,7 @@ class FigureCanvasQt(QtWidgets.QWidget):
         self._callbacks: dict[str, dict[int, Callable[[Any], Any]]] = {}
         self._next_callback_id = 1
         self._event_axis_by_object: dict[QtCore.QObject, Axes] = {}
+        self._captured_axis: Axes | None = None
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(figure.widget)
@@ -1477,6 +1480,7 @@ class FigureCanvasQt(QtWidgets.QWidget):
             QtWidgets.QSizePolicy.Policy.Expanding,
         )
         self.setMouseTracking(True)
+        self.installEventFilter(self)
         figure.widget.setMouseTracking(True)
         figure.widget.installEventFilter(self)
         self._install_axis_event_filters()
@@ -1485,6 +1489,44 @@ class FigureCanvasQt(QtWidgets.QWidget):
 
     def get_tk_widget(self) -> "FigureCanvasQt":
         return self
+
+    def grab_pointer(self, axis: Axes | None = None) -> None:
+        """Keep delivering pointer events until release.
+
+        This mirrors pointer capture on the web: direct manipulation remains
+        continuous even when the cursor temporarily leaves the plot surface.
+        Repeated calls simply retarget the capture, so the interaction stays
+        interruptible.
+        """
+
+        self._captured_axis = axis
+        self.grabMouse()
+
+    def release_pointer(self) -> None:
+        """Release a previously captured pointer without raising on teardown."""
+
+        self._captured_axis = None
+        if QtWidgets.QWidget.mouseGrabber() is self:
+            self.releaseMouse()
+
+    def _emit_pointer_cancel(self) -> None:
+        """Notify interaction owners when the OS revokes mouse capture."""
+
+        axis = self._captured_axis
+        if axis is None:
+            return
+        self._captured_axis = None
+        event = SimpleNamespace(
+            canvas=self,
+            inaxes=axis,
+            x=None,
+            y=None,
+            xdata=None,
+            ydata=None,
+            button=None,
+        )
+        for callback in list(self._callbacks.get("pointer_cancel_event", {}).values()):
+            callback(event)
 
     def winfo_children(self) -> list[Any]:
         return list(self._children)
@@ -1767,7 +1809,12 @@ class FigureCanvasQt(QtWidgets.QWidget):
         pos = qt_event.position() if hasattr(qt_event, "position") else qt_event.pos()
         point = pos.toPoint() if hasattr(pos, "toPoint") else QtCore.QPoint(int(pos.x()), int(pos.y()))
         if preferred_axis is not None and hasattr(preferred_axis.widget, "mapToScene"):
-            return QtCore.QPointF(preferred_axis.widget.mapToScene(point))
+            if watched is preferred_axis.widget:
+                return QtCore.QPointF(preferred_axis.widget.mapToScene(point))
+            if isinstance(watched, QtWidgets.QWidget):
+                global_pos = watched.mapToGlobal(point)
+                local_pos = preferred_axis.widget.mapFromGlobal(global_pos)
+                return QtCore.QPointF(preferred_axis.widget.mapToScene(local_pos))
         if isinstance(watched, QtWidgets.QWidget):
             global_pos = watched.mapToGlobal(point)
             for axis in self.figure.axes:
@@ -1785,7 +1832,11 @@ class FigureCanvasQt(QtWidgets.QWidget):
         button: int | None = None,
         watched: QtCore.QObject | None = None,
     ) -> None:
-        preferred_axis = self._event_axis_by_object.get(watched) if watched is not None else None
+        preferred_axis = (
+            self._event_axis_by_object.get(watched)
+            if watched is not None
+            else None
+        ) or self._captured_axis
         scene_pos = self._event_scene_pos(watched, qt_event, preferred_axis)
         axis, xdata, ydata = self._axis_at(scene_pos, preferred_axis)
         event = SimpleNamespace(
@@ -1826,6 +1877,8 @@ class FigureCanvasQt(QtWidgets.QWidget):
         elif event.type() == QtCore.QEvent.Type.Leave:
             for callback in list(self._callbacks.get("figure_leave_event", {}).values()):
                 callback(SimpleNamespace(canvas=self, inaxes=None, xdata=None, ydata=None, button=None))
+        elif event.type() == QtCore.QEvent.Type.UngrabMouse:
+            self._emit_pointer_cancel()
         return super().eventFilter(watched, event)
 
     def winfo_class(self) -> str:
@@ -1851,8 +1904,11 @@ class MplButton:
             hover = _color(hovercolor or color).name()
             base = _color(color).name()
             self.button.setStyleSheet(
-                f"QPushButton {{ background-color: {base}; border: 1px solid #cfdbe7; }}"
+                f"QPushButton {{ background-color: {base}; "
+                f"border: 1px solid {TOKENS.border}; "
+                f"border-radius: {TOKENS.radius}px; }}"
                 f"QPushButton:hover {{ background-color: {hover}; }}"
+                f"QPushButton:pressed {{ background-color: {TOKENS.surface_pressed}; }}"
             )
         self.label = _LabelProxy(self.button.setText)
 

@@ -19,6 +19,7 @@ from virtual_array.gui import (
     _build_auto_layout_elements,
     _default_workspace_sash_position,
     _dbf_peak_index,
+    _drag_position_with_offset,
     _format_frequency_ghz,
     _format_margin_db,
     _new_response_hover_annotation,
@@ -28,6 +29,24 @@ from virtual_array.gui import (
     _validate_element_count,
     _validated_window_geometry,
 )
+
+
+def test_drag_position_preserves_grab_offset_without_grid_jumps() -> None:
+    assert _drag_position_with_offset(
+        0.37,
+        -1.22,
+        (0.18, -0.08),
+        None,
+    ) == pytest.approx((0.55, -1.30))
+
+
+def test_drag_position_clips_after_applying_grab_offset() -> None:
+    assert _drag_position_with_offset(
+        0.95,
+        -1.95,
+        (0.20, -0.20),
+        (-1.0, 1.0, -2.0, 2.0),
+    ) == pytest.approx((1.0, -2.0))
 
 
 def test_layout_import_rejects_more_than_16_tx() -> None:
@@ -218,6 +237,48 @@ def test_layout_snapshot_restore_round_trip_preserves_selection() -> None:
     assert app.selected_element is app.elements[1]
     assert app.dragging is None
     assert app.drag_start_snapshot is None
+
+
+def test_escape_mid_drag_restores_layout_and_releases_pointer() -> None:
+    app = VirtualArrayGui.__new__(VirtualArrayGui)
+    app.elements = [
+        EditableElement(kind="tx", index=0, name="Tx1", x=0.0, y=2.0),
+        EditableElement(kind="rx", index=0, name="Rx1", x=0.0, y=-2.0),
+    ]
+    app.selected_element = None
+    snapshot = app._capture_layout_snapshot()
+    app.dragging = app.elements[0]
+    app.dragging.x = 0.55
+    app.drag_bounds = (-4.0, 4.0, -4.0, 4.0)
+    app.drag_axis_limits = ((-2.0, 2.0), (-2.0, 2.0))
+    app.drag_start_snapshot = snapshot
+    app.drag_grab_offset = (0.15, -0.10)
+    app._physical_drag_after_id = "drag-redraw"
+    app.delete_mode = False
+
+    cancelled: list[str] = []
+    released: list[bool] = []
+    generated: list[bool] = []
+    status: list[str] = []
+    app.root = SimpleNamespace(after_cancel=cancelled.append)
+    app.phys_canvas = SimpleNamespace(release_pointer=lambda: released.append(True))
+    app.generate_virtual_array = lambda: generated.append(True)
+    app.status = SimpleNamespace(set=status.append)
+    app._t = lambda key, **_kwargs: key
+
+    assert app.on_escape_key() == "break"
+    assert [(element.x, element.y) for element in app.elements] == [
+        (0.0, 2.0),
+        (0.0, -2.0),
+    ]
+    assert app.dragging is None
+    assert app.drag_start_snapshot is None
+    assert app.drag_grab_offset is None
+    assert app._physical_drag_after_id is None
+    assert cancelled == ["drag-redraw"]
+    assert released == [True]
+    assert generated == [True]
+    assert status == ["drag_cancel"]
 
 
 def test_default_gui_layout_uses_clean_1t1r_starter() -> None:

@@ -13,7 +13,9 @@ QtWidgets = pytest.importorskip("PySide6.QtWidgets")
 QtCore = pytest.importorskip("PySide6.QtCore")
 QtTest = pytest.importorskip("PySide6.QtTest")
 
+from virtual_array.native_theme import application_stylesheet  # noqa: E402
 from virtual_array.performance_report_dialog import PerformanceReportDialog  # noqa: E402
+from virtual_array.qt_tk import AppleSwitch  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -42,6 +44,7 @@ def test_dialog_defaults_are_complete_and_do_not_write_files(
     dialog: PerformanceReportDialog, tmp_path: Path
 ) -> None:
     assert dialog.objectName() == "performanceReportDialog"
+    assert dialog.property("workbenchRole") == "dialog-shell"
     output_path = Path(dialog.output_path_edit.text())
     assert output_path.parent == tmp_path
     assert re.fullmatch(
@@ -80,6 +83,13 @@ def test_dialog_defaults_are_complete_and_do_not_write_files(
     assert dialog.save_button.isEnabled()
     assert isinstance(dialog.angle_image_button, QtWidgets.QPushButton)
     assert dialog.angle_image_button.isEnabled()
+    assert dialog.angle_image_button.property("fluentRole") != "quiet"
+    spectrum_scale_label = dialog.findChild(
+        QtWidgets.QLabel, "reportSpectrumScaleLabel"
+    )
+    assert spectrum_scale_label is not None
+    assert "可多选" in spectrum_scale_label.text()
+    assert "分别输出" in dialog.include_spectrum_db_checkbox.toolTip()
     assert dialog.export_kind == "report"
 
     with pytest.raises(AttributeError):
@@ -108,25 +118,166 @@ def test_range_spin_boxes_and_important_object_names_are_stable(
         "reportOutputPath": QtWidgets.QLineEdit,
         "reportTitle": QtWidgets.QLineEdit,
         "reportBrowseButton": QtWidgets.QPushButton,
-        "azHoldFollowsFocus": QtWidgets.QCheckBox,
-        "elHoldFollowsFocus": QtWidgets.QCheckBox,
+        "azHoldFollowsFocus": AppleSwitch,
+        "elHoldFollowsFocus": AppleSwitch,
         "azHoldCurveStep": QtWidgets.QSpinBox,
         "elHoldCurveStep": QtWidgets.QSpinBox,
         "reportErrorLimitDeg": QtWidgets.QDoubleSpinBox,
         "reportSpectrumFloorDb": QtWidgets.QDoubleSpinBox,
-        "reportIncludeSpectrumDb": QtWidgets.QCheckBox,
-        "reportIncludeSpectrumMagnitude": QtWidgets.QCheckBox,
-        "reportIncludeRawData": QtWidgets.QCheckBox,
+        "reportIncludeSpectrumDb": AppleSwitch,
+        "reportIncludeSpectrumMagnitude": AppleSwitch,
+        "reportIncludeRawData": AppleSwitch,
         "reportValidationError": QtWidgets.QLabel,
         "performanceReportButtonBox": QtWidgets.QDialogButtonBox,
     }
     for object_name, widget_type in expected_names_and_types.items():
         assert dialog.findChild(widget_type, object_name) is not None
 
+    switch_names = (
+        "azHoldFollowsFocus",
+        "elHoldFollowsFocus",
+        "reportIncludeSpectrumDb",
+        "reportIncludeSpectrumMagnitude",
+        "reportIncludeRawData",
+    )
+    for object_name in switch_names:
+        switch = dialog.findChild(AppleSwitch, object_name)
+        assert isinstance(switch, QtWidgets.QCheckBox)
+        assert not switch.isTristate()
+
+    expected_roles = {
+        "performanceReportRail": "dialog-rail",
+        "performanceReportRailContent": "dialog-rail",
+        "performanceReportContent": "dialog-content",
+        "reportOutputGroup": "dialog-rail",
+        "reportAxisTabs": "dialog-content",
+        "reportPerformanceSettingsGroup": "dialog-rail",
+        "azimuthReportGroup": "dialog-section",
+        "elevationReportGroup": "dialog-section",
+        "performanceReportButtonBox": "dialog-footer",
+    }
+    for object_name, role in expected_roles.items():
+        widget = dialog.findChild(QtWidgets.QWidget, object_name)
+        assert widget is not None
+        assert widget.property("workbenchRole") == role
+
     for object_name in ("azHoldCurveStep", "elHoldCurveStep"):
         spin = dialog.findChild(QtWidgets.QSpinBox, object_name)
         assert spin is not None
         assert (spin.minimum(), spin.maximum(), spin.singleStep()) == (1, 180, 1)
+
+
+@pytest.mark.parametrize("language", ("zh", "en", "ja"))
+@pytest.mark.parametrize("dialog_size", ((920, 600), (820, 540)))
+def test_compact_layout_balances_configuration_rail_and_axis_panel(
+    qapp, tmp_path: Path, language: str, dialog_size: tuple[int, int]
+) -> None:
+    compact_dialog = PerformanceReportDialog(
+        None,
+        language=language,
+        initial_directory=tmp_path,
+        azimuth_available=True,
+        elevation_available=True,
+    )
+    compact_dialog.setStyleSheet(application_stylesheet())
+    compact_dialog.resize(*dialog_size)
+    compact_dialog.show()
+    qapp.processEvents()
+
+    try:
+        rail = compact_dialog.findChild(
+            QtWidgets.QScrollArea, "performanceReportRail"
+        )
+        rail_content = compact_dialog.findChild(
+            QtWidgets.QWidget, "performanceReportRailContent"
+        )
+        content = compact_dialog.findChild(
+            QtWidgets.QWidget, "performanceReportContent"
+        )
+        output_group = compact_dialog.findChild(
+            QtWidgets.QGroupBox, "reportOutputGroup"
+        )
+        settings_group = compact_dialog.findChild(
+            QtWidgets.QGroupBox, "reportPerformanceSettingsGroup"
+        )
+
+        assert rail is not None
+        assert rail_content is not None
+        assert content is not None
+        assert output_group is not None
+        assert settings_group is not None
+        assert compact_dialog.size() == QtCore.QSize(*dialog_size)
+        assert rail.geometry().right() < content.geometry().left()
+        assert output_group.parentWidget() is rail_content
+        assert settings_group.parentWidget() is rail_content
+        assert settings_group.geometry().top() > output_group.geometry().bottom()
+        assert compact_dialog.title_edit.isVisibleTo(compact_dialog)
+        assert compact_dialog.title_edit.width() >= 120
+        assert output_group.contentsRect().contains(
+            compact_dialog.title_edit.geometry()
+        )
+        QtTest.QTest.mouseClick(
+            compact_dialog.title_edit,
+            QtCore.Qt.MouseButton.LeftButton,
+        )
+        assert compact_dialog.title_edit.hasFocus()
+        QtTest.QTest.keyClick(
+            compact_dialog.title_edit,
+            QtCore.Qt.Key.Key_A,
+            QtCore.Qt.KeyboardModifier.ControlModifier,
+        )
+        QtTest.QTest.keyClicks(compact_dialog.title_edit, "Editable report title")
+        assert compact_dialog.title_edit.text() == "Editable report title"
+        assert rail.horizontalScrollBar().maximum() == 0
+        assert compact_dialog.azimuth_page.horizontalScrollBar().maximum() == 0
+        assert compact_dialog.button_box.geometry().bottom() <= compact_dialog.rect().bottom()
+    finally:
+        compact_dialog.close()
+        compact_dialog.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("language", ("zh", "en", "ja"))
+def test_themed_angle_rows_keep_clear_vertical_separation(
+    qapp, tmp_path: Path, language: str
+) -> None:
+    themed_dialog = PerformanceReportDialog(
+        None,
+        language=language,
+        initial_directory=tmp_path,
+        azimuth_available=True,
+        elevation_available=True,
+    )
+    themed_dialog.setStyleSheet(application_stylesheet())
+    themed_dialog.resize(780, 700)
+    themed_dialog.show()
+    qapp.processEvents()
+
+    try:
+        for tab_index, (axis, group, page) in enumerate(
+            (
+                ("az", themed_dialog.azimuth_group, themed_dialog.azimuth_page),
+                ("el", themed_dialog.elevation_group, themed_dialog.elevation_page),
+            )
+        ):
+            themed_dialog.axis_tabs.setCurrentIndex(tab_index)
+            qapp.processEvents()
+            grid = group.layout()
+            assert isinstance(grid, QtWidgets.QGridLayout)
+            assert grid.verticalSpacing() == 8
+            assert group.height() >= group.minimumSizeHint().height()
+            assert page.horizontalScrollBar().maximum() == 0
+
+            focus = getattr(themed_dialog, f"{axis}_focus_start")
+            hold = getattr(themed_dialog, f"{axis}_hold_start")
+            gap = hold.geometry().top() - (focus.geometry().bottom() + 1)
+            assert gap >= 6
+            assert focus.height() >= 37
+            assert hold.height() >= 37
+    finally:
+        themed_dialog.close()
+        themed_dialog.deleteLater()
+        qapp.processEvents()
 
 
 def test_hold_range_follows_focus_until_user_requests_independent_range(
@@ -219,12 +370,14 @@ def test_at_least_one_spectrum_vertical_scale_is_required(
 
     dialog.include_spectrum_db_checkbox.setChecked(True)
     assert dialog.spectrum_floor_spin.isEnabled()
+    options = dialog.options()
+    assert options.include_spectrum_db is True
+    assert options.include_spectrum_magnitude is True
 
 
 def test_axis_capability_disables_irrelevant_controls_and_report_action(
     qapp, tmp_path: Path
 ) -> None:
-    del qapp
     azimuth_only = PerformanceReportDialog(
         None,
         language="en",
@@ -259,10 +412,22 @@ def test_axis_capability_disables_irrelevant_controls_and_report_action(
         elevation_available=False,
     )
     try:
+        no_axis.setStyleSheet(application_stylesheet())
+        no_axis.resize(920, 600)
+        no_axis.show()
+        qapp.processEvents()
+
         assert not no_axis.azimuth_group.isEnabled()
         assert not no_axis.elevation_group.isEnabled()
         assert not no_axis.save_button.isEnabled()
         assert not no_axis.angle_image_button.isEnabled()
+        rail = no_axis.findChild(QtWidgets.QScrollArea, "performanceReportRail")
+        assert rail.horizontalScrollBar().maximum() == 0
+        assert rail.verticalScrollBar().maximum() == 0
+        assert no_axis.validation_label.parentWidget() is no_axis
+        assert no_axis.validation_label.geometry().bottom() < (
+            no_axis.button_box.geometry().top()
+        )
     finally:
         no_axis.close()
         no_axis.deleteLater()

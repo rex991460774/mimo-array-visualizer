@@ -233,6 +233,8 @@ and calibrated to the 0° row as before. Complex amplitude values must be nonzer
 
 ## Development
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development and pull-request workflow.
+
 ```bash
 # Run tests
 pytest tests/ -x -q

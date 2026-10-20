@@ -8,7 +8,7 @@ export type Language = "zh" | "en" | "ja";
 export type ThemeMode = "system" | "light" | "dark";
 export type DisplayMode = "db" | "magnitude";
 export type CoordUnit = "lambda" | "mm";
-export type DialogId = "dictionary" | "patterns" | "report" | "projects" | "help" | "settings" | "share" | null;
+export type DialogId = "dictionary" | "patterns" | "report" | "projects" | "help" | "settings" | "share" | "saveConflict" | null;
 
 export interface StatusMessage {
   key: MessageKey;
@@ -25,6 +25,7 @@ const STORAGE_KEY = "mimo-array-workbench:v1";
 interface PersistedState {
   project: Project;
   projectId: string | null;
+  projectRevision: number | null;
   savedSnapshot: string | null;
   language: Language;
   theme: ThemeMode;
@@ -82,6 +83,8 @@ interface AppState {
   config: ServerConfig | null;
   project: Project | null;
   projectId: string | null;
+  /** Library revision the current project was loaded from or last saved as. */
+  projectRevision: number | null;
   savedSnapshot: string | null;
   past: Layout[];
   future: Layout[];
@@ -101,8 +104,8 @@ interface AppState {
   initialize(config: ServerConfig): void;
   setStatus(key: MessageKey, tone?: StatusMessage["tone"], params?: StatusMessage["params"], detail?: string): void;
   updateProject(update: Partial<Project>): void;
-  replaceProject(project: Project, projectId: string | null, saved: boolean): void;
-  markSaved(projectId: string, project: Project): void;
+  replaceProject(project: Project, projectId: string | null, saved: boolean, revision?: number | null): void;
+  markSaved(projectId: string, project: Project, revision: number): void;
   commitLayout(layout: Layout, selection?: ElementRef | null): void;
   undo(): void;
   redo(): void;
@@ -124,6 +127,7 @@ export const useStore = create<AppState>((set, get) => ({
   config: null,
   project: null,
   projectId: persisted.projectId ?? null,
+  projectRevision: persisted.projectRevision ?? null,
   savedSnapshot: persisted.savedSnapshot ?? null,
   past: [],
   future: [],
@@ -158,10 +162,11 @@ export const useStore = create<AppState>((set, get) => ({
     set({ project: { ...project, ...update } });
   },
 
-  replaceProject(project, projectId, saved) {
+  replaceProject(project, projectId, saved, revision = null) {
     set({
       project,
       projectId,
+      projectRevision: projectId ? revision : null,
       savedSnapshot: saved ? projectSnapshot(project) : null,
       past: [],
       future: [],
@@ -172,8 +177,8 @@ export const useStore = create<AppState>((set, get) => ({
     });
   },
 
-  markSaved(projectId, project) {
-    set({ projectId, savedSnapshot: projectSnapshot(project) });
+  markSaved(projectId, project, revision) {
+    set({ projectId, projectRevision: revision, savedSnapshot: projectSnapshot(project) });
   },
 
   commitLayout(layout, selection) {
@@ -269,6 +274,7 @@ useStore.subscribe((state) => {
   writePersisted({
     project: state.project,
     projectId: state.projectId,
+    projectRevision: state.projectRevision,
     savedSnapshot: state.savedSnapshot,
     language: state.language,
     theme: state.theme,

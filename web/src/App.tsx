@@ -19,6 +19,7 @@ const ReportDialog = lazy(() => import("./dialogs/ReportDialog").then((m) => ({ 
 const ProjectsDialog = lazy(() => import("./dialogs/ProjectsDialog").then((m) => ({ default: m.ProjectsDialog })));
 const SettingsDialog = lazy(() => import("./dialogs/SettingsDialog").then((m) => ({ default: m.SettingsDialog })));
 const BandView = lazy(() => import("./views/BandView").then((m) => ({ default: m.BandView })));
+const SaveConflictDialog = lazy(() => import("./dialogs/SaveConflictDialog").then((m) => ({ default: m.SaveConflictDialog })));
 const ShareDialog = lazy(() => import("./dialogs/ShareDialog").then((m) => ({ default: m.ShareDialog })));
 const HelpDialog = lazy(() => import("./dialogs/HelpDialog").then((m) => ({ default: m.HelpDialog })));
 
@@ -170,6 +171,7 @@ function Workbench() {
         {dialog === "help" && <HelpDialog onClose={close} />}
         {dialog === "settings" && <SettingsDialog onClose={close} />}
         {dialog === "share" && <ShareDialog onClose={close} />}
+        {dialog === "saveConflict" && <SaveConflictDialog onClose={close} />}
       </Suspense>
     </div>
   );

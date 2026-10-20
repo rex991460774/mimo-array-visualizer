@@ -56,7 +56,7 @@ docker compose up -d --build
 ### Server (`src/virtual_array/server/`)
 
 - **`app.py`** — `create_app(data_dir, static_dir)`; all routes under `/api` (OpenAPI docs at `/api/docs`); serves the built SPA with index fallback.
-- **`store.py`** — file-backed project library (`<data>/projects/*.json`).
+- **`store.py`** — file-backed project library (`<data>/projects/*.json`). Each record has a `revision`; `PUT /api/projects/{id}` with `base_revision` returns 409 if someone saved in between (the client then shows `SaveConflictDialog`); omitting it overwrites.
 - **`shares.py`** — immutable share-link snapshots (`<data>/shares/<id>.json`); the 12-char base62 ID is derived from the project's canonical JSON, so equal configurations share one link. The SPA opens `/s/<id>` via `GET /api/shares/{id}` (`openShareFromLocation` in `state/actions.ts`).
 - **`bundles.py`** — safe `.mimo.zip` reading for `/api/import/bundle`: declared sizes checked, members stream-read with byte caps, member count and total decompressed size bounded; every asset is validated before any is stored.
 - **`jobs.py`** — background export jobs (PDF report / angle-error PNG) with progress, cancel, download.

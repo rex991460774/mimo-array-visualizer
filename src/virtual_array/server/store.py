@@ -19,6 +19,14 @@ class ProjectNotFoundError(KeyError):
     pass
 
 
+class ProjectConflictError(Exception):
+    """The stored project changed since the caller's copy was loaded."""
+
+    def __init__(self, record: dict[str, Any]) -> None:
+        super().__init__(record.get("id"))
+        self.record = record
+
+
 class ProjectStore:
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
@@ -40,7 +48,10 @@ class ProjectStore:
         path = self._path(project_id)
         if not path.is_file():
             raise ProjectNotFoundError(project_id)
-        return json.loads(path.read_text(encoding="utf-8"))
+        record = json.loads(path.read_text(encoding="utf-8"))
+        # Records saved before revisions existed count as revision 1.
+        record.setdefault("revision", 1)
+        return record
 
     def create(self, project: Project) -> dict[str, Any]:
         project_id = uuid.uuid4().hex
@@ -49,16 +60,26 @@ class ProjectStore:
             "id": project_id,
             "created_at": now,
             "updated_at": now,
+            "revision": 1,
             "project": project.model_dump(mode="json"),
         }
         self._write(project_id, record)
         return record
 
-    def update(self, project_id: str, project: Project) -> dict[str, Any]:
+    def update(self, project_id: str, project: Project, base_revision: int | None = None) -> dict[str, Any]:
+        """Replace a project; with ``base_revision``, refuse if someone saved since.
+
+        The library is shared by everyone on the server, so two people may edit
+        the same project. Without this check the later save would silently
+        discard the earlier one. ``base_revision=None`` overwrites on purpose.
+        """
         with self._lock:
             record = self.get(project_id)
+            if base_revision is not None and base_revision != record["revision"]:
+                raise ProjectConflictError(record)
             record["project"] = project.model_dump(mode="json")
             record["updated_at"] = _now()
+            record["revision"] += 1
             self._write(project_id, record, locked=True)
         return record
 
@@ -94,6 +115,7 @@ def _summary(record: dict[str, Any]) -> dict[str, Any]:
         "name": project.get("name", ""),
         "created_at": record.get("created_at", ""),
         "updated_at": record.get("updated_at", ""),
+        "revision": record.get("revision", 1),
         "tx_count": len(layout.get("tx", [])),
         "rx_count": len(layout.get("rx", [])),
         "frequency_ghz": project.get("frequency_ghz"),

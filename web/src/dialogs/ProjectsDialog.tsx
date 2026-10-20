@@ -105,7 +105,7 @@ export function ProjectsDialog({ onClose }: { onClose: () => void }) {
                 if (!window.confirm(t("projectsDialog.confirmDelete", { name: item.name }))) return;
                 try {
                   await api.deleteProject(item.id);
-                  if (item.id === projectId) useStore.setState({ projectId: null, savedSnapshot: null });
+                  if (item.id === projectId) useStore.setState({ projectId: null, projectRevision: null, savedSnapshot: null });
                   refresh();
                 } catch (reason) {
                   setError(errorMessage(reason));

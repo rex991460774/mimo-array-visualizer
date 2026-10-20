@@ -313,6 +313,7 @@ export interface ProjectSummary {
   name: string;
   created_at: string;
   updated_at: string;
+  revision: number;
   tx_count: number;
   rx_count: number;
   frequency_ghz: number | null;
@@ -322,6 +323,8 @@ export interface ProjectRecord {
   id: string;
   created_at: string;
   updated_at: string;
+  /** Increments on every save; sent back as base_revision to detect concurrent edits. */
+  revision: number;
   project: Project;
 }
 

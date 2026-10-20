@@ -119,7 +119,7 @@ const zh: HelpSection[] = [
     bullets: [
       "阵面 JSON 与桌面版格式兼容（version 1，单位 λ），导出时附带评估信息。",
       "项目包（.mimo.zip）包含项目配置和全部导入的数据文件，适合在不同服务器之间迁移。",
-      "项目库保存在服务器数据目录，同一服务器的用户都能看到；浏览器也会自动保留当前草稿。",
+      "项目库保存在服务器数据目录，同一服务器的用户都能看到；浏览器也会自动保留当前草稿。两人同时修改同一项目时，后保存的人会收到提示（另存为新项目或覆盖对方），不会静默覆盖。",
       "「分享」生成形如 http://服务器:8000/s/xxxxxxxxxxxx 的链接，局域网内的人打开即得到当前配置（Tx/Rx 数量与位置、频段、视场、规格和导入数据）的副本；链接内容在生成时固定。",
       "性能报告在服务器端生成多页 PDF，可选附带 CSV/JSON 可复现数据包，生成期间可以继续编辑。",
     ],
@@ -225,7 +225,7 @@ const en: HelpSection[] = [
     bullets: [
       "Array JSON is compatible with the desktop tool (version 1, unit λ) and includes an evaluation block on export.",
       "A project bundle (.mimo.zip) contains the project and all imported data files, for moving between servers.",
-      "The project library lives in the server data directory and is shared by its users; the browser also keeps your draft.",
+      "The project library lives in the server data directory and is shared by its users; the browser also keeps your draft. If two people edit the same project, the later save asks whether to save as a new project or overwrite instead of silently replacing the other version.",
       "Share creates a link like http://server:8000/s/xxxxxxxxxxxx. Anyone on the network who opens it gets a copy of the current configuration (Tx/Rx count and positions, band, FOV, requirements and imported data); the link is frozen when created.",
       "Reports are rendered on the server as multi-page PDFs with an optional CSV/JSON reproducibility package.",
     ],
@@ -329,7 +329,7 @@ const ja: HelpSection[] = [
     bullets: [
       "配置 JSON はデスクトップ版と互換（version 1、単位 λ）で、書き出し時に評価情報を含みます。",
       "プロジェクトパッケージ（.mimo.zip）は設定と読み込んだデータファイルをすべて含み、サーバー間の移行に使えます。",
-      "プロジェクトライブラリはサーバーのデータディレクトリに保存され、利用者間で共有されます。ブラウザも下書きを保持します。",
+      "プロジェクトライブラリはサーバーのデータディレクトリに保存され、利用者間で共有されます。ブラウザも下書きを保持します。2 人が同じプロジェクトを編集した場合、後から保存する人には新規保存か上書きかを確認し、黙って上書きしません。",
       "「共有」で http://サーバー:8000/s/xxxxxxxxxxxx 形式のリンクを作成します。同じネットワークの人が開くと現在の構成（Tx/Rx の数と位置、周波数帯、視野、仕様、読み込んだデータ）のコピーが開きます。リンクの内容は作成時点で固定されます。",
       "レポートはサーバーで複数ページの PDF として生成され、CSV/JSON の再現用データを含められます。",
     ],

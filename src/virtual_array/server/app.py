@@ -38,7 +38,7 @@ from ..version import APP_VERSION
 from .bundles import BundleError, read_bundle
 from .jobs import JobManager, JobNotFoundError, zip_directory
 from .shares import ShareNotFoundError, ShareStore
-from .store import ProjectNotFoundError, ProjectStore
+from .store import ProjectConflictError, ProjectNotFoundError, ProjectStore
 
 LOGGER = logging.getLogger(__name__)
 DATA_DIR_ENV = "MIMO_DATA_DIR"
@@ -138,7 +138,14 @@ class AngleErrorImageRequest(ProjectRequest):
 
 
 class SaveProjectRequest(ProjectRequest):
-    pass
+    base_revision: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Revision the edit started from. If the stored project has a newer revision "
+            "(someone else saved), the update is refused with 409. Omit to overwrite."
+        ),
+    )
 
 
 class CompareRequest(BaseModel):
@@ -369,9 +376,18 @@ def create_app(data_dir: str | Path | None = None, static_dir: str | Path | None
     @app.put("/api/projects/{project_id}")
     def update_project(project_id: str, request: SaveProjectRequest) -> dict[str, Any]:
         try:
-            return projects.update(project_id, request.project)
+            return projects.update(project_id, request.project, request.base_revision)
         except ProjectNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Project not found.") from exc
+        except ProjectConflictError as exc:
+            current = exc.record
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Project was saved by someone else at {current['updated_at']} "
+                    f"(revision {current['revision']}); your copy is based on revision {request.base_revision}."
+                ),
+            ) from exc
 
     @app.delete("/api/projects/{project_id}", status_code=204)
     def delete_project(project_id: str) -> Response:

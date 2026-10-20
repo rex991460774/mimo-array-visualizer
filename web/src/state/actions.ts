@@ -8,22 +8,32 @@ function store() {
   return useStore.getState();
 }
 
-export async function saveProject(asNew = false): Promise<void> {
-  const { project, projectId, markSaved, setStatus } = store();
+/**
+ * Save to the shared library. Updates send the revision this copy is based on;
+ * if someone else saved in between, nothing is written and the conflict dialog
+ * asks whether to save as a new project or overwrite (`overwrite = true`).
+ */
+export async function saveProject(asNew = false, overwrite = false): Promise<void> {
+  const { project, projectId, projectRevision, markSaved, setStatus, openDialog } = store();
   if (!project) return;
   try {
     let record;
     if (projectId && !asNew) {
       try {
-        record = await api.updateProject(projectId, project);
+        record = await api.updateProject(projectId, project, overwrite ? undefined : (projectRevision ?? undefined));
       } catch (error) {
+        if (error instanceof ApiError && error.status === 409) {
+          setStatus("conflict.status", "error");
+          openDialog("saveConflict");
+          return;
+        }
         if (!(error instanceof ApiError && error.status === 404)) throw error;
         record = await api.createProject(project);
       }
     } else {
       record = await api.createProject(project);
     }
-    markSaved(record.id, project);
+    markSaved(record.id, project, record.revision);
     setStatus("status.saved", "success");
   } catch (error) {
     setStatus("overview.error", "error", undefined, errorMessage(error));
@@ -41,7 +51,7 @@ export async function openProject(id: string): Promise<void> {
   const { replaceProject, setStatus } = store();
   try {
     const record = await api.getProject(id);
-    replaceProject(record.project, record.id, true);
+    replaceProject(record.project, record.id, true, record.revision);
     setStatus("status.opened", "success", { name: record.project.name });
   } catch (error) {
     setStatus("overview.error", "error", undefined, errorMessage(error));

@@ -120,11 +120,12 @@ export const api = {
   listProjects: () => request<ProjectSummary[]>("/api/projects"),
   getProject: (id: string) => request<ProjectRecord>(`/api/projects/${id}`),
   createProject: (project: Project) => post<ProjectRecord>("/api/projects", { project }),
-  updateProject: (id: string, project: Project) =>
+  /** Without baseRevision the stored project is overwritten unconditionally. */
+  updateProject: (id: string, project: Project, baseRevision?: number) =>
     request<ProjectRecord>(`/api/projects/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project }),
+      body: JSON.stringify({ project, base_revision: baseRevision ?? null }),
     }),
   deleteProject: (id: string) => request<void>(`/api/projects/${id}`, { method: "DELETE" }),
   createShare: (project: Project) => post<ShareCreated>("/api/shares", { project }),

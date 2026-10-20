@@ -591,3 +591,45 @@ def test_damaged_xlsx_is_a_client_error_everywhere(client, project, content) -> 
     for response in (preview, resolve, dictionary, evaluate):
         assert 400 <= response.status_code < 500, (response.request.url, response.status_code, response.text)
         assert "XLSX" in response.json()["detail"]
+
+
+def test_concurrent_saves_conflict_instead_of_overwriting(client, project) -> None:
+    created = client.post("/api/projects", json={"project": project}).json()
+    assert created["revision"] == 1
+    project_id = created["id"]
+
+    # Two people open revision 1 and both edit it.
+    alice = {**project, "name": "Alice edit"}
+    bob = {**project, "name": "Bob edit"}
+
+    saved = client.put(f"/api/projects/{project_id}", json={"project": alice, "base_revision": 1})
+    assert saved.status_code == 200
+    assert saved.json()["revision"] == 2
+
+    conflict = client.put(f"/api/projects/{project_id}", json={"project": bob, "base_revision": 1})
+    assert conflict.status_code == 409
+    assert "revision 2" in conflict.json()["detail"]
+    stored = client.get(f"/api/projects/{project_id}").json()
+    assert stored["project"]["name"] == "Alice edit"
+    assert stored["revision"] == 2
+
+    # Saving on top of the latest revision works; omitting it overwrites on purpose.
+    assert client.put(f"/api/projects/{project_id}", json={"project": bob, "base_revision": 2}).json()["revision"] == 3
+    forced = client.put(f"/api/projects/{project_id}", json={"project": alice})
+    assert forced.status_code == 200 and forced.json()["revision"] == 4
+    listed = {item["id"]: item for item in client.get("/api/projects").json()}
+    assert listed[project_id]["revision"] == 4
+
+
+def test_records_without_revision_count_as_revision_one(tmp_path, project) -> None:
+    import json as _json
+
+    client = TestClient(create_app(data_dir=tmp_path / "data", static_dir=tmp_path / "web"))
+    project_id = client.post("/api/projects", json={"project": project}).json()["id"]
+    path = tmp_path / "data" / "projects" / f"{project_id}.json"
+    record = _json.loads(path.read_text(encoding="utf-8"))
+    del record["revision"]  # written by a version before revisions existed
+    path.write_text(_json.dumps(record), encoding="utf-8")
+
+    assert client.get(f"/api/projects/{project_id}").json()["revision"] == 1
+    assert client.put(f"/api/projects/{project_id}", json={"project": project, "base_revision": 1}).json()["revision"] == 2

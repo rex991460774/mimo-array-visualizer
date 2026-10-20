@@ -102,3 +102,44 @@ test("a share link opens the same configuration in another browser", async ({ pa
   expect(new URL(recipient.url()).pathname).toBe("/");
   await other.close();
 });
+
+test("concurrent saves of one library project ask instead of overwriting", async ({ page: alice, browser }) => {
+  await openApp(alice);
+  const name = `并发保存 ${Date.now()}`;
+  await alice.locator(".project-name-input").fill(name);
+  await alice.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(alice.locator(".save-state")).toContainText("已保存");
+
+  // Bob opens the same library project in his own browser.
+  const context = await browser.newContext({ locale: "zh-CN", viewport: { width: 1440, height: 900 } });
+  const bob = await context.newPage();
+  await openApp(bob);
+  await bob.getByRole("button", { name: /项目库/ }).click();
+  await bob.locator(".project-row").filter({ hasText: name }).getByRole("button", { name: "打开" }).click();
+  await expect(bob.locator(".project-name-input")).toHaveValue(name);
+
+  // Alice saves first; Bob's later save must not silently discard it.
+  const aliceFrequency = alice.locator(".param-input").first();
+  await aliceFrequency.fill("60");
+  await aliceFrequency.press("Enter");
+  await alice.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(alice.locator(".save-state")).toContainText("已保存");
+
+  const bobMargin = bob.locator(".param-input").nth(1);
+  await bobMargin.fill("3");
+  await bobMargin.press("Enter");
+  await bob.getByRole("button", { name: "保存", exact: true }).click();
+  const dialog = bob.getByRole("dialog");
+  await expect(dialog).toContainText("项目已被他人修改");
+  await dialog.getByRole("button", { name: "另存为新项目" }).click();
+  await expect(bob.locator(".save-state")).toContainText("已保存");
+  await expect(bob.locator(".project-name-input")).toHaveValue(`${name}（副本）`);
+
+  // Alice's version is intact and Bob's edit lives in its own project.
+  const library = await (await alice.request.get("/api/projects")).json();
+  const mine = library.filter((item: { name: string }) => item.name.startsWith(name));
+  expect(mine).toHaveLength(2);
+  const original = mine.find((item: { name: string }) => item.name === name);
+  expect(original.frequency_ghz).toBe(60);
+  await context.close();
+});

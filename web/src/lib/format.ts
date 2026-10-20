@@ -66,6 +66,8 @@ export function downloadJson(data: unknown, filename: string): void {
 }
 
 export function safeFilename(name: string): string {
+  // Control characters are invalid in file names on every platform: strip them on purpose.
+  // eslint-disable-next-line no-control-regex
   return name.replace(/[\\/:*?"<>|\x00-\x1f]/g, "_").trim() || "project";
 }
 

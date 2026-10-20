@@ -13,9 +13,12 @@ function store() {
  * if someone else saved in between, nothing is written and the conflict dialog
  * asks whether to save as a new project or overwrite (`overwrite = true`).
  */
-export async function saveProject(asNew = false, overwrite = false): Promise<void> {
-  const { project, projectId, projectRevision, markSaved, setStatus, openDialog } = store();
-  if (!project) return;
+export async function saveProject(asNew = false, overwrite = false, name?: string): Promise<void> {
+  const { project: current, projectId, projectRevision, markSaved, setStatus, openDialog, updateProject } = store();
+  if (!current) return;
+  // A new name (e.g. "… (copy)") is applied only once the save succeeds, so a
+  // failed or retried save neither renames the project nor stacks suffixes.
+  const project = name === undefined ? current : { ...current, name };
   try {
     let record;
     if (projectId && !asNew) {
@@ -33,6 +36,7 @@ export async function saveProject(asNew = false, overwrite = false): Promise<voi
     } else {
       record = await api.createProject(project);
     }
+    if (name !== undefined) updateProject({ name });
     markSaved(record.id, project, record.revision);
     setStatus("status.saved", "success");
   } catch (error) {

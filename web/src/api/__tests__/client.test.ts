@@ -56,8 +56,15 @@ describe("request error mapping", () => {
     expect((await rejection(api.listProjects())).message).toBe("HTTP 502");
   });
 
-  it("ignores a non-string detail (FastAPI validation arrays)", async () => {
-    fetchMock.mockImplementation(async () => jsonResponse({ detail: [{ msg: "bad" }] }, 422, "Unprocessable Entity"));
+  it("joins the messages of a FastAPI validation array instead of dropping them", async () => {
+    fetchMock.mockImplementation(async () =>
+      jsonResponse({ detail: [{ msg: "bad" }, { msg: "worse" }, { loc: ["x"] }] }, 422, "Unprocessable Entity"),
+    );
+    expect((await rejection(api.listProjects())).message).toBe("bad; worse");
+  });
+
+  it("falls back to the status text for an unusable detail", async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ detail: { nested: true } }, 422, "Unprocessable Entity"));
     expect((await rejection(api.listProjects())).message).toBe("Unprocessable Entity");
   });
 
@@ -133,14 +140,14 @@ describe("exportBundle (blob responses)", () => {
     expect(error).toMatchObject({ status: 404, message: "Asset not found: 'x'" });
   });
 
-  // Defect R5-1: postForBlob (client.ts:78-83) copies `detail` without the
-  // typeof check request() has, so a FastAPI 422 array becomes the message
-  // and the UI shows "[object Object]".
-  it.fails("a non-string detail should not become the error message", async () => {
+  // Regression R5-1: postForBlob parsed `detail` without request()'s type check,
+  // so exportBundle showed "[object Object]" for a FastAPI 422 array.
+  it("a non-string detail never becomes \"[object Object]\"", async () => {
     fetchMock.mockImplementation(async () => jsonResponse({ detail: [{ msg: "bad" }] }, 422, "Unprocessable Entity"));
     const error = await rejection(api.exportBundle(project()));
-    expect(typeof error.message).toBe("string");
-    expect(error.message).toBe("Unprocessable Entity");
+    expect(error.message).toBe("bad");
+    fetchMock.mockImplementation(async () => jsonResponse({ detail: { nested: true } }, 422, "Unprocessable Entity"));
+    expect((await rejection(api.exportBundle(project()))).message).toBe("Unprocessable Entity");
   });
 });
 

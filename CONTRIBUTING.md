@@ -17,7 +17,7 @@ cd web && npm ci
 ```bash
 .venv/bin/python -m pytest -q
 .venv/bin/ruff check src tests
-cd web && npm test && npx tsc -b && npm run build
+cd web && npm run lint && npm test && npx tsc -b && npm run build
 cd web && npm run e2e        # 浏览器冒烟测试；首次运行前执行 npx playwright install chromium
 ```
 

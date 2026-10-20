@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonResponse, resetStore } from "../../__tests__/fixtures";
-import { useStore } from "../../state/store";
+import { projectSnapshot, useStore } from "../../state/store";
 import { SaveConflictDialog } from "../SaveConflictDialog";
 
 const ID = "f".repeat(32);
@@ -78,12 +78,14 @@ describe("SaveConflictDialog", () => {
     expect(s().project!.name).toBe("Case4（副本）");
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST")!;
     expect(post[0]).toBe("/api/projects");
+    expect(JSON.parse(post[1]!.body as string).project.name).toBe("Case4（副本）");
+    // Saved under the new name: the working copy is not left "unsaved".
+    expect(s().savedSnapshot).toBe(projectSnapshot(s().project!));
   });
 
-  // Defect R5-3: "save as new" renames the working copy before saving
-  // (SaveConflictDialog.tsx:62) and never undoes it, so a failed save still
-  // leaves the project renamed to "…（副本）" and each retry appends another suffix.
-  it.fails("a failed 'save as new' leaves the project name unchanged", async () => {
+  // Regression R5-3: the copy suffix used to be applied before saving, so a
+  // failed save renamed the project and every retry stacked another suffix.
+  it("a failed 'save as new' leaves the project name unchanged", async () => {
     fetchMock.mockImplementation(async (_path, init) =>
       init?.method === "POST" ? jsonResponse({ detail: "cannot write" }, 507) : jsonResponse(stored(2)),
     );

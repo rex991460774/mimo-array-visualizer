@@ -75,6 +75,23 @@ test("Escape cancels a numeric edit and Enter commits it", async ({ page }) => {
   await frequency.fill("60");
   await frequency.press("Enter");
   await expect(status).toContainText("@ 60 GHz");
+
+  // Inside a dialog, Escape in a numeric field cancels only that field: the
+  // dialog and its other unapplied edits stay (regression R5-2).
+  await page.locator(".param-button").nth(1).click();
+  const dialog = page.getByRole("dialog");
+  const fields = dialog.locator("input.num");
+  await fields.nth(0).fill("12");
+  await fields.nth(0).press("Enter");
+  const second = fields.nth(1);
+  const secondOriginal = await second.inputValue();
+  await second.fill("99");
+  await second.press("Escape");
+  await expect(dialog).toBeVisible();
+  await expect(second).toHaveValue(secondOriginal);
+  await expect(fields.nth(0)).toHaveValue("12");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
 });
 
 test("a share link opens the same configuration in another browser", async ({ page, browser }) => {

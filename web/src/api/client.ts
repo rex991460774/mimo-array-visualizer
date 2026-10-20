@@ -42,18 +42,32 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     if ((error as Error).name === "AbortError") throw error;
     throw new ApiError("network", 0);
   }
-  if (!response.ok) {
-    let detail = response.statusText;
-    try {
-      const body = await response.json();
-      if (typeof body?.detail === "string") detail = body.detail;
-    } catch {
-      // keep status text
-    }
-    throw new ApiError(detail || `HTTP ${response.status}`, response.status);
-  }
+  if (!response.ok) throw await responseError(response);
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
+}
+
+/**
+ * ApiError from a failed response. `detail` is a string from this server, but
+ * FastAPI-style validation errors are a list of `{msg}` objects: join their
+ * messages rather than letting an object become "[object Object]".
+ */
+async function responseError(response: Response): Promise<ApiError> {
+  let detail = "";
+  try {
+    const body = await response.json();
+    if (typeof body?.detail === "string") {
+      detail = body.detail;
+    } else if (Array.isArray(body?.detail)) {
+      detail = body.detail
+        .map((item: unknown) => (typeof item === "string" ? item : (item as { msg?: unknown })?.msg))
+        .filter((text: unknown): text is string => typeof text === "string" && text.length > 0)
+        .join("; ");
+    }
+  } catch {
+    // not JSON: fall back to the status text
+  }
+  return new ApiError(detail || response.statusText || `HTTP ${response.status}`, response.status);
 }
 
 function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
@@ -76,15 +90,7 @@ async function postForBlob(path: string, body: unknown): Promise<Blob> {
   } catch {
     throw new ApiError("network", 0);
   }
-  if (!response.ok) {
-    let detail = response.statusText;
-    try {
-      detail = (await response.json()).detail ?? detail;
-    } catch {
-      // keep status text
-    }
-    throw new ApiError(detail, response.status);
-  }
+  if (!response.ok) throw await responseError(response);
   return response.blob();
 }
 

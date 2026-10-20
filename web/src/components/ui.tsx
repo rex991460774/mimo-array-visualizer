@@ -205,15 +205,18 @@ export function Dialog({
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     panel.current?.focus();
+    // Bubble phase, not capture: a field that handles Escape itself (NumberInput
+    // cancels its edit, an open Menu closes) stops propagation, so the dialog
+    // and its other unapplied changes survive; Escape elsewhere still closes it.
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.stopPropagation();
         onClose();
       }
     };
-    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("keydown", onKey);
       previous?.focus?.();
     };
   }, [onClose]);
@@ -276,7 +279,11 @@ export function Menu({
     const onDown = (event: MouseEvent) => {
       if (!anchor.current?.contains(event.target as Node)) setOpen(false);
     };
-    const onKey = (event: KeyboardEvent) => event.key === "Escape" && setOpen(false);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation(); // close only the menu, not an enclosing dialog
+      setOpen(false);
+    };
     const onResize = () => setOpen(false);
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);

@@ -185,19 +185,39 @@ describe("Dialog", () => {
     expect(document.activeElement).toBe(opener);
   });
 
-  // Defect R5-2: the Dialog listens for Escape on window in the capture phase
-  // (ui.tsx:208-216), before NumberInput's handler runs, so Escape inside a
-  // numeric field in any dialog (settings, patterns…) closes the whole dialog
-  // instead of only cancelling the edit.
-  it.fails("Escape inside a NumberInput in a dialog only cancels the edit", async () => {
+  // Regression R5-2: the Dialog used to catch Escape on window in the capture
+  // phase, before NumberInput, closing the dialog and dropping its other edits.
+  it("Escape inside a NumberInput in a dialog only cancels the edit", async () => {
     const onClose = vi.fn();
+    const onCommit = vi.fn();
     render(
       <Dialog title="设置" onClose={onClose}>
-        <NumberInput aria-label="freq" value={77} parse={parseNumber} onCommit={() => {}} />
+        <NumberInput aria-label="freq" value={77} parse={parseNumber} onCommit={onCommit} />
       </Dialog>,
     );
     await userEvent.clear(input());
     await userEvent.type(input(), "60{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(input().value).toBe("77");
+    // With the field no longer focused, Escape closes the dialog as usual.
+    await userEvent.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("Escape in an open Menu inside a dialog closes only the menu", async () => {
+    const onClose = vi.fn();
+    render(
+      <Dialog title="设置" onClose={onClose}>
+        <Menu trigger={({ toggle }) => <button type="button" onClick={toggle}>more</button>}>
+          {() => <MenuItem onSelect={() => {}}>item</MenuItem>}
+        </Menu>
+      </Dialog>,
+    );
+    await userEvent.click(screen.getByText("more"));
+    expect(screen.getByRole("menu")).toBeTruthy();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).toBeNull();
     expect(onClose).not.toHaveBeenCalled();
   });
 });

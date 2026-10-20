@@ -56,10 +56,7 @@ export function SaveConflictDialog({ onClose }: { onClose: () => void }) {
             icon={<CopyPlus size={15} />}
             disabled={busy}
             onClick={() =>
-              run(async () => {
-                useStore.getState().updateProject({ name: `${project.name}${t("conflict.copySuffix")}`.slice(0, 120) });
-                await saveProject(true);
-              })
+              run(() => saveProject(true, false, `${project.name}${t("conflict.copySuffix")}`.slice(0, 120)))
             }
           >
             {t("conflict.saveAsNew")}

@@ -98,6 +98,7 @@ export function baseLayout(theme: ChartTheme, overrides: Record<string, any> = {
 }
 
 /** Merge axis overrides while keeping the themed title font. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mergeAxis(base: Record<string, any>, override: Record<string, any> | undefined): Record<string, any> {
   if (!override) return base;
   const merged = { ...base, ...override };

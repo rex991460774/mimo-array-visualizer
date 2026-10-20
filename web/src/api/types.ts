@@ -377,6 +377,8 @@ export interface ServerConfig {
     max_asset_bytes: number;
     max_2d_frames_per_request: number;
     grid_steps_lambda: number[];
+    /** Element coordinates must stay within ±this many λ. */
+    coordinate_lambda: number;
   };
   band_presets: Record<"60G" | "77G" | "92G", { start_ghz: number; stop_ghz: number; design_ghz: number }>;
   dbf: { scan_fov: [number, number]; scan_step_deg: number; scan_grid_size: number };

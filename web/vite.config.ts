@@ -22,5 +22,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Browser smoke tests in e2e/ run under Playwright, not Vitest.
+    include: ["src/**/*.test.ts"],
   },
 });

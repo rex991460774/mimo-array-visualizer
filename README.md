@@ -261,6 +261,7 @@ cd web && npm ci && npm run dev               # 前端热更新：http://localho
 .venv/bin/ruff check src tests                # Python lint
 cd web && npm test && npx tsc -b              # 前端单元测试 + 类型检查
 cd web && npm run build                       # 构建到 src/virtual_array/server/static
+cd web && npm run e2e                         # 浏览器冒烟测试（Playwright，需先 build；首次运行 npx playwright install chromium）
 ```
 
 参与贡献请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。

@@ -22,6 +22,7 @@ from ..engine import Engine, ProjectComputationError
 from ..logging_config import configure_logging
 from ..project import (
     BAND_PRESETS,
+    COORDINATE_LIMIT_LAMBDA,
     GRID_STEP_LAMBDA,
     GRID_STEPS_LAMBDA,
     MAX_RX_COUNT,
@@ -213,6 +214,7 @@ def create_app(data_dir: str | Path | None = None, static_dir: str | Path | None
                 "max_asset_bytes": MAX_ASSET_BYTES,
                 "max_2d_frames_per_request": MAX_2D_FRAMES_PER_REQUEST,
                 "grid_steps_lambda": list(GRID_STEPS_LAMBDA),
+                "coordinate_lambda": COORDINATE_LIMIT_LAMBDA,
             },
             "band_presets": BAND_PRESETS,
             "dbf": {

@@ -114,6 +114,7 @@ export const zh = {
   "physical.dragHint": "拖动通道调整位置 · 方向键微调 · Delete 删除",
   "physical.limit": "{kind} 数量已达上限（{max}）",
   "physical.lastElement": "至少需要保留一个 {kind} 通道",
+  "physical.outOfRange": "坐标需在 ±{limit} λ 以内",
   "physical.selected": "已选中 {name}",
   "physical.legendTx": "Tx 发射",
   "physical.legendRx": "Rx 接收",
@@ -164,6 +165,7 @@ export const zh = {
   "overview.notes": "提示",
   "overview.computing": "计算中…",
   "overview.error": "计算失败",
+  "overview.stale": "下方为上次成功计算的结果，与当前配置不一致。",
 
   "cut.competitor": "竞争峰模糊",
   "cut.error_jump": "误差跳变",
@@ -556,6 +558,7 @@ export const en: Messages = {
   "physical.dragHint": "Drag to move · arrow keys nudge · Delete removes",
   "physical.limit": "{kind} limit reached ({max})",
   "physical.lastElement": "At least one {kind} channel is required",
+  "physical.outOfRange": "Coordinates must be within ±{limit} λ",
   "physical.selected": "Selected {name}",
   "physical.legendTx": "Tx transmit",
   "physical.legendRx": "Rx receive",
@@ -606,6 +609,7 @@ export const en: Messages = {
   "overview.notes": "Notes",
   "overview.computing": "Computing…",
   "overview.error": "Computation failed",
+  "overview.stale": "The figures below are from the last successful run and do not match the current configuration.",
 
   "cut.competitor": "Competitor peak",
   "cut.error_jump": "Error jump",
@@ -995,6 +999,7 @@ export const ja: Messages = {
   "physical.dragHint": "ドラッグで移動 · 矢印キーで微調整 · Delete で削除",
   "physical.limit": "{kind} の上限（{max}）に達しました",
   "physical.lastElement": "{kind} チャネルは少なくとも 1 つ必要です",
+  "physical.outOfRange": "座標は ±{limit} λ 以内にしてください",
   "physical.selected": "{name} を選択",
   "physical.legendTx": "Tx 送信",
   "physical.legendRx": "Rx 受信",
@@ -1045,6 +1050,7 @@ export const ja: Messages = {
   "overview.notes": "注意",
   "overview.computing": "計算中…",
   "overview.error": "計算に失敗しました",
+  "overview.stale": "以下は前回成功した計算結果で、現在の構成とは一致しません。",
 
   "cut.competitor": "競合ピーク",
   "cut.error_jump": "誤差ジャンプ",

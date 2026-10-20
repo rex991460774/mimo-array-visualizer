@@ -84,8 +84,10 @@ export function Overview() {
   const evaluation = useStore((state) => state.evaluation);
   const evaluating = useStore((state) => state.evaluating);
   const error = useStore((state) => state.evaluationError);
+  // A failed evaluation keeps the previous result: show it as stale, not as current.
+  const stale = Boolean(error && evaluation);
   return (
-    <aside className="overview" aria-label={t("overview.title")}>
+    <aside className={`overview${stale ? " is-stale" : ""}`} aria-label={t("overview.title")}>
       <div className="overview-section">
         <h3>
           {t("overview.title")}
@@ -95,6 +97,7 @@ export function Overview() {
           <div style={{ marginBottom: 10 }}>
             <Callout tone="danger" title={t("overview.error")}>
               {error}
+              {stale && <div style={{ marginTop: 4 }}>{t("overview.stale")}</div>}
             </Callout>
           </div>
         )}

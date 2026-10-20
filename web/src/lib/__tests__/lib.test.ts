@@ -42,9 +42,30 @@ describe("geometry", () => {
 describe("format", () => {
   it("parses numbers with optional unit suffixes and decimal commas", () => {
     expect(parseNumber("77 GHz", ["ghz", "g"])).toBe(77);
-    expect(parseNumber("24,125g", ["ghz", "g"])).toBe(24.125);
+    expect(parseNumber("76.5")).toBe(76.5);
+    expect(parseNumber("1,5")).toBe(1.5);
+    expect(parseNumber("0,125")).toBe(0.125);
+    expect(parseNumber("-.5")).toBe(-0.5);
+    expect(parseNumber("1e-3")).toBe(0.001);
+    expect(parseNumber("\u221275°", ["°"])).toBe(-75);
     expect(parseNumber("abc")).toBeNull();
     expect(parseNumber("  ")).toBeNull();
+  });
+
+  it("rejects input that could be misread instead of guessing", () => {
+    // A comma before exactly three digits may be a thousands separator.
+    expect(parseNumber("1,000")).toBeNull();
+    expect(parseNumber("24,125g", ["ghz", "g"])).toBeNull();
+    expect(parseNumber("1,000,000")).toBeNull();
+    expect(parseNumber("1.000,5")).toBeNull();
+    // Non-decimal literals and special values.
+    expect(parseNumber("0x4D")).toBeNull();
+    expect(parseNumber("0b101")).toBeNull();
+    expect(parseNumber("0o17")).toBeNull();
+    expect(parseNumber("Infinity")).toBeNull();
+    expect(parseNumber("1e999")).toBeNull();
+    expect(parseNumber("7 7")).toBeNull();
+    expect(parseNumber("77..5")).toBeNull();
   });
 
   it("formats signed angles and trims trailing zeros", () => {

@@ -68,6 +68,12 @@ function withDefaults(draft: Project, defaults: Project): Project {
   };
 }
 
+function layoutWithin(layout: Layout, limit: number): boolean {
+  return [...layout.tx, ...layout.rx].every(
+    (point) => Number.isFinite(point.x) && Number.isFinite(point.y) && Math.abs(point.x) <= limit && Math.abs(point.y) <= limit,
+  );
+}
+
 export function projectSnapshot(project: Project): string {
   return JSON.stringify(project);
 }
@@ -171,8 +177,15 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   commitLayout(layout, selection) {
-    const { project, past, selection: current } = get();
+    const { project, past, selection: current, config } = get();
     if (!project) return;
+    // Every edit path (drag, keys, table, inspector) ends here: refuse layouts
+    // the server would reject instead of showing metrics for an invalid array.
+    const limit = config?.limits.coordinate_lambda;
+    if (limit !== undefined && !layoutWithin(layout, limit)) {
+      get().setStatus("physical.outOfRange", "error", { limit });
+      return;
+    }
     const ordered = renumber(layout, selection === undefined ? current : selection);
     if (layoutsEqual(ordered.layout, project.layout)) {
       set({ selection: ordered.follow });

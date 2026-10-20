@@ -25,6 +25,7 @@ cd web && npm run dev
 .venv/bin/python -m pytest -q
 .venv/bin/python -m pytest tests/test_server.py -q
 cd web && npm test && npx tsc -b
+cd web && npm run build && npm run e2e   # Playwright smoke tests (web/e2e) against the real server; MIMO_SERVER overrides the server command
 
 # Lint
 .venv/bin/ruff check src tests

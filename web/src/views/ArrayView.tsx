@@ -37,13 +37,20 @@ function CoordInput({
   onCommit: (lambda: number) => void;
   className?: string;
 }) {
+  const t = useT();
+  // The server validates too; without a published limit, leave the check to it.
+  const limit = useStore((state) => state.config!.limits.coordinate_lambda) ?? Number.POSITIVE_INFINITY;
   const scale = unit === "mm" ? mmPerLambda : 1;
   return (
     <NumberInput
       className={className}
       value={value * scale}
-      parse={(text) => parseNumber(text, unit === "mm" ? ["mm"] : ["λ"])}
+      parse={(text) => {
+        const parsed = parseNumber(text, unit === "mm" ? ["mm"] : ["λ"]);
+        return parsed !== null && Math.abs(parsed / scale) <= limit ? parsed : null;
+      }}
       format={(v) => trimNumber(v, unit === "mm" ? 3 : 4)}
+      invalidTitle={t("physical.outOfRange", { limit })}
       onCommit={(v) => onCommit(snap(v / scale, 0))}
     />
   );

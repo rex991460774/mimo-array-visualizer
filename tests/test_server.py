@@ -410,6 +410,16 @@ def test_config_exposes_band_presets(client) -> None:
     assert set(presets) == {"60G", "77G", "92G"}
 
 
+def test_config_coordinate_limit_matches_project_validation(client, project) -> None:
+    limit = client.get("/api/config").json()["limits"]["coordinate_lambda"]
+    assert limit == 500
+
+    project["layout"]["tx"][0]["x"] = limit
+    assert client.post("/api/evaluate", json={"project": project}).status_code == 200
+    project["layout"]["tx"][0]["x"] = limit + 1
+    assert client.post("/api/evaluate", json={"project": project}).status_code == 422
+
+
 def test_evaluate_reports_measured_resolution_fov_and_requirements(client, project) -> None:
     project["requirements"] = {"azimuth_resolution_deg": 1.5, "max_psl_db": -10}
 

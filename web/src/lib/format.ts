@@ -19,15 +19,29 @@ export function trimNumber(value: number, digits = 3): string {
   return text.includes(".") ? text.replace(/0+$/, "").replace(/\.$/, "") : text;
 }
 
+const DECIMAL = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/;
+
+/**
+ * Parse a user-typed number: plain decimal or scientific notation, with an
+ * optional unit suffix. Anything that could be misread is rejected rather than
+ * guessed: hex/binary literals, several separators, and "1,000"-style input
+ * where the comma may be a thousands separator. An unambiguous decimal comma
+ * ("1,5", "0,125") is accepted.
+ */
 export function parseNumber(text: string, suffixes: string[] = []): number | null {
-  let value = text.trim().toLowerCase().replace(",", ".");
+  let value = text.trim().toLowerCase().replace(/\u2212/g, "-");
   for (const suffix of suffixes) {
     if (value.endsWith(suffix)) {
       value = value.slice(0, -suffix.length).trim();
       break;
     }
   }
-  if (!value) return null;
+  if (value.includes(",")) {
+    const ambiguous = /^[+-]?[1-9]\d*,\d{3}$/.test(value);
+    if (ambiguous || value.includes(".") || value.indexOf(",") !== value.lastIndexOf(",")) return null;
+    value = value.replace(",", ".");
+  }
+  if (!DECIMAL.test(value)) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }

@@ -922,3 +922,10 @@ details.collapsible[open] > summary .chevron {
   background: transparent;
   font-size: 13px;
 }
+
+/* Previous results kept after a failed evaluation: visibly out of date. */
+.overview.is-stale .kpi-grid,
+.overview.is-stale .overview-section + .overview-section {
+  opacity: 0.45;
+  filter: grayscale(1);
+}

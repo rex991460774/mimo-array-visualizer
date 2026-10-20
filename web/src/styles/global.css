@@ -436,6 +436,12 @@ textarea {
   background: var(--surface-hover);
 }
 
+/* Tertiary text is only AA on the resting background; darken it on hover fills. */
+.param:hover .param-label,
+.param:hover .param-unit {
+  color: var(--text-secondary);
+}
+
 .param-strip > :first-child .param,
 .param-strip > .param:first-child {
   border-radius: var(--radius) 0 0 var(--radius);

@@ -6,6 +6,7 @@ import { Plot } from "../charts/Plot";
 import { baseLayout, useChartTheme } from "../charts/theme";
 import { Button, Callout, Dialog, Segmented, Spinner, useFilePicker } from "../components/ui";
 import { useT } from "../i18n";
+import { trimNumber } from "../lib/format";
 import { decodeMatrix, matrixRows } from "../lib/encoding";
 import { useStore } from "../state/store";
 import { rememberAssetName, useAssetNames } from "./useAssetNames";
@@ -222,11 +223,30 @@ export function DictionaryDialog({ onClose }: { onClose: () => void }) {
           </div>
           {needsFile && <Callout tone="info">{t("dictDialog.needFile")}</Callout>}
           {previewError && <Callout tone="danger">{previewError}</Callout>}
+          {preview && !needsFile && <CoverageCallout preview={preview} />}
           {preview && !needsFile && <QualityCallout preview={preview} />}
           {preview && !needsFile && <PhaseMatrix preview={preview} />}
         </div>
       </div>
     </Dialog>
+  );
+}
+
+/** Warn when the table spans less than the FOV or the search range (no extrapolation beyond it). */
+function CoverageCallout({ preview }: { preview: DictionaryPreview }) {
+  const t = useT();
+  const coverage = preview.coverage;
+  if (!coverage || coverage.covers_search) return null;
+  const range = ([low, high]: [number, number]) => `${trimNumber(low, 2)}° ~ ${trimNumber(high, 2)}°`;
+  const params = { table: range(coverage.table), fov: range(coverage.fov), search: range(coverage.search) };
+  return coverage.covers_fov ? (
+    <Callout tone="info" title={t("dictDialog.coverageGuardTitle")}>
+      {t("dictDialog.coverageGuard", params)}
+    </Callout>
+  ) : (
+    <Callout tone="warning" title={t("dictDialog.coverageFovTitle")}>
+      {t("dictDialog.coverageFov", params)}
+    </Callout>
   );
 }
 

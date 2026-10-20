@@ -9,6 +9,14 @@ import { defineConfig, devices } from "@playwright/test";
 const port = Number(process.env.E2E_PORT ?? 8765);
 const server = process.env.MIMO_SERVER ?? "../.venv/bin/mimo-array-server";
 const dataDir = mkdtempSync(join(tmpdir(), "mimo-e2e-"));
+// CI runs Chromium; E2E_BROWSERS=chromium,firefox,webkit adds the other engines
+// (install them first with `npx playwright install firefox webkit`).
+const browsers = (process.env.E2E_BROWSERS ?? "chromium").split(",").map((name) => name.trim());
+const devicesByBrowser: Record<string, (typeof devices)[string]> = {
+  chromium: devices["Desktop Chrome"],
+  firefox: devices["Desktop Firefox"],
+  webkit: devices["Desktop Safari"],
+};
 
 export default defineConfig({
   testDir: "e2e",
@@ -21,7 +29,9 @@ export default defineConfig({
     locale: "zh-CN",
     trace: "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } }],
+  projects: browsers
+    .filter((name) => name in devicesByBrowser)
+    .map((name) => ({ name, use: { ...devicesByBrowser[name], viewport: { width: 1440, height: 900 } } })),
   webServer: {
     command: `${server} --host 127.0.0.1 --port ${port} --data-dir "${dataDir}"`,
     url: `http://127.0.0.1:${port}/api/health`,

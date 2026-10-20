@@ -25,7 +25,8 @@ cd web && npm run dev
 .venv/bin/python -m pytest -q
 .venv/bin/python -m pytest tests/test_server.py -q
 cd web && npm test && npx tsc -b
-cd web && npm run build && npm run e2e   # Playwright smoke tests (web/e2e) against the real server; MIMO_SERVER overrides the server command
+cd web && npm run build && npm run e2e   # Playwright smoke tests (web/e2e) against the real server; MIMO_SERVER overrides the server command, E2E_BROWSERS=chromium,firefox,webkit adds engines
+cd web && npm run coverage               # unit-test coverage over all of web/src
 
 # Lint
 .venv/bin/ruff check src tests
@@ -87,7 +88,8 @@ Browser edits Project ──POST /api/evaluate──▶ Engine.evaluate ─▶ A
 - All angle evaluation goes through `EvaluationSettings` built from `project.fov` (`engine.evaluation_settings`); do not call the ±90° bank functions directly from new service code.
 - Channel names derive from list order (`Tx1…`, `Rx1…`); the client renumbers by (x, y) after every edit, like the desktop tool.
 - Imported channel phase (HFSS far-field) already contains the geometric phase, so it is the channel response for its plane in both DBF and array-factor metrics (`_channel_response`); geometric steering is kept only for a plane without imported phase, with the sign from `_imported_phase_sign`.
-- Uploaded files are untrusted (no auth): read spreadsheets only via `table_io.read_spreadsheet_rows()` (maps damaged/oversized XLSX to `ValueError` → 4xx) and never decompress uploads without a size cap.
+- Uploaded files are untrusted (no auth): read tables only via `table_io.read_spreadsheet_rows()` / `read_csv_rows()` (bounded rows, columns, line length and XLSX expansion; damaged files → `ValueError` → 4xx) and never decompress uploads without a size cap. Request bodies are capped by `server/limits.py`; data-dir writes go through `fileio.atomic_write_*` and a full/read-only disk is reported as 507.
+- Custom DBF dictionary tables are never extrapolated: outside a table's angle span its rows are zero (`DbfDictionaryTable.angle_coverage`), and `dictionary_coverage` reports tables narrower than the FOV or search range.
 - Non-finite numbers travel as `"Infinity"` / `"-Infinity"` strings; large matrices as `{dtype, shape, data(base64)}`.
 - Keep core numerics unchanged when refactoring — the analysis tests pin them.
 - Tests use `examples/case4_5tx7rx_sel.py::build_array()` (also the default project) as the reference layout.

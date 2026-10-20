@@ -272,6 +272,8 @@ cd web && npm ci && npm run dev               # 前端热更新：http://localho
 cd web && npm test && npx tsc -b              # 前端单元测试 + 类型检查
 cd web && npm run build                       # 构建到 src/virtual_array/server/static
 cd web && npm run e2e                         # 浏览器冒烟测试（Playwright，需先 build；首次运行 npx playwright install chromium）
+cd web && E2E_BROWSERS=chromium,firefox,webkit npm run e2e   # 同时跑 Firefox/WebKit（先 npx playwright install firefox webkit）
+cd web && npm run coverage                    # 前端单元测试覆盖率（报告在 web/coverage/）
 ```
 
 参与贡献请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。

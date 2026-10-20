@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import time
 import zipfile
 from pathlib import Path
@@ -633,3 +634,135 @@ def test_records_without_revision_count_as_revision_one(tmp_path, project) -> No
 
     assert client.get(f"/api/projects/{project_id}").json()["revision"] == 1
     assert client.put(f"/api/projects/{project_id}", json={"project": project, "base_revision": 1}).json()["revision"] == 2
+
+
+def test_deleted_project_is_not_resurrected_by_concurrent_saves(client, project) -> None:
+    import threading
+
+    resurrected = 0
+    for _ in range(40):
+        project_id = client.post("/api/projects", json={"project": project}).json()["id"]
+        barrier = threading.Barrier(5)
+
+        def save(project_id: str = project_id, barrier: threading.Barrier = barrier) -> None:
+            barrier.wait()
+            for _ in range(4):
+                client.put(f"/api/projects/{project_id}", json={"project": project})
+
+        def delete(project_id: str = project_id, barrier: threading.Barrier = barrier) -> None:
+            barrier.wait()
+            assert client.delete(f"/api/projects/{project_id}").status_code == 204
+
+        threads = [threading.Thread(target=save) for _ in range(4)] + [threading.Thread(target=delete)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        if client.get(f"/api/projects/{project_id}").status_code != 404:
+            resurrected += 1
+    assert resurrected == 0
+
+
+def ideal_dictionary_csv(start: float, stop: float, step: float = 0.5) -> bytes:
+    """Ideal-geometry azimuth dictionary for the default project's virtual channels."""
+    from virtual_array.project import project_array
+
+    array = project_array(default_project())
+    angles = np.arange(start, stop + step / 2, step)
+    names, phases = [], []
+    for ti, tx in enumerate(array.tx):
+        for ri, rx in enumerate(array.rx):
+            names.append(f"Tx{ti + 1}Rx{ri + 1}")
+            phases.append(180.0 * (tx.x + rx.x) * np.sin(np.radians(angles)))
+    lines = ["Angle," + ",".join(names)]
+    lines += [f"{angle:g}," + ",".join(f"{phase[i]:.6f}" for phase in phases) for i, angle in enumerate(angles)]
+    return ("\n".join(lines) + "\n").encode()
+
+
+@pytest.mark.parametrize(
+    ("span", "note"),
+    [((-90, 90), None), ((-75, 75), "dictionary_guard_gap"), ((-60, 60), "dictionary_fov_gap")],
+)
+def test_custom_dictionary_edges_are_not_extrapolated(client, project, span, note) -> None:
+    asset = upload(client, "dict.csv", ideal_dictionary_csv(*span))
+    project["dbf_dictionary"] = {**project["dbf_dictionary"], "mode": "custom", "azimuth_asset": asset}
+
+    result = client.post("/api/evaluate", json={"project": project}).json()
+    azimuth = result["angle"]["azimuth"]
+    coverage = result["dictionary_coverage"]["azimuth"]
+    assert coverage["table"] == [span[0], span[1]]
+    assert coverage["fov"] == [-75, 75]
+    notes = {code for code in result["notes"] if code.startswith("dictionary_")}
+    assert notes == ({note} if note else set())
+
+    if span[0] <= -75:
+        # A table that exactly spans the FOV used to report -85° for a true -75°
+        # (edge rows repeated across the guard band); both edges must now be exact.
+        assert azimuth["focus_max_abs_error"] < 0.01
+        assert (azimuth["no_fold_left"], azimuth["no_fold_right"]) == (-75, 75)
+        assert azimuth["negative_cut_reason"] == azimuth["positive_cut_reason"] == "data_boundary"
+
+    preview = client.post("/api/dictionary/preview", json={"project": project, "axis": "azimuth"}).json()
+    assert preview["coverage"]["table"] == [span[0], span[1]]
+    assert preview["quality"]["zero_norm_rows"] == 0
+
+
+def test_storage_failures_are_reported_and_leave_no_partial_files(tmp_path, project, monkeypatch) -> None:
+    import errno
+    from pathlib import Path as _Path
+
+    client = TestClient(create_app(data_dir=tmp_path / "data", static_dir=tmp_path / "web"))
+    real_write = _Path.write_bytes
+
+    def disk_full(self, data):  # noqa: ANN001
+        real_write(self, data[: len(data) // 2])  # a partial temp file, as on a full disk
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(_Path, "write_bytes", disk_full)
+    upload_response = client.post("/api/assets", files={"file": ("p.csv", b"theta,gain\n0,1\n", "text/csv")})
+    save_response = client.post("/api/projects", json={"project": project})
+    monkeypatch.undo()
+
+    for response in (upload_response, save_response):
+        assert response.status_code == 507
+        assert "data directory" in response.json()["detail"]
+    leftovers = [path for path in (tmp_path / "data").rglob("*") if path.is_file() and path.suffix in {".tmp", ".csv"}]
+    assert leftovers == []
+    assert not any((tmp_path / "data" / "assets").iterdir())
+
+
+def test_cli_refuses_an_unusable_data_dir(tmp_path, capsys) -> None:
+    from virtual_array.server.cli import main
+
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x", encoding="utf-8")
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--data-dir", str(blocker / "data")])
+    assert exit_info.value.code == 2
+    assert "Cannot use data directory" in capsys.readouterr().err
+
+
+def test_request_bodies_are_size_limited(client, project) -> None:
+    from virtual_array.server.limits import MAX_JSON_BODY_BYTES
+
+    padding = "x" * (MAX_JSON_BODY_BYTES + 1)
+    oversized = client.post(
+        "/api/evaluate", content=json.dumps({"project": project, "pad": padding}), headers={"Content-Type": "application/json"}
+    )
+    assert oversized.status_code == 413
+    assert "MB" in oversized.json()["detail"]
+
+    # Chunked bodies without Content-Length are counted while being read.
+    def chunks():
+        yield b'{"project": '
+        for _ in range(MAX_JSON_BODY_BYTES // (1024 * 1024) + 2):
+            yield b" " * (1024 * 1024)
+        yield json.dumps(project).encode() + b"}"
+
+    chunked = client.post("/api/evaluate", content=chunks(), headers={"Content-Type": "application/json"})
+    assert chunked.status_code == 413
+
+    # Uploads keep their own, larger limit (an 18 MB CSV is fine).
+    big_csv = b"theta,gain\n" + b"0,1\n" * (18 * 1024 * 1024 // 4)
+    assert client.post("/api/assets", files={"file": ("big.csv", big_csv, "text/csv")}).status_code == 200
+    assert client.post("/api/evaluate", json={"project": project}).status_code == 200

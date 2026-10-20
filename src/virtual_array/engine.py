@@ -365,6 +365,7 @@ class Engine:
         capability = axis_capability(metrics)
         half_wavelength_mm = project.wavelength_mm / 2.0
         angle_metrics, angle_errors = self._angle_metrics(context, capability)
+        coverage = dictionary_coverage(context, project)
         angle: dict[str, Any] = {
             axis: (
                 {"error": angle_errors[axis]}
@@ -402,7 +403,8 @@ class Engine:
             "requirements": [check_payload(check) for check in checks],
             "layout_checks": layout_checks(project),
             "pattern_status": pattern_status(project),
-            "notes": note_codes(metrics, project),
+            "notes": [*note_codes(metrics, project), *coverage_note_codes(coverage)],
+            "dictionary_coverage": coverage,
         }
 
     def dbf_bank(self, project: Project, axis: str) -> dict[str, Any]:
@@ -630,7 +632,13 @@ class Engine:
             )
         except ValueError as exc:
             raise ProjectComputationError(str(exc)) from exc
-        report = dictionary_quality_report(matrix, angles)
+        coverage = dictionary_coverage(context, project)[axis]
+        covered = np.ones(len(angles), dtype=bool)
+        if coverage is not None:
+            low, high = coverage["table"]
+            covered = (angles >= low - 1e-6) & (angles <= high + 1e-6)
+        # Rows outside the table's span are intentionally zero; judge quality on the rest.
+        report = dictionary_quality_report(matrix[covered], angles[covered])
         settings = project.dbf_dictionary
         capability_limited = report.channel_count <= 1 or settings.mode != DBF_DICT_CUSTOM
         severity = report.severity
@@ -652,6 +660,7 @@ class Engine:
             "phase_deg": encode_array(dictionary_phase_preview(matrix)),
             "channel_count": int(matrix.shape[1]),
             "quality": {**asdict(report), "severity": severity},
+            "coverage": coverage,
             "tables": {
                 name: (
                     None
@@ -862,6 +871,46 @@ def pattern_status(project: Project) -> dict[str, str]:
     return status
 
 
+def dictionary_coverage(context: Any, project: Project) -> dict[str, dict[str, Any] | None]:
+    """Angle span of each custom dictionary table against the FOV and search range.
+
+    Outside its span a table contributes no candidates, so a table narrower than
+    the FOV cannot estimate those angles, and one narrower than the search range
+    cannot reveal competitor peaks in the guard band (edge results look better).
+    """
+    result: dict[str, dict[str, Any] | None] = {axis: None for axis in AXES}
+    if project.dbf_dictionary.mode != DBF_DICT_CUSTOM:
+        return result
+    tables = {
+        "azimuth": context.dictionary.custom_azimuth_table,
+        "elevation": context.dictionary.custom_elevation_table,
+    }
+    for axis in AXES:
+        table = tables[axis]
+        if table is None:
+            continue
+        low, high = table.angle_coverage(axis)
+        fov_low, fov_high = context.settings.fov(axis)
+        search = context.settings.scan_angles(axis)
+        result[axis] = {
+            "table": [low, high],
+            "fov": [fov_low, fov_high],
+            "search": [float(search[0]), float(search[-1])],
+            "covers_fov": bool(low <= fov_low + 1e-6 and high >= fov_high - 1e-6),
+            "covers_search": bool(low <= search[0] + 1e-6 and high >= search[-1] - 1e-6),
+        }
+    return result
+
+
+def coverage_note_codes(coverage: dict[str, dict[str, Any] | None]) -> list[str]:
+    items = [item for item in coverage.values() if item is not None]
+    if any(not item["covers_fov"] for item in items):
+        return ["dictionary_fov_gap"]
+    if any(not item["covers_search"] for item in items):
+        return ["dictionary_guard_gap"]
+    return []
+
+
 def note_codes(metrics: ArrayMetrics, project: Project | None = None) -> list[str]:
     notes = []
     if metrics.duplicate_excess > 0:
@@ -885,6 +934,8 @@ _NOTE_TEXT_ZH = {
     "ambiguity_high": "俯仰模糊风险高",
     "ambiguity_medium": "俯仰模糊风险中",
     "resolution_optimistic": "口径公式估算的分辨率偏乐观",
+    "dictionary_fov_gap": "自定义字典没有覆盖整个视场",
+    "dictionary_guard_gap": "自定义字典没有覆盖视场外的搜索保护带",
 }
 
 

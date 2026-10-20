@@ -12,10 +12,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+from .fileio import atomic_write_bytes, atomic_write_text
 
 ALLOWED_SUFFIXES = {".csv", ".tsv", ".txt", ".xlsx", ".xlsm"}
 MAX_ASSET_BYTES = 32 * 1024 * 1024
@@ -68,19 +71,22 @@ class AssetStore:
             existing = self._read_meta(directory)
             if existing is not None:
                 return existing
-            directory.mkdir(parents=True, exist_ok=True)
-            temporary = directory / f".{safe_name}.tmp"
-            temporary.write_bytes(content)
-            temporary.replace(directory / safe_name)
+            created = not directory.exists()
             info = AssetInfo(
                 id=asset_id,
                 filename=safe_name,
                 size=len(content),
                 uploaded_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             )
-            (directory / _META_NAME).write_text(
-                json.dumps(asdict(info), ensure_ascii=False), encoding="utf-8"
-            )
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+                atomic_write_bytes(directory / safe_name, content)
+                # The metadata file marks the asset complete, so it is written last.
+                atomic_write_text(directory / _META_NAME, json.dumps(asdict(info), ensure_ascii=False))
+            except OSError:
+                if created:
+                    shutil.rmtree(directory, ignore_errors=True)
+                raise
             return info
 
     def info(self, asset_id: str) -> AssetInfo:

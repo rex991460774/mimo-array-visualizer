@@ -10,7 +10,7 @@ import numpy as np
 from .element_pattern import ChannelPatternSet, virtual_channel_names
 from .geometry import AntennaArray
 from .phasor import unit_phasor
-from .table_io import read_spreadsheet_rows
+from .table_io import read_csv_rows, read_spreadsheet_rows, read_text_sample
 
 DBF_DICT_IDEAL = "ideal"
 DBF_DICT_IDEAL_REVERSED = "ideal_reversed"
@@ -37,6 +37,10 @@ DBF_DICTIONARY_FAR_SPATIAL_SEPARATION = float(
     np.sin(np.radians(DBF_DICTIONARY_FAR_ANGLE_SEPARATION_DEG))
 )
 DBF_DICTIONARY_ROW_NORM_EPS = 1e-12
+
+
+# Query angles this far outside a table's measured span count as outside it.
+_COVERAGE_TOLERANCE_DEG = 1e-6
 
 
 @dataclass(frozen=True)
@@ -71,6 +75,14 @@ class DbfDictionaryTable:
     @property
     def is_2d(self) -> bool:
         return self.azimuth_column is not None and self.elevation_column is not None
+
+    def angle_coverage(self, axis: str) -> tuple[float, float]:
+        """Angle span the table actually measures on ``axis`` (no extrapolation beyond it)."""
+        if self.is_2d:
+            values = self.azimuths_deg if axis == "azimuth" else self.elevations_deg
+        else:
+            values = self.angles_deg
+        return float(np.min(values)), float(np.max(values))
 
     def response_matrix(
         self,
@@ -117,10 +129,17 @@ class DbfDictionaryTable:
 
     def _zero_reference_row(self) -> np.ndarray:
         if self.is_2d:
-            return self._nearest_rows(np.asarray([0.0]), np.asarray([0.0]))[0]
-        return self._interpolated_rows(np.asarray([0.0]))[0]
+            return self._nearest_rows(np.asarray([0.0]), np.asarray([0.0]), extrapolate=True)[0]
+        return self._interpolated_rows(np.asarray([0.0]), extrapolate=True)[0]
 
-    def _interpolated_rows(self, angles_deg: np.ndarray) -> np.ndarray:
+    def _interpolated_rows(self, angles_deg: np.ndarray, *, extrapolate: bool = False) -> np.ndarray:
+        """Rows at the query angles; outside the table's span they are zero.
+
+        Repeating the edge row instead (the old behaviour) makes every scan angle
+        beyond the edge an identical dictionary entry, so the peak search tie-
+        breaks to the first of them and reports e.g. -85° for a true -75°.
+        A zero row has zero correlation and is never chosen as a peak.
+        """
         query_angles = np.asarray(angles_deg, dtype=float)
         amplitudes = np.abs(self.values)
         phases = np.unwrap(np.angle(self.values), axis=0)
@@ -141,16 +160,33 @@ class DbfDictionaryTable:
                 left=phases[0, column],
                 right=phases[-1, column],
             )
-        return interpolated_amp * np.exp(1j * interpolated_phase)
+        rows = interpolated_amp * np.exp(1j * interpolated_phase)
+        if not extrapolate:
+            low, high = self.angle_coverage("azimuth")
+            rows[(query_angles < low - _COVERAGE_TOLERANCE_DEG) | (query_angles > high + _COVERAGE_TOLERANCE_DEG)] = 0.0
+        return rows
 
-    def _nearest_rows(self, azimuth_deg: np.ndarray, elevation_deg: np.ndarray) -> np.ndarray:
+    def _nearest_rows(
+        self, azimuth_deg: np.ndarray, elevation_deg: np.ndarray, *, extrapolate: bool = False
+    ) -> np.ndarray:
         points = np.column_stack([self.azimuths_deg, self.elevations_deg])
         queries = np.column_stack([azimuth_deg, elevation_deg])
         indices = []
         for query in queries:
             distance = np.sum((points - query[None, :]) ** 2, axis=1)
             indices.append(int(np.argmin(distance)))
-        return self.values[np.asarray(indices, dtype=int)]
+        rows = np.array(self.values[np.asarray(indices, dtype=int)], dtype=complex)
+        if not extrapolate:
+            az_low, az_high = self.angle_coverage("azimuth")
+            el_low, el_high = self.angle_coverage("elevation")
+            outside = (
+                (queries[:, 0] < az_low - _COVERAGE_TOLERANCE_DEG)
+                | (queries[:, 0] > az_high + _COVERAGE_TOLERANCE_DEG)
+                | (queries[:, 1] < el_low - _COVERAGE_TOLERANCE_DEG)
+                | (queries[:, 1] > el_high + _COVERAGE_TOLERANCE_DEG)
+            )
+            rows[outside] = 0.0
+        return rows
 
     def _virtual_rows(self, array: AntennaArray, rows: np.ndarray) -> np.ndarray:
         virtual_count = len(array.tx) * len(array.rx)
@@ -801,13 +837,11 @@ def _read_table(path: Path) -> tuple[list[str], list[list[str]]]:
     if path.suffix.lower() in {".xlsx", ".xlsm"}:
         rows = [row for row in read_spreadsheet_rows(path) if any(row)]
     else:
-        delimiter = _detect_delimiter(path)
-        with path.open("r", encoding="utf-8-sig", newline="") as file:
-            rows = [
-                [cell.strip() for cell in row]
-                for row in csv.reader(file, delimiter=delimiter)
-                if row and any(cell.strip() for cell in row)
-            ]
+        rows = [
+            [cell.strip() for cell in row]
+            for row in read_csv_rows(path, _detect_delimiter(path))
+            if row and any(cell.strip() for cell in row)
+        ]
     if len(rows) < 2:
         raise ValueError("DBF dictionary file must contain at least two rows.")
     return rows[0], rows[1:]
@@ -816,7 +850,7 @@ def _read_table(path: Path) -> tuple[list[str], list[list[str]]]:
 def _detect_delimiter(path: Path) -> str:
     if path.suffix.lower() == ".tsv":
         return "\t"
-    sample = path.read_text(encoding="utf-8-sig", errors="ignore")[:4096]
+    sample = read_text_sample(path)
     try:
         dialect = csv.Sniffer().sniff(sample, delimiters=",\t;")
     except csv.Error:

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ..fileio import atomic_write_text
 from ..project import Project
 
 _PROJECT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -84,10 +85,13 @@ class ProjectStore:
         return record
 
     def delete(self, project_id: str) -> None:
+        # Same lock as update(): otherwise a delete landing between update's
+        # read and write is undone when the write recreates the file.
         path = self._path(project_id)
-        if not path.is_file():
-            raise ProjectNotFoundError(project_id)
-        path.unlink()
+        with self._lock:
+            if not path.is_file():
+                raise ProjectNotFoundError(project_id)
+            path.unlink()
 
     def _path(self, project_id: str) -> Path:
         if not _PROJECT_ID_RE.fullmatch(project_id or ""):
@@ -96,15 +100,12 @@ class ProjectStore:
 
     def _write(self, project_id: str, record: dict[str, Any], locked: bool = False) -> None:
         path = self._path(project_id)
-        temporary = path.with_suffix(".json.tmp")
         text = json.dumps(record, ensure_ascii=False, indent=2)
         if locked:
-            temporary.write_text(text, encoding="utf-8")
-            temporary.replace(path)
+            atomic_write_text(path, text)
             return
         with self._lock:
-            temporary.write_text(text, encoding="utf-8")
-            temporary.replace(path)
+            atomic_write_text(path, text)
 
 
 def _summary(record: dict[str, Any]) -> dict[str, Any]:

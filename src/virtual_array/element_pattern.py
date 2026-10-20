@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .table_io import read_spreadsheet_rows
+from .table_io import read_csv_rows, read_spreadsheet_rows, read_text_sample
 
 ANGLE_HEADER_KEYWORDS = ("theta", "angle", "azimuth", "az", "deg")
 GAIN_HEADER_KEYWORDS = ("gain", "db", "dbi", "realized")
@@ -557,7 +557,7 @@ def _detect_delimiter(path: Path) -> str:
     if path.suffix.lower() == ".tsv":
         return "\t"
 
-    sample = path.read_text(encoding="utf-8-sig", errors="ignore")[:4096]
+    sample = read_text_sample(path)
     try:
         dialect = csv.Sniffer().sniff(sample, delimiters=",\t;")
     except csv.Error:
@@ -570,13 +570,8 @@ def _read_table_rows(path: Path) -> list[list[str]]:
         rows = read_spreadsheet_rows(path)
         return [row for row in rows if row and not _is_comment_or_blank(row)]
 
-    delimiter = _detect_delimiter(path)
-    with path.open("r", encoding="utf-8-sig", newline="") as file:
-        return [
-            row
-            for row in csv.reader(file, delimiter=delimiter)
-            if row and not _is_comment_or_blank(row)
-        ]
+    rows = read_csv_rows(path, _detect_delimiter(path))
+    return [row for row in rows if row and not _is_comment_or_blank(row)]
 
 
 def _beamwidth_at_drop(

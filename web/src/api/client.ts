@@ -1,3 +1,5 @@
+import { translate } from "../i18n";
+import { useStore } from "../state/store";
 import type {
   AssetInfo,
   BandSweep,
@@ -64,11 +66,16 @@ function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> 
 }
 
 async function postForBlob(path: string, body: unknown): Promise<Blob> {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError("network", 0);
+  }
   if (!response.ok) {
     let detail = response.statusText;
     try {
@@ -140,6 +147,9 @@ export const api = {
 };
 
 export function errorMessage(error: unknown): string {
+  // Status 0 means the request never reached the server (stopped, restarting, offline).
+  if (error instanceof ApiError && error.status === 0) return translate(useStore.getState().language, "app.offline");
+  if (error instanceof ApiError && error.status === 507) return translate(useStore.getState().language, "app.storageError");
   if (error instanceof ApiError) return error.message;
   if (error instanceof Error) return error.message;
   return String(error);

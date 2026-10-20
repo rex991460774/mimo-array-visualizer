@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import sys
 from pathlib import Path
 
 from ..version import APP_VERSION
@@ -43,12 +44,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def data_dir_problem(data_dir: Path) -> str | None:
+    """Why the data directory cannot be used, or None; checked before startup."""
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+        probe = data_dir / ".write-test"
+        probe.write_bytes(b"ok")
+        probe.unlink()
+    except OSError as exc:
+        return exc.strerror or str(exc)
+    return None
+
+
 def main(argv: list[str] | None = None) -> None:
     import uvicorn
 
     args = build_parser().parse_args(argv)
     data_dir = (args.data_dir or default_data_dir()).expanduser().resolve()
-    data_dir.mkdir(parents=True, exist_ok=True)
+    problem = data_dir_problem(data_dir)
+    if problem:
+        print(f"Cannot use data directory {data_dir}: {problem}", file=sys.stderr)
+        print("Pass --data-dir with a writable directory (or set MIMO_DATA_DIR), or fix its permissions.", file=sys.stderr)
+        raise SystemExit(2)
     log_path = configure_server_logging(data_dir)
     logging.getLogger(__name__).info(
         "Starting MIMO Array Visualizer %s on %s:%s (data: %s)",

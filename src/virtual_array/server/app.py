@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import io
 import json
 import logging
@@ -37,6 +38,7 @@ from ..project import (
 from ..version import APP_VERSION
 from .bundles import BundleError, read_bundle
 from .jobs import JobManager, JobNotFoundError, zip_directory
+from .limits import MULTIPART_OVERHEAD_BYTES, BodySizeLimitMiddleware
 from .shares import ShareNotFoundError, ShareStore
 from .store import ProjectConflictError, ProjectNotFoundError, ProjectStore
 
@@ -45,6 +47,8 @@ DATA_DIR_ENV = "MIMO_DATA_DIR"
 WEB_DIST_ENV = "MIMO_WEB_DIST"
 MAX_2D_FRAMES_PER_REQUEST = 24
 MAX_BUNDLE_BYTES = 128 * 1024 * 1024
+# errno values that mean the data directory cannot be written (reported as 507).
+STORAGE_ERRNOS = {errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC), errno.EROFS, errno.EACCES, errno.EPERM}
 
 
 def default_data_dir() -> Path:
@@ -178,6 +182,13 @@ def create_app(data_dir: str | Path | None = None, static_dir: str | Path | None
         openapi_url="/api/openapi.json",
         redoc_url=None,
     )
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        upload_limits={
+            "/api/assets": MAX_ASSET_BYTES + MULTIPART_OVERHEAD_BYTES,
+            "/api/import/bundle": MAX_BUNDLE_BYTES + MULTIPART_OVERHEAD_BYTES,
+        },
+    )
     app.state.engine = engine
     app.state.assets = assets
     app.state.projects = projects
@@ -192,6 +203,22 @@ def create_app(data_dir: str | Path | None = None, static_dir: str | Path | None
     @app.exception_handler(AssetNotFoundError)
     async def asset_missing(_request: Request, exc: AssetNotFoundError) -> JSONResponse:
         return JSONResponse(status_code=404, content={"detail": f"Asset not found: {exc}"})
+
+    @app.exception_handler(OSError)
+    async def storage_error(request: Request, exc: OSError) -> JSONResponse:
+        # Writes to the data directory are the only expected OSErrors: report a
+        # full or read-only disk clearly instead of a bare "Internal Server Error".
+        if exc.errno in STORAGE_ERRNOS:
+            LOGGER.error("Cannot write to the data directory (%s %s): %s", request.method, request.url.path, exc)
+            return JSONResponse(
+                status_code=507,
+                content={
+                    "detail": "The server cannot write to its data directory (disk full or not writable). "
+                    "Ask the administrator to free disk space or fix the directory permissions."
+                },
+            )
+        LOGGER.exception("Unexpected I/O error on %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=500, content={"detail": "Internal server error; see the server log."})
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:

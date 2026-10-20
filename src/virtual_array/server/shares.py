@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ..fileio import atomic_write_text
 from ..project import Project
 
 SHARE_ID_LENGTH = 12
@@ -52,9 +53,7 @@ class ShareStore:
             if path.is_file():
                 return json.loads(path.read_text(encoding="utf-8"))
             record = {"id": share_id, "created_at": _now(), "project": document}
-            temporary = path.with_suffix(".json.tmp")
-            temporary.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
-            temporary.replace(path)
+            atomic_write_text(path, json.dumps(record, ensure_ascii=False, indent=2))
         return record
 
     def get(self, share_id: str) -> dict[str, Any]:

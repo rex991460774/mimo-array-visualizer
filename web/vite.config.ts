@@ -24,5 +24,12 @@ export default defineConfig({
     environment: "node",
     // Browser smoke tests in e2e/ run under Playwright, not Vitest.
     include: ["src/**/*.test.ts"],
+    coverage: {
+      provider: "v8",
+      // Report every source file, not only those a unit test happens to import.
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: ["src/**/__tests__/**"],
+      reporter: ["text-summary", "html"],
+    },
   },
 });

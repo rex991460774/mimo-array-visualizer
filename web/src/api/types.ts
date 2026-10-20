@@ -227,6 +227,7 @@ export interface Evaluation {
   layout_checks: LayoutCheck[];
   pattern_status: { amplitude: AmpPhaseState; phase: AmpPhaseState };
   notes: string[];
+  dictionary_coverage: Record<Axis, DictionaryCoverage | null>;
 }
 
 export interface DbfBank {
@@ -288,6 +289,15 @@ export interface ElementPatternPreview {
   elevation_metrics: PatternCutMetrics | null;
 }
 
+/** Angle span of a custom dictionary table versus the FOV and the DBF search range. */
+export interface DictionaryCoverage {
+  table: [number, number];
+  fov: [number, number];
+  search: [number, number];
+  covers_fov: boolean;
+  covers_search: boolean;
+}
+
 export interface DictionaryPreview {
   axis: Axis;
   angles: number[];
@@ -302,6 +312,7 @@ export interface DictionaryPreview {
     non_neighbor_effective_rank: number;
     non_neighbor_rank_rows: number;
   };
+  coverage: DictionaryCoverage | null;
   tables: Record<
     Axis,
     { channel_mode: ChannelMode; value_format: string; rows: number; columns: string[]; is_2d: boolean } | null

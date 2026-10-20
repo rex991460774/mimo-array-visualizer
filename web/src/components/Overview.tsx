@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, ChevronRight, MinusCircle, Settings2, XCircle } from "lucide-react";
 import type { AngleMetrics, Axis, CutReason, Evaluation, LayoutCheck, RequirementCheck } from "../api/types";
+import type { ReactNode } from "react";
 import { type Translate, useT } from "../i18n";
 import { wire } from "../lib/encoding";
 import { fmt, fmtSigned, trimNumber } from "../lib/format";
@@ -104,8 +105,7 @@ export function Overview() {
           <RequirementSection evaluation={evaluation} />
           <div className="overview-section">
             <h3>{t("overview.angleTitle")}</h3>
-            <AngleCard axis="azimuth" evaluation={evaluation} />
-            <AngleCard axis="elevation" evaluation={evaluation} />
+            <AngleTable evaluation={evaluation} />
           </div>
           <PatternMetrics evaluation={evaluation} />
           {(evaluation.notes.length > 0 || evaluation.layout_checks.length > 0) && (
@@ -245,35 +245,74 @@ function RequirementSection({ evaluation }: { evaluation: Evaluation }) {
   );
 }
 
-function AngleCard({ axis, evaluation }: { axis: Axis; evaluation: Evaluation }) {
+const AXES: Axis[] = ["azimuth", "elevation"];
+
+/** Side-by-side azimuth / elevation angle evaluation: the two axes are compared row by row. */
+function AngleTable({ evaluation }: { evaluation: Evaluation }) {
   const t = useT();
-  const result = evaluation.angle[axis];
-  const title = t(axis === "azimuth" ? "axis.azimuth" : "axis.elevation");
-  const [low, high] = evaluation.fov[axis];
+  const results = AXES.map((axis) => {
+    const result = evaluation.angle[axis];
+    return result && !("error" in result) ? result : null;
+  });
+  const failures = AXES.flatMap((axis) => {
+    const result = evaluation.angle[axis];
+    return result && "error" in result ? [{ axis, error: result.error }] : [];
+  });
+  const row = (label: string, cell: (metrics: AngleMetrics) => ReactNode) => (
+    <tr>
+      <th scope="row">{label}</th>
+      {results.map((metrics, index) => (
+        <td key={AXES[index]}>{metrics ? cell(metrics) : "—"}</td>
+      ))}
+    </tr>
+  );
   return (
-    <div className="axis-card">
-      <div className="axis-card-title">
-        {title}
-        <span className="subtle" style={{ fontWeight: 400, fontSize: 12 }}>
-          {t("overview.fov", { low, high })}
-        </span>
-        {!evaluation.capability[axis] && <span className="badge">{t("overview.noAperture")}</span>}
-      </div>
-      {result && "error" in result ? (
-        <Callout tone="danger">{result.error}</Callout>
-      ) : result ? (
-        <dl className="metric-list">
-          <dt>{t("overview.noFold")}</dt>
-          <dd>{noFoldText(result)}</dd>
-          <dt>{t("overview.focusError")}</dt>
-          <dd>{errorText(wire(result.focus_max_abs_error))}</dd>
-          <dt>{t("overview.peakMargin")}</dt>
-          <dd>{marginText(result, t)}</dd>
-          <dt>{t("overview.cutReason")}</dt>
-          <dd>{cutSummary(result, t)}</dd>
-        </dl>
-      ) : null}
-    </div>
+    <>
+      <table className="angle-table">
+        <thead>
+          <tr>
+            <th />
+            {AXES.map((axis) => (
+              <th key={axis} scope="col">
+                {axisName(axis, t)}
+                {!evaluation.capability[axis] && <span className="badge">{t("overview.noAperture")}</span>}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">{t("top.fov")}</th>
+            {AXES.map((axis) => (
+              <td key={axis}>
+                {fmtSigned(evaluation.fov[axis][0])} ~ {fmtSigned(evaluation.fov[axis][1])}
+              </td>
+            ))}
+          </tr>
+          {row(t("overview.noFold"), (metrics) => {
+            const left = wire(metrics.no_fold_left);
+            const right = wire(metrics.no_fold_right);
+            if (left === null || right === null || !Number.isFinite(left) || !Number.isFinite(right)) return "—";
+            return (
+              <>
+                {fmtSigned(left)} ~ {fmtSigned(right)}
+                <span className="cell-sub">{fmt(wire(metrics.no_fold_width), 0, "°")}</span>
+              </>
+            );
+          })}
+          {row(t("overview.focusError"), (metrics) => errorText(wire(metrics.focus_max_abs_error)))}
+          {row(t("overview.peakMargin"), (metrics) => marginText(metrics, t))}
+          {row(t("overview.cutReason"), (metrics) => <span className="cell-text">{cutSummary(metrics, t)}</span>)}
+        </tbody>
+      </table>
+      {failures.map(({ axis, error }) => (
+        <div key={axis} style={{ marginTop: 8 }}>
+          <Callout tone="danger" title={axisName(axis, t)}>
+            {error}
+          </Callout>
+        </div>
+      ))}
+    </>
   );
 }
 

@@ -12,7 +12,7 @@ import {
 import { useMemo, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import type { ElementKind, Layout, Point } from "../api/types";
-import { Button, NumberInput } from "../components/ui";
+import { Button, Menu, NumberInput } from "../components/ui";
 import { useT } from "../i18n";
 import { elementName, nextElementPosition, snap, virtualGroups } from "../lib/geometry";
 import { parseNumber, trimNumber } from "../lib/format";
@@ -133,6 +133,13 @@ export function ArrayView() {
   const unique = evaluation && !preview ? evaluation.summary.unique_count : groups.length;
   const total = shown.tx.length * shown.rx.length;
 
+  const relatedPairs = highlight
+    ? groups.reduce((sum, group) => sum + group.pairs.filter((pair) => pair.split("-")[highlight.side] === highlight.name).length, 0)
+    : 0;
+  const ySpan = (points: Point[]) => (points.length ? Math.max(...points.map((p) => p.y)) - Math.min(...points.map((p) => p.y)) : 0);
+  const xSpan = (points: Point[]) => (points.length ? Math.max(...points.map((p) => p.x)) - Math.min(...points.map((p) => p.x)) : 0);
+  const gridLabel = project.grid_step_lambda > 0 ? `λ/${Math.round(1 / project.grid_step_lambda)}` : t("settings.gridFree");
+
   return (
     <div className="array-view">
       <div className="grid-2 array-panels">
@@ -141,56 +148,71 @@ export function ArrayView() {
             <div className="panel-heading">
               <span className="panel-title">{t("physical.title")}</span>
               <span className="panel-subtitle">
-                {deleteMode ? t("physical.deleteHint") : t("physical.subtitle")}
+                {deleteMode ? t("physical.deleteHint") : t("physical.subtitle", { grid: gridLabel })}
               </span>
             </div>
             <div className="panel-tools">
-              <Button size="sm" icon={<Plus size={14} />} onClick={() => addElement("tx")} title={t("physical.addTxTitle")}>
-                <span className="legend-swatch tx" />
-                {t("physical.addTx")}
-              </Button>
-              <Button size="sm" icon={<Plus size={14} />} onClick={() => addElement("rx")} title={t("physical.addRxTitle")}>
-                <span className="legend-swatch rx" />
-                {t("physical.addRx")}
-              </Button>
-              <span className="toolbar-sep" />
-              <Button
-                size="sm"
-                variant="ghost"
-                icon={<Eraser size={15} />}
-                active={deleteMode}
-                onClick={() => setDeleteMode(!deleteMode)}
-                title={t("physical.deleteMode")}
-                aria-label={t("physical.deleteMode")}
-              />
-              <Button
-                size="sm"
-                variant="ghost"
-                icon={<Trash2 size={15} />}
-                disabled={!selection}
-                onClick={() => selection && deleteElement(selection)}
-                title={t("physical.deleteSelected")}
-                aria-label={t("physical.deleteSelected")}
-              />
-              <Button
-                size="sm"
-                variant="ghost"
-                icon={<RotateCcw size={15} />}
-                onClick={() => {
-                  commitLayout(STARTER_LAYOUT, null);
-                  setFitSignal((value) => value + 1);
-                  setStatus("status.cleared");
-                }}
-                title={t("physical.clear")}
-                aria-label={t("physical.clear")}
-              />
-              <span className="toolbar-sep" />
-              <Button size="sm" variant="ghost" icon={<Undo2 size={15} />} disabled={!past} onClick={undo} title={`${t("physical.undo")} (Ctrl+Z)`} aria-label={t("physical.undo")} />
-              <Button size="sm" variant="ghost" icon={<Redo2 size={15} />} disabled={!future} onClick={redo} title={`${t("physical.redo")} (Ctrl+Y)`} aria-label={t("physical.redo")} />
-              <Button size="sm" variant="ghost" icon={<Maximize2 size={15} />} onClick={() => setFitSignal((value) => value + 1)} title={t("physical.fit")} aria-label={t("physical.fit")} />
-              <Button size="sm" variant="ghost" icon={<Table2 size={15} />} active={showTable} onClick={() => setShowTable((value) => !value)} title={t("physical.table")} aria-label={t("physical.table")} />
+              <span className="badge tx">Tx {layout.tx.length}</span>
+              <span className="badge rx">Rx {layout.rx.length}</span>
             </div>
           </header>
+          <div className="panel-toolbar">
+            <Button size="sm" icon={<Plus size={14} />} onClick={() => addElement("tx")} title={t("physical.addTxTitle")}>
+              <span className="legend-swatch tx" />
+              {t("physical.addTx")}
+            </Button>
+            <Button size="sm" icon={<Plus size={14} />} onClick={() => addElement("rx")} title={t("physical.addRxTitle")}>
+              <span className="legend-swatch rx" />
+              {t("physical.addRx")}
+            </Button>
+            <AutoLayoutButton
+              tx={autoTx}
+              rx={autoRx}
+              limits={limits}
+              onChange={(tx, rx) => {
+                setAutoTx(tx);
+                setAutoRx(rx);
+              }}
+              onApply={applyAuto}
+            />
+            <span className="toolbar-sep" />
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<Eraser size={15} />}
+              active={deleteMode}
+              onClick={() => setDeleteMode(!deleteMode)}
+              title={t("physical.deleteMode")}
+              aria-label={t("physical.deleteMode")}
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<Trash2 size={15} />}
+              disabled={!selection}
+              onClick={() => selection && deleteElement(selection)}
+              title={t("physical.deleteSelected")}
+              aria-label={t("physical.deleteSelected")}
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<RotateCcw size={15} />}
+              onClick={() => {
+                commitLayout(STARTER_LAYOUT, null);
+                setFitSignal((value) => value + 1);
+                setStatus("status.cleared");
+              }}
+              title={t("physical.clear")}
+              aria-label={t("physical.clear")}
+            />
+            <span className="toolbar-sep" />
+            <Button size="sm" variant="ghost" icon={<Undo2 size={15} />} disabled={!past} onClick={undo} title={`${t("physical.undo")} (Ctrl+Z)`} aria-label={t("physical.undo")} />
+            <Button size="sm" variant="ghost" icon={<Redo2 size={15} />} disabled={!future} onClick={redo} title={`${t("physical.redo")} (Ctrl+Y)`} aria-label={t("physical.redo")} />
+            <span className="toolbar-spacer" />
+            <Button size="sm" variant="ghost" icon={<Maximize2 size={15} />} onClick={() => setFitSignal((value) => value + 1)} title={t("physical.fit")} aria-label={t("physical.fit")} />
+            <Button size="sm" variant="ghost" icon={<Table2 size={15} />} active={showTable} onClick={() => setShowTable((value) => !value)} title={t("physical.table")} aria-label={t("physical.table")} />
+          </div>
           <div className="panel-body">
             <PhysicalEditor
               layout={layout}
@@ -204,10 +226,6 @@ export function ArrayView() {
               onDelete={deleteElement}
               onPreview={setPreview}
             />
-            <div className="plane-legend">
-              <span><span className="legend-swatch tx" />{t("physical.legendTx")} · {layout.tx.length}</span>
-              <span><span className="legend-swatch rx" />{t("physical.legendRx")} · {layout.rx.length}</span>
-            </div>
           </div>
           <footer className="panel-footer">
             <div className="inspector">
@@ -236,56 +254,25 @@ export function ArrayView() {
                     />
                     <span className="field-unit">{unit === "mm" ? "mm" : "λ"}</span>
                   </label>
-                  <span className="subtle mono">
+                  <span className="subtle mono inspector-alt">
                     {unit === "mm"
                       ? `(${trimNumber(selected.x)}, ${trimNumber(selected.y)}) λ`
                       : `(${trimNumber(selected.x * mmPerLambda, 2)}, ${trimNumber(selected.y * mmPerLambda, 2)}) mm`}
                   </span>
-                  <Segmented
-                    label={t("inspector.unit")}
-                    value={unit}
-                    options={[
-                      { value: "lambda", label: "λ" },
-                      { value: "mm", label: "mm" },
-                    ]}
-                    onChange={setCoordUnit}
-                  />
                 </>
               ) : (
                 <span className="subtle">{t("inspector.none")}</span>
               )}
             </div>
-            <div className="auto-layout" title={t("physical.autoTitle")}>
-              <Wand2 size={14} className="subtle" />
-              <span className="subtle">{t("physical.auto")}</span>
-              <label className="field compact">
-                <span className="field-label">T</span>
-                <NumberInput
-                  className=""
-                  value={autoTx}
-                  parse={(text) => {
-                    const value = parseNumber(text);
-                    return value !== null && Number.isInteger(value) && value >= 1 && value <= limits.tx ? value : null;
-                  }}
-                  onCommit={setAutoTx}
-                />
-              </label>
-              <label className="field compact">
-                <span className="field-label">R</span>
-                <NumberInput
-                  className=""
-                  value={autoRx}
-                  parse={(text) => {
-                    const value = parseNumber(text);
-                    return value !== null && Number.isInteger(value) && value >= 1 && value <= limits.rx ? value : null;
-                  }}
-                  onCommit={setAutoRx}
-                />
-              </label>
-              <Button size="sm" onClick={applyAuto}>
-                {t("physical.autoApply")}
-              </Button>
-            </div>
+            <Segmented
+              label={t("inspector.unit")}
+              value={unit}
+              options={[
+                { value: "lambda", label: "λ" },
+                { value: "mm", label: "mm" },
+              ]}
+              onChange={setCoordUnit}
+            />
           </footer>
         </section>
 
@@ -299,18 +286,99 @@ export function ArrayView() {
               <span className="badge num">{t("virtual.info", { unique, total, duplicate })}</span>
             </div>
           </header>
+          <div className="panel-toolbar">
+            <span className="toolbar-legend">
+              <span className="legend-dot unique" />
+              {t("virtual.unique")}
+            </span>
+            <span className="toolbar-legend">
+              <span className="legend-dot duplicate" />
+              {t("virtual.duplicate")}
+            </span>
+            <span className="toolbar-spacer" />
+            <Button size="sm" variant="ghost" icon={<Maximize2 size={15} />} onClick={() => setFitSignal((value) => value + 1)} title={t("physical.fit")} aria-label={t("physical.fit")} />
+          </div>
           <div className="panel-body">
             <VirtualPlot groups={groups} fitSignal={fitSignal} highlight={highlight} />
-            <div className="plane-legend">
-              <span><span className="legend-dot unique" />{t("virtual.unique")}</span>
-              <span><span className="legend-dot duplicate" />{t("virtual.duplicate")}</span>
-            </div>
           </div>
+          <footer className="panel-footer">
+            {highlight ? (
+              <span>
+                <span className={`badge ${selection!.kind}`}>{highlight.name}</span>{" "}
+                <span className="muted">{t("virtual.related", { count: relatedPairs })}</span>
+              </span>
+            ) : (
+              <span className="muted num">
+                {t("virtual.extent", {
+                  x: trimNumber(xSpan(groups), 2),
+                  y: trimNumber(ySpan(groups), 2),
+                })}
+              </span>
+            )}
+          </footer>
         </section>
       </div>
 
       {showTable && <CoordinateTable layout={layout} mmPerLambda={mmPerLambda} onChange={updatePoint} onClose={() => setShowTable(false)} />}
     </div>
+  );
+}
+
+function AutoLayoutButton({
+  tx,
+  rx,
+  limits,
+  onChange,
+  onApply,
+}: {
+  tx: number;
+  rx: number;
+  limits: { tx: number; rx: number };
+  onChange: (tx: number, rx: number) => void;
+  onApply: () => void;
+}) {
+  const t = useT();
+  const integer = (max: number) => (text: string) => {
+    const value = parseNumber(text);
+    return value !== null && Number.isInteger(value) && value >= 1 && value <= max ? value : null;
+  };
+  return (
+    <Menu
+      align="left"
+      trigger={({ toggle }) => (
+        <Button size="sm" icon={<Wand2 size={14} />} onClick={toggle} title={t("physical.autoTitle")}>
+          {t("physical.auto")}
+        </Button>
+      )}
+    >
+      {(close) => (
+        <div className="popover-form">
+          <div className="popover-title">{t("physical.autoTitle")}</div>
+          <div className="popover-row">
+            <label className="field compact">
+              <span className="field-label">Tx</span>
+              <NumberInput className="" value={tx} parse={integer(limits.tx)} onCommit={(value) => onChange(value, rx)} />
+            </label>
+            <span className="subtle">×</span>
+            <label className="field compact">
+              <span className="field-label">Rx</span>
+              <NumberInput className="" value={rx} parse={integer(limits.rx)} onCommit={(value) => onChange(tx, value)} />
+            </label>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => {
+                onApply();
+                close();
+              }}
+            >
+              {t("physical.autoApply")}
+            </Button>
+          </div>
+          <p className="subtle popover-hint">{t("physical.autoHint", { n: tx * rx })}</p>
+        </div>
+      )}
+    </Menu>
   );
 }
 

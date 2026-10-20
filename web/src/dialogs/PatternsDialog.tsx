@@ -38,8 +38,17 @@ function mergeBindings(current: ChannelPatternBinding[], incoming: ChannelPatter
   return [...current.filter((b) => !replaced.has(`${b.channel}|${b.kind}|${b.plane}`)), ...incoming];
 }
 
+type PatternTab = "channel" | "element";
+
 export function PatternsDialog({ onClose }: { onClose: () => void }) {
   const t = useT();
+  const channelCount = useStore((state) => new Set(state.project!.channel_patterns.map((b) => b.channel)).size);
+  const hasElement = useStore((state) => state.project!.element_pattern !== null);
+  const [tab, setTab] = useState<PatternTab>("channel");
+  const tabs: { id: PatternTab; label: string; badge: string | null }[] = [
+    { id: "channel", label: t("patternDialog.channelSection"), badge: channelCount > 0 ? String(channelCount) : null },
+    { id: "element", label: t("patternDialog.elementSection"), badge: hasElement ? "1" : null },
+  ];
   return (
     <Dialog
       title={t("patternDialog.title")}
@@ -54,8 +63,22 @@ export function PatternsDialog({ onClose }: { onClose: () => void }) {
         </>
       }
     >
-      <ChannelPatternsSection />
-      <ElementPatternSection />
+      <div className="dialog-tabs" role="tablist">
+        {tabs.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            className="dialog-tab"
+            aria-selected={tab === item.id}
+            onClick={() => setTab(item.id)}
+          >
+            {item.label}
+            {item.badge && <span className="badge">{item.badge}</span>}
+          </button>
+        ))}
+      </div>
+      {tab === "channel" ? <ChannelPatternsSection /> : <ElementPatternSection />}
     </Dialog>
   );
 }
@@ -139,6 +162,7 @@ function ChannelPatternsSection() {
                 <Button
                   size="sm"
                   variant="ghost"
+                  className="slot-add"
                   icon={<Plus size={13} />}
                   title={t("patternDialog.setSingle", { channel, slot: t(slotKey(slot.kind, slot.plane)) })}
                   aria-label={t("patternDialog.setSingle", { channel, slot: t(slotKey(slot.kind, slot.plane)) })}
@@ -168,9 +192,9 @@ function ChannelPatternsSection() {
   return (
     <div className="section">
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <h3 className="section-title" style={{ flex: 1 }}>
-          {t("patternDialog.channelSection")}
-        </h3>
+        <p className="subtle" style={{ margin: 0, flex: 1, minWidth: 240 }}>
+          {t("patternDialog.summaryHint")}
+        </p>
         {busy && <Spinner />}
         <span className="subtle">{t("patternDialog.target")}</span>
         <Segmented
@@ -182,9 +206,6 @@ function ChannelPatternsSection() {
           onChange={setTarget}
         />
       </div>
-      <p className="subtle" style={{ margin: 0 }}>
-        {t("patternDialog.summaryHint")}
-      </p>
       <div className="btn-group" style={{ flexWrap: "wrap" }}>
         {SLOTS.map((slot) => (
           <Button
@@ -293,9 +314,9 @@ function ElementPatternSection() {
   return (
     <div className="section">
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <h3 className="section-title" style={{ flex: 1 }}>
-          {t("patternDialog.elementSection")}
-        </h3>
+        <p className="subtle" style={{ margin: 0, flex: 1, minWidth: 240 }}>
+          {t("patternDialog.elementHint")}
+        </p>
         {busy && <Spinner />}
         {settings && (
           <Button
@@ -325,9 +346,6 @@ function ElementPatternSection() {
           </Button>
         )}
       </div>
-      <p className="subtle" style={{ margin: 0 }}>
-        {t("patternDialog.elementHint")}
-      </p>
       {error && <Callout tone="danger">{error}</Callout>}
       {!settings && <Callout>{t("patternDialog.isotropic")}</Callout>}
       {settings && preview && (

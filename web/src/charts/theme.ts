@@ -92,7 +92,15 @@ export function baseLayout(theme: ChartTheme, overrides: Record<string, any> = {
     },
     dragmode: false,
     ...overrides,
-    xaxis: { ...axis, ...(overrides.xaxis ?? {}) },
-    yaxis: { ...axis, ...(overrides.yaxis ?? {}) },
+    xaxis: mergeAxis(axis, overrides.xaxis),
+    yaxis: mergeAxis(axis, overrides.yaxis),
   };
+}
+
+/** Merge axis overrides while keeping the themed title font. */
+function mergeAxis(base: Record<string, any>, override: Record<string, any> | undefined): Record<string, any> {
+  if (!override) return base;
+  const merged = { ...base, ...override };
+  if (override.title) merged.title = { ...base.title, ...override.title };
+  return merged;
 }

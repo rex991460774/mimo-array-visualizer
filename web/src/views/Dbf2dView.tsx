@@ -172,28 +172,53 @@ export function Dbf2dView() {
             <span className="panel-title">{t("dbf2d.title")}</span>
             <span className="panel-subtitle">{t("dbf2d.hint")}</span>
           </div>
-          {shown && available && (
-            <div className="panel-tools readout">
-              <span className="readout-item">
-                <span className="readout-label">{t("dbf2d.peak")}</span>
-                <span className="readout-value">
-                  {fmtSigned(shown.frame.peak_azimuth)} / {fmtSigned(shown.frame.peak_elevation)}
-                </span>
-              </span>
-              <span className="readout-item">
-                <span className="readout-label">{t("dbf2d.delta")}</span>
-                <span className="readout-value">
-                  {fmtSigned(shown.frame.peak_azimuth - shown.frame.true_azimuth)} /{" "}
-                  {fmtSigned(shown.frame.peak_elevation - shown.frame.true_elevation)}
-                </span>
-              </span>
-              <span className="readout-item">
-                <span className="readout-label">peak</span>
-                <span className="readout-value">{fmt(shown.frame.peak_db, 2, " dB")}</span>
-              </span>
-            </div>
-          )}
+          <div className="panel-tools">{loading && <Spinner />}</div>
         </header>
+        {available && (
+          <div className="panel-toolbar dbf2d-toolbar">
+            <AxisScrubber
+              label={t("dbf2d.trueAz")}
+              range={azRange}
+              value={trueAz}
+              playing={playAz}
+              playLabel={t("dbf2d.playAz")}
+              pauseLabel={t("dbf2d.pauseAz")}
+              onToggle={() => setPlayAz((value) => !value)}
+              onChange={(value) => {
+                setPlayAz(false);
+                setTrueAz(value);
+              }}
+            />
+            <span className="toolbar-sep" />
+            <AxisScrubber
+              label={t("dbf2d.trueEl")}
+              range={elRange}
+              value={trueEl}
+              playing={playEl}
+              playLabel={t("dbf2d.playEl")}
+              pauseLabel={t("dbf2d.pauseEl")}
+              onToggle={() => setPlayEl((value) => !value)}
+              onChange={(value) => {
+                setPlayEl(false);
+                setTrueEl(value);
+              }}
+            />
+            <span className="toolbar-sep" />
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<RotateCcw size={14} />}
+              title={t("dbf2d.reset")}
+              aria-label={t("dbf2d.reset")}
+              onClick={() => {
+                setPlayAz(false);
+                setPlayEl(false);
+                setTrueAz(0);
+                setTrueEl(0);
+              }}
+            />
+          </div>
+        )}
         <div className="panel-body">
           {available && shown && frames.scan && (
             <Heatmap
@@ -211,7 +236,7 @@ export function Dbf2dView() {
               }}
             />
           )}
-          {loading && (
+          {loading && !shown && (
             <div className="loading-overlay">
               <Spinner /> {t("dbf2d.loading")}
             </div>
@@ -234,47 +259,35 @@ export function Dbf2dView() {
         </div>
         {available && (
           <footer className="panel-footer">
-            <div className="dbf2d-controls">
-              <AxisScrubber
-                label={t("dbf2d.trueAz")}
-                range={azRange}
-                value={trueAz}
-                playing={playAz}
-                playLabel={t("dbf2d.playAz")}
-                pauseLabel={t("dbf2d.pauseAz")}
-                onToggle={() => setPlayAz((value) => !value)}
-                onChange={(value) => {
-                  setPlayAz(false);
-                  setTrueAz(value);
-                }}
-              />
-              <AxisScrubber
-                label={t("dbf2d.trueEl")}
-                range={elRange}
-                value={trueEl}
-                playing={playEl}
-                playLabel={t("dbf2d.playEl")}
-                pauseLabel={t("dbf2d.pauseEl")}
-                onToggle={() => setPlayEl((value) => !value)}
-                onChange={(value) => {
-                  setPlayEl(false);
-                  setTrueEl(value);
-                }}
-              />
-            </div>
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={<RotateCcw size={14} />}
-              onClick={() => {
-                setPlayAz(false);
-                setPlayEl(false);
-                setTrueAz(0);
-                setTrueEl(0);
-              }}
-            >
-              {t("dbf2d.reset")}
-            </Button>
+            {shown ? (
+              <div className="readout">
+                <span className="readout-item">
+                  <span className="readout-label">{t("dbf.true")}</span>
+                  <span className="readout-value">
+                    {fmtSigned(shown.frame.true_azimuth)} / {fmtSigned(shown.frame.true_elevation)}
+                  </span>
+                </span>
+                <span className="readout-item">
+                  <span className="readout-label">{t("dbf2d.peak")}</span>
+                  <span className="readout-value">
+                    {fmtSigned(shown.frame.peak_azimuth)} / {fmtSigned(shown.frame.peak_elevation)}
+                  </span>
+                </span>
+                <span className="readout-item">
+                  <span className="readout-label">{t("dbf2d.delta")}</span>
+                  <span className="readout-value">
+                    {fmtSigned(shown.frame.peak_azimuth - shown.frame.true_azimuth)} /{" "}
+                    {fmtSigned(shown.frame.peak_elevation - shown.frame.true_elevation)}
+                  </span>
+                </span>
+                <span className="readout-item">
+                  <span className="readout-label">{t("dbf2d.peakLevel")}</span>
+                  <span className="readout-value">{fmt(shown.frame.peak_db, 2, " dB")}</span>
+                </span>
+              </div>
+            ) : (
+              <span className="subtle">{t("dbf2d.loading")}</span>
+            )}
           </footer>
         )}
       </section>
@@ -306,9 +319,7 @@ function AxisScrubber({
       <Button size="sm" variant={playing ? "default" : "primary"} icon={playing ? <Pause size={14} /> : <Play size={14} />} onClick={onToggle}>
         {playing ? pauseLabel : playLabel}
       </Button>
-      <span className="subtle" style={{ whiteSpace: "nowrap" }}>
-        {label}
-      </span>
+      <span className="subtle scrubber-label">{label}</span>
       <input
         type="range"
         className="slider"

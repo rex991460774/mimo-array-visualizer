@@ -9,6 +9,7 @@ import {
   FolderOpen,
   Grid3x3,
   HelpCircle,
+  ImageDown,
   Languages,
   LineChart,
   Map as MapIcon,
@@ -18,18 +19,36 @@ import {
   Package,
   Radar,
   Save,
-  Settings2,
   Sun,
   Target,
   Upload,
   Waves,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
+import { api } from "../api/client";
 import { LANGUAGE_LABELS, useT } from "../i18n";
 import { fmt, parseNumber, trimNumber } from "../lib/format";
 import { exportBundle, exportLayout, importFile, newProject, saveProject } from "../state/actions";
+import { useExportJob } from "../state/jobs";
 import { type Language, type ThemeMode, useIsDirty, useStore, type ViewId } from "../state/store";
 import { Button, Menu, MenuItem, NumberInput, Segmented, Spinner, useFilePicker } from "./ui";
+
+/** Angle-error PNG export from the top bar, reporting progress in the status bar. */
+function useAngleImageExport() {
+  const job = useExportJob();
+  const setStatus = useStore((state) => state.setStatus);
+  const status = job.job?.status;
+  useEffect(() => {
+    if (status === "running" || status === "queued") setStatus("status.imageGenerating");
+    else if (status === "succeeded") setStatus("status.exported", "success", { name: job.job?.download_name ?? "" });
+    else if (status === "failed") setStatus("status.exportFailed", "error", { message: job.job?.error ?? "" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
+  useEffect(() => {
+    if (job.error) setStatus("status.exportFailed", "error", { message: job.error });
+  }, [job.error, setStatus]);
+  return job;
+}
 
 export function TopBar() {
   const t = useT();
@@ -40,6 +59,8 @@ export function TopBar() {
   const { updateProject, openDialog, setLanguage, setTheme } = useStore.getState();
   const dirty = useIsDirty();
   const pickImport = useFilePicker(".json,.zip,application/json,application/zip", importFile);
+  const capability = useStore((state) => state.evaluation?.capability);
+  const angleImage = useAngleImageExport();
 
   return (
     <header className="topbar">
@@ -96,7 +117,7 @@ export function TopBar() {
         </Menu>
         <Menu
           trigger={({ toggle }) => (
-            <Button variant="ghost" icon={<Download size={16} />} onClick={toggle}>
+            <Button variant="ghost" icon={angleImage.running ? <Spinner /> : <Download size={16} />} onClick={toggle}>
               <span className="btn-label">{t("menu.export")}</span>
               <ChevronDown size={14} />
             </Button>
@@ -109,6 +130,17 @@ export function TopBar() {
               </MenuItem>
               <MenuItem icon={<Package size={15} />} onSelect={() => { close(); exportBundle(); }}>
                 {t("menu.exportBundle")}
+              </MenuItem>
+              <div className="menu-sep" />
+              <MenuItem
+                icon={<ImageDown size={15} />}
+                disabled={angleImage.running || (capability !== undefined && !capability.azimuth && !capability.elevation)}
+                onSelect={() => {
+                  close();
+                  angleImage.start(() => api.createAngleErrorImage(project, 1.0, language));
+                }}
+              >
+                {t("menu.exportAngleImage")}
               </MenuItem>
             </>
           )}
@@ -170,6 +202,43 @@ const VIEWS: { id: ViewId; icon: ReactNode; key: "view.array" | "view.dbf1d" | "
   { id: "band", icon: <Waves size={15} />, key: "view.band" },
 ];
 
+function fovText(range: [number, number]): string {
+  return range[0] === -range[1] ? `±${range[1]}°` : `${range[0]}~${range[1]}°`;
+}
+
+function ParamItem({
+  label,
+  children,
+  onClick,
+  title,
+  dot,
+}: {
+  label: string;
+  children: ReactNode;
+  onClick?: () => void;
+  title?: string;
+  dot?: "on" | "warn" | "off";
+}) {
+  const body = (
+    <>
+      <span className="param-label">
+        {dot && <span className={`chip-dot ${dot === "off" ? "" : dot}`} />}
+        {label}
+      </span>
+      <span className="param-value">{children}</span>
+    </>
+  );
+  return onClick ? (
+    <button type="button" className="param param-button" onClick={onClick} title={title}>
+      {body}
+    </button>
+  ) : (
+    <label className="param" title={title}>
+      {body}
+    </label>
+  );
+}
+
 export function ControlBar() {
   const t = useT();
   const project = useStore((state) => state.project)!;
@@ -180,7 +249,13 @@ export function ControlBar() {
   const { setView, updateProject, setDisplay, openDialog } = useStore.getState();
   const dictMode = project.dbf_dictionary.mode;
   const pattern = evaluation?.pattern_status;
-  const patternActive = pattern && (pattern.amplitude !== "ideal" || pattern.phase !== "ideal");
+  const patternDot = !pattern || (pattern.amplitude === "ideal" && pattern.phase === "ideal")
+    ? "off"
+    : pattern.amplitude === "mixed" || pattern.phase === "mixed"
+      ? "warn"
+      : "on";
+  const band = project.band;
+  const bandLabel = band.preset === "custom" ? t("top.bandCustom") : band.preset;
 
   return (
     <nav className="controlbar">
@@ -199,32 +274,58 @@ export function ControlBar() {
           </button>
         ))}
       </div>
-      <div className="controlbar-group">
-        <Segmented
-          label={t("top.band")}
-          value={project.band.preset}
-          options={[
-            { value: "60G", label: "60G", title: "57–64 GHz" },
-            { value: "77G", label: "77G", title: "76–81 GHz" },
-            { value: "92G", label: "92G" },
-            { value: "custom", label: t("top.bandCustom") },
-          ]}
-          onChange={(preset) => {
-            if (preset === "custom") {
-              openDialog("settings");
-              return;
-            }
-            const values = config.band_presets[preset];
-            updateProject({
-              band: { preset, start_ghz: values.start_ghz, stop_ghz: values.stop_ghz },
-              frequency_ghz: values.design_ghz,
-            });
-          }}
-        />
-        <label className="field" title={t("top.designTitle")}>
-          <span className="field-label">{t("top.frequency")}</span>
+      <div className="param-strip" aria-label={t("top.settings")}>
+        <Menu
+          align="left"
+          trigger={({ toggle }) => (
+            <ParamItem label={t("top.band")} onClick={toggle}>
+              {bandLabel}
+              <span className="param-sub">
+                {trimNumber(band.start_ghz, 2)}–{trimNumber(band.stop_ghz, 2)} GHz
+              </span>
+              <ChevronDown size={12} className="subtle" />
+            </ParamItem>
+          )}
+        >
+          {(close) => (
+            <>
+              {(["60G", "77G", "92G"] as const).map((preset) => {
+                const values = config.band_presets[preset];
+                return (
+                  <MenuItem
+                    key={preset}
+                    checked={band.preset === preset}
+                    onSelect={() => {
+                      updateProject({
+                        band: { preset, start_ghz: values.start_ghz, stop_ghz: values.stop_ghz },
+                        frequency_ghz: values.design_ghz,
+                      });
+                      close();
+                    }}
+                  >
+                    {preset}
+                    <span className="subtle" style={{ marginLeft: 8 }}>
+                      {values.start_ghz}–{values.stop_ghz} GHz
+                    </span>
+                  </MenuItem>
+                );
+              })}
+              <div className="menu-sep" />
+              <MenuItem
+                checked={band.preset === "custom"}
+                onSelect={() => {
+                  close();
+                  openDialog("settings");
+                }}
+              >
+                {t("top.bandCustom")}…
+              </MenuItem>
+            </>
+          )}
+        </Menu>
+        <ParamItem label={t("top.design")} title={t("top.designTitle")}>
           <NumberInput
-            className=""
+            className="param-input"
             value={project.frequency_ghz}
             parse={(text) => {
               const value = parseNumber(text, ["ghz", "g"]);
@@ -233,14 +334,13 @@ export function ControlBar() {
             format={(value) => trimNumber(value, 6)}
             invalidTitle={t("top.invalidFrequency")}
             onCommit={(value) => updateProject({ frequency_ghz: value })}
-            style={{ width: 58 }}
+            style={{ width: 52 }}
           />
-          <span className="field-unit">GHz</span>
-        </label>
-        <label className="field" title={t("top.marginTitle")}>
-          <span className="field-label">{t("top.margin")}</span>
+          <span className="param-unit">GHz</span>
+        </ParamItem>
+        <ParamItem label={t("top.margin")} title={t("top.marginTitle")}>
           <NumberInput
-            className=""
+            className="param-input"
             value={project.ambiguity_margin_db}
             parse={(text) => {
               const value = parseNumber(text, ["db"]);
@@ -249,41 +349,35 @@ export function ControlBar() {
             format={(value) => trimNumber(value, 3)}
             invalidTitle={t("top.invalidMargin")}
             onCommit={(value) => updateProject({ ambiguity_margin_db: value })}
-            style={{ width: 42 }}
+            style={{ width: 36 }}
           />
-          <span className="field-unit">dB</span>
-        </label>
-        <button type="button" className="chip-button" onClick={() => openDialog("dictionary")}>
-          <span className={`chip-dot ${dictMode !== "ideal" ? "on" : ""}`} />
-          <span className="chip-label">{t("top.dictionary")}</span>
-          <span className="chip-value">{t(`dict.${dictMode}` as const)}</span>
-        </button>
-        <button type="button" className="chip-button" onClick={() => openDialog("patterns")}>
-          <span className={`chip-dot ${patternActive ? (pattern?.amplitude === "mixed" || pattern?.phase === "mixed" ? "warn" : "on") : ""}`} />
-          <span className="chip-label">{t("top.ampPhase")}</span>
-          <span className="chip-value">
-            {t("top.ampPhaseValue", {
-              amplitude: t(`state.${pattern?.amplitude ?? "ideal"}` as const),
-              phase: t(`state.${pattern?.phase ?? "ideal"}` as const),
-            })}
-          </span>
-        </button>
-        <Button
-          variant="ghost"
-          icon={<Settings2 size={16} />}
-          onClick={() => openDialog("settings")}
-          title={t("top.settings")}
-          aria-label={t("top.settings")}
-        />
-        <Segmented
-          label={t("top.display")}
-          value={display}
-          options={[
-            { value: "db", label: t("display.db") },
-            { value: "magnitude", label: t("display.magnitude") },
-          ]}
-          onChange={setDisplay}
-        />
+          <span className="param-unit">dB</span>
+        </ParamItem>
+        <ParamItem label={t("top.fov")} onClick={() => openDialog("settings")} title={t("top.settings")}>
+          Az {fovText(project.fov.azimuth)}
+          <span className="param-sub">El {fovText(project.fov.elevation)}</span>
+        </ParamItem>
+        <ParamItem label={t("top.dictionary")} onClick={() => openDialog("dictionary")} dot={dictMode !== "ideal" ? "on" : "off"}>
+          {t(`dict.${dictMode}` as const)}
+        </ParamItem>
+        <ParamItem label={t("top.ampPhase")} onClick={() => openDialog("patterns")} dot={patternDot}>
+          {t("top.ampPhaseValue", {
+            amplitude: t(`state.${pattern?.amplitude ?? "ideal"}` as const),
+            phase: t(`state.${pattern?.phase ?? "ideal"}` as const),
+          })}
+        </ParamItem>
+        <div className="param param-static">
+          <span className="param-label">{t("top.display")}</span>
+          <Segmented
+            label={t("top.display")}
+            value={display}
+            options={[
+              { value: "db", label: t("display.db") },
+              { value: "magnitude", label: t("display.magnitude") },
+            ]}
+            onChange={setDisplay}
+          />
+        </div>
       </div>
     </nav>
   );

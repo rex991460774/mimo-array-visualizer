@@ -90,7 +90,7 @@ const zh: HelpSection[] = [
     bullets: [
       "误差图按「不模糊范围」（浅蓝底色）内的误差自适应纵轴；范围外的折返误差可能被裁切。",
       "裕量图中红色虚线为竞争峰裕量阈值；无竞争峰的帧画在图顶部。",
-      "「导出误差图 PNG」生成与报告一致的出版级图片。",
+      "顶部「导出 → 导出测角误差图 PNG」生成与报告一致的出版级图片。",
     ],
   },
   {
@@ -195,7 +195,7 @@ const en: HelpSection[] = [
     bullets: [
       "The error chart scales to errors inside the no-fold range (shaded); folded errors outside it may clip.",
       "The red dashed line in the margin chart is the margin threshold; frames without a competitor are drawn at the top.",
-      "Export error PNG renders the publication-quality image used in reports.",
+      "Export → Export angle-error PNG in the top bar renders the publication-quality image used in reports.",
     ],
   },
   {
@@ -298,7 +298,7 @@ const ja: HelpSection[] = [
     bullets: [
       "誤差グラフは折り返しなし範囲（網掛け）内の誤差に合わせて縦軸を調整します。範囲外の折り返し誤差は切れることがあります。",
       "マージングラフの赤い破線がしきい値です。競合ピークのないフレームは上端に描画します。",
-      "「誤差図 PNG を書き出す」でレポートと同じ品質の画像を出力します。",
+      "上部の「書き出し → 測角誤差図 PNG を書き出す」でレポートと同じ品質の画像を出力します。",
     ],
   },
   {

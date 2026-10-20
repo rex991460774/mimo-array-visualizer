@@ -1,4 +1,4 @@
-import { FolderOpen, Save, Trash2 } from "lucide-react";
+import { FolderOpen, FolderPlus, Save, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import type { ProjectSummary } from "../api/types";
@@ -64,7 +64,13 @@ export function ProjectsDialog({ onClose }: { onClose: () => void }) {
         </div>
       )}
       {!items && !error && <Spinner />}
-      {items && items.length === 0 && <p className="subtle">{t("projectsDialog.empty")}</p>}
+      {items && items.length === 0 && (
+        <div className="empty-block">
+          <FolderPlus size={28} strokeWidth={1.5} />
+          <h3>{t("projectsDialog.emptyTitle")}</h3>
+          <p>{t("projectsDialog.empty")}</p>
+        </div>
+      )}
       <div className="project-list">
         {items?.map((item) => (
           <div key={item.id} className="project-row">

@@ -42,13 +42,41 @@ function DbfAxisPanel({ axis, available }: { axis: Axis; available: boolean }) {
       <header className="panel-header">
         <div className="panel-heading">
           <span className="panel-title">{t("dbf.title", { axis: axisLabel })}</span>
-          {bank.data && (
-            <span className="panel-subtitle num">
-              {t("dbf.frame", { frame: playback.index + 1, total: count })}
-            </span>
-          )}
+          <span className="panel-subtitle num">
+            {bank.data
+              ? `${t("dbf.frame", { frame: playback.index + 1, total: count })} · ${t("overview.fov", { low: bank.data.fov[0], high: bank.data.fov[1] })}`
+              : "\u00a0"}
+          </span>
         </div>
-        <div className="panel-tools">
+        <div className="panel-tools">{available && bank.loading && <Spinner />}</div>
+      </header>
+      {available && (
+        <div className="panel-toolbar">
+          <Button
+            size="sm"
+            variant="primary"
+            icon={playback.playing ? <Pause size={14} /> : <Play size={14} />}
+            onClick={playback.toggle}
+            disabled={!bank.data}
+          >
+            {playback.playing ? t("dbf.pause") : playback.index > 0 && playback.index < count - 1 && playback.index !== center ? t("dbf.resume") : t("dbf.play")}
+          </Button>
+          <Button size="sm" variant="ghost" icon={<RotateCcw size={14} />} onClick={playback.reset} title={t("dbf.stop")} aria-label={t("dbf.stop")} disabled={!bank.data} />
+          <input
+            type="range"
+            className="slider toolbar-slider"
+            min={0}
+            max={count - 1}
+            value={playback.index}
+            disabled={!bank.data}
+            aria-label={t("dbf.sliderLabel", { axis: axisLabel })}
+            onChange={(event) => {
+              playback.setPlaying(false);
+              playback.seek(Number(event.target.value));
+            }}
+          />
+          <span className="angle-value">{bank.data ? fmtSigned(bank.data.true_angles[playback.index], 0) : "—"}</span>
+          <span className="toolbar-sep" />
           <Segmented
             label={t("dbf.speed")}
             value={String(playback.fps)}
@@ -56,10 +84,10 @@ function DbfAxisPanel({ axis, available }: { axis: Axis; available: boolean }) {
             onChange={(value) => playback.setFps(Number(value))}
           />
         </div>
-      </header>
+      )}
       <div className="panel-body">
         {available && bank.data && <SpectrumChart bank={bank.data} frame={playback.index} onSeek={playback.seek} />}
-        {available && bank.loading && (
+        {available && !bank.data && bank.loading && (
           <div className="loading-overlay">
             <Spinner /> {t("dbf.loading")}
           </div>
@@ -74,33 +102,9 @@ function DbfAxisPanel({ axis, available }: { axis: Axis; available: boolean }) {
         )}
         {!available && <EmptyCapability title={t(axis === "azimuth" ? "empty.azimuth" : "empty.elevation")} />}
       </div>
-      {available && bank.data && (
+      {available && (
         <footer className="panel-footer">
-          <div className="scrubber">
-            <Button
-              size="sm"
-              variant="primary"
-              icon={playback.playing ? <Pause size={14} /> : <Play size={14} />}
-              onClick={playback.toggle}
-            >
-              {playback.playing ? t("dbf.pause") : playback.index > 0 && playback.index < count - 1 && playback.index !== center ? t("dbf.resume") : t("dbf.play")}
-            </Button>
-            <Button size="sm" variant="ghost" icon={<RotateCcw size={14} />} onClick={playback.reset} title={t("dbf.stop")} aria-label={t("dbf.stop")} />
-            <input
-              type="range"
-              className="slider"
-              min={0}
-              max={count - 1}
-              value={playback.index}
-              aria-label={t("dbf.sliderLabel", { axis: axisLabel })}
-              onChange={(event) => {
-                playback.setPlaying(false);
-                playback.seek(Number(event.target.value));
-              }}
-            />
-            <span className="angle-value">{fmtSigned(bank.data.true_angles[playback.index], 0)}</span>
-          </div>
-          <FrameReadout bank={bank.data} frame={playback.index} />
+          {bank.data ? <FrameReadout bank={bank.data} frame={playback.index} /> : <span className="subtle">{t("dbf.loading")}</span>}
         </footer>
       )}
     </section>

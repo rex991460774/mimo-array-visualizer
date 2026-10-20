@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Info, X, XCircle } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, Info, X, XCircle } from "lucide-react";
 import {
   type ButtonHTMLAttributes,
   type ReactNode,
@@ -248,26 +248,42 @@ export function Menu({
   align?: "left" | "right";
 }) {
   const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<React.CSSProperties>({});
   const anchor = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
+  // Fixed positioning keeps the menu visible inside scrollable bars.
+  const toggle = useCallback(() => {
+    const rect = anchor.current?.getBoundingClientRect();
+    if (rect) {
+      setPosition(
+        align === "left"
+          ? { position: "fixed", top: rect.bottom + 4, left: rect.left, right: "auto" }
+          : { position: "fixed", top: rect.bottom + 4, right: window.innerWidth - rect.right, left: "auto" },
+      );
+    }
+    setOpen((value) => !value);
+  }, [align]);
   useEffect(() => {
     if (!open) return;
     const onDown = (event: MouseEvent) => {
       if (!anchor.current?.contains(event.target as Node)) setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => event.key === "Escape" && setOpen(false);
+    const onResize = () => setOpen(false);
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onResize);
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onResize);
     };
   }, [open]);
   return (
     <div className="menu-anchor" ref={anchor}>
-      {trigger({ open, toggle: () => setOpen((value) => !value) })}
+      {trigger({ open, toggle })}
       {open && (
-        <div className="menu" role="menu" style={align === "left" ? { left: 0, right: "auto" } : undefined}>
+        <div className="menu" role="menu" style={position}>
           {children(close)}
         </div>
       )}
@@ -299,7 +315,7 @@ export function MenuItem({
     >
       {icon}
       <span>{children}</span>
-      {checked && <span className="menu-check">✓</span>}
+      {checked && <Check size={14} className="menu-check" />}
     </button>
   );
 }

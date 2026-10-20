@@ -333,11 +333,12 @@ textarea {
   display: flex;
   align-items: center;
   gap: 16px;
-  min-height: 46px;
+  min-height: 52px;
   padding: 0 14px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
+  overflow-y: visible;
   scrollbar-width: none;
 }
 
@@ -356,8 +357,8 @@ textarea {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 0 12px;
+  gap: 6px;
+  padding: 0 10px;
   border: 0;
   background: none;
   color: var(--text-secondary);
@@ -384,6 +385,124 @@ textarea {
   height: 2px;
   border-radius: 2px 2px 0 0;
   background: var(--accent);
+}
+
+.param-strip {
+  display: flex;
+  align-items: stretch;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-subtle);
+  flex: none;
+}
+
+.param-strip > .param,
+.param-strip > .menu-anchor > .param {
+  border-right: 1px solid var(--border);
+}
+
+.param-strip > :last-child {
+  border-right: 0;
+}
+
+.param {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  min-height: 38px;
+  padding: 2px 11px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.param-button {
+  cursor: pointer;
+}
+
+.param-button:hover {
+  background: var(--surface-hover);
+}
+
+.param-strip > :first-child .param,
+.param-strip > .param:first-child {
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+
+.param-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.param-value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-weight: 500;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.param-sub {
+  color: var(--text-secondary);
+  font-weight: 400;
+  font-size: 12px;
+}
+
+.param-value .lucide-chevron-down {
+  align-self: center;
+}
+
+.param-input {
+  height: 20px;
+  padding: 0 4px;
+  margin: 0 0 0 -4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  font-weight: 500;
+  font-size: 13px;
+  text-align: left;
+  outline: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.param:hover .param-input {
+  border-color: var(--border-strong);
+  background: var(--surface);
+}
+
+.param-input:focus {
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.param-input.invalid {
+  border-color: var(--danger);
+}
+
+.param-unit {
+  color: var(--text-tertiary);
+  font-weight: 400;
+  font-size: 12px;
+}
+
+.param-static .segmented button {
+  height: 20px;
+  padding: 0 8px;
+}
+
+.param-static .segmented {
+  padding: 1px;
 }
 
 .controlbar-group {
@@ -1207,17 +1326,6 @@ select.input {
   color: var(--danger);
 }
 
-@media (max-width: 1640px) {
-  .chip-label,
-  .controlbar .field-label {
-    display: none;
-  }
-
-  .controlbar .field input {
-    padding-left: 9px;
-  }
-}
-
 @media (max-width: 1180px) {
   :root {
     --overview-width: 280px;
@@ -1351,4 +1459,67 @@ select.input {
   .form-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Secondary toolbar row under a panel header (same height in every panel). */
+.panel-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.panel-toolbar::-webkit-scrollbar {
+  display: none;
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.toolbar-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.popover-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 300px;
+  padding: 8px 8px 4px;
+}
+
+.popover-title {
+  font-weight: 600;
+}
+
+.popover-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.popover-row .btn {
+  margin-left: auto;
+}
+
+.popover-hint {
+  margin: 0;
+  font-size: 12px;
+  white-space: normal;
+}
+
+.inspector-alt {
+  font-size: 12px;
 }

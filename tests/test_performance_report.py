@@ -857,3 +857,26 @@ def test_performance_report_import_does_not_import_pyplot() -> None:
     )
     result = subprocess.run([sys.executable, "-c", code], cwd=project_root, check=False)
     assert result.returncode == 0
+
+
+def test_method_notes_explain_imported_phase_only_when_present() -> None:
+    options = SimpleNamespace(language="en")
+    data = SimpleNamespace(array_metrics=SimpleNamespace(warning_messages=()))
+    note = performance_report_module._label("en", "note_imported_phase")
+    patterns = ChannelPatternSet()
+    patterns.set_series(
+        "Rx2",
+        PATTERN_KIND_PHASE,
+        PATTERN_PLANE_HORIZONTAL,
+        _phase_series("Rx2", -90.0, 90.0),
+    )
+
+    without = performance_report_module._method_notes(
+        _angle_error_snapshot(), options, data
+    )
+    with_phase = performance_report_module._method_notes(
+        _angle_error_snapshot(patterns), options, data
+    )
+
+    assert note not in without
+    assert note in with_phase

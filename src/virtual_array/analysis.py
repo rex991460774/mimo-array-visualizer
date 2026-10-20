@@ -260,22 +260,34 @@ def calculate_metrics_and_psf(
     u = np.sin(az_rad) * np.cos(el_rad)
     v = np.sin(el_rad)
 
-    # A (channels x grid) matrix product avoids the large broadcast temporaries
-    # of the per-axis formulation; it is ~4x faster for 64+ virtual channels.
-    uv = np.stack([u.ravel(), v.ravel()])
-    steering = unit_phasor((np.pi * virtual_xy) @ uv)
-    channel_weight = _channel_pattern_weight(
-        channel_patterns, array, az_grid, el_grid
-    )
-    if np.ndim(channel_weight) == 0:
-        flat_factor = complex(channel_weight) * (
-            np.ones(len(virtual_xy), dtype=complex) @ steering
+    if _channel_pattern_has_any_phase(channel_patterns, array):
+        # Imported phase cuts already carry the geometric phase progression of
+        # their plane; multiplying the steering in again would count it twice.
+        # Use the same channel response as the DBF signal model.
+        phase_sign = _imported_phase_sign(
+            array, channel_patterns, azimuths, elevations
         )
+        flat_factor = _channel_response(
+            array, az_grid.ravel(), el_grid.ravel(), channel_patterns, phase_sign
+        ).sum(axis=0)
     else:
-        flat_weight = np.asarray(channel_weight, dtype=complex).reshape(
-            len(virtual_xy), -1
+        # A (channels x grid) matrix product avoids the large broadcast
+        # temporaries of the per-axis formulation; it is ~4x faster for 64+
+        # virtual channels.
+        uv = np.stack([u.ravel(), v.ravel()])
+        steering = unit_phasor((np.pi * virtual_xy) @ uv)
+        channel_weight = _channel_pattern_weight(
+            channel_patterns, array, az_grid, el_grid
         )
-        flat_factor = np.einsum("ng,ng->g", steering, flat_weight)
+        if np.ndim(channel_weight) == 0:
+            flat_factor = complex(channel_weight) * (
+                np.ones(len(virtual_xy), dtype=complex) @ steering
+            )
+        else:
+            flat_weight = np.asarray(channel_weight, dtype=complex).reshape(
+                len(virtual_xy), -1
+            )
+            flat_factor = np.einsum("ng,ng->g", steering, flat_weight)
     array_factor = flat_factor.reshape(az_grid.shape)
     pattern_weight = _element_pattern_weight(tx_pattern, az_grid, el_grid)
     pattern_weight *= _element_pattern_weight(rx_pattern, az_grid, el_grid)
@@ -546,6 +558,16 @@ class Dbf2dScanner:
             dbf_dictionary is not None and not dbf_dictionary.uses_auto_ideal_sign
         )
         self._has_phase = _channel_pattern_has_any_phase(channel_patterns, array)
+        self._phase_sign = (
+            _imported_phase_sign(
+                array,
+                channel_patterns,
+                self.scan_azimuths_deg,
+                self.scan_elevations_deg,
+            )
+            if self._has_phase
+            else 1
+        )
         self._dictionaries: dict[int, np.ndarray] = {}
 
     def _dictionary(self, steering_sign: int) -> np.ndarray:
@@ -610,6 +632,7 @@ class Dbf2dScanner:
             true_az,
             true_el,
             channel_patterns=self.channel_patterns,
+            phase_sign=self._phase_sign,
         )
         if self._uses_fixed_dictionary:
             dictionary = self._dictionary(0)
@@ -1358,7 +1381,16 @@ def _dbf_2d_signal_vector(
     true_azimuth_deg: float,
     true_elevation_deg: float,
     channel_patterns: ChannelPatternSet | None,
+    phase_sign: int = 1,
 ) -> np.ndarray:
+    if _channel_pattern_has_any_phase(channel_patterns, array):
+        return _channel_response(
+            array,
+            np.asarray([true_azimuth_deg], dtype=float),
+            np.asarray([true_elevation_deg], dtype=float),
+            channel_patterns,
+            phase_sign,
+        )[:, 0]
     azimuths = np.asarray([true_azimuth_deg], dtype=float)
     elevations = np.asarray([true_elevation_deg], dtype=float)
     channel_weight = _channel_pattern_weight(
@@ -1369,44 +1401,87 @@ def _dbf_2d_signal_vector(
         channel_weight = np.ones(virtual_count, dtype=complex) * complex(channel_weight)
     else:
         channel_weight = np.asarray(channel_weight, dtype=complex).reshape(virtual_count)
-    if _channel_pattern_has_any_phase(channel_patterns, array):
-        return np.asarray(channel_weight, dtype=complex)
     return _dbf_2d_steering_vector(
         array, true_azimuth_deg, true_elevation_deg
     ) * channel_weight
 
 
-def _dbf_2d_signal_matrix(
+def _channel_response(
     array: AntennaArray,
-    true_azimuth_deg: np.ndarray,
-    true_elevation_deg: np.ndarray,
+    azimuth_deg: np.ndarray,
+    elevation_deg: np.ndarray,
     channel_patterns: ChannelPatternSet | None,
+    phase_sign: int = 1,
 ) -> np.ndarray:
-    azimuths, elevations = np.broadcast_arrays(
-        np.asarray(true_azimuth_deg, dtype=float),
-        np.asarray(true_elevation_deg, dtype=float),
-    )
-    flat_az = azimuths.ravel()
-    flat_el = elevations.ravel()
-    channel_weight = _channel_pattern_weight(channel_patterns, array, flat_az, flat_el)
+    """Per-virtual-channel response (channels x directions) with imported phase.
+
+    Imported phase cuts already contain the geometric phase progression of
+    their plane, so the channel weight alone is the response along that axis.
+    The geometric steering is kept only for an axis without imported phase,
+    with the phase sign of the imported data (see :func:`_imported_phase_sign`)
+    so both axes follow one convention.
+    """
+    flat_az = np.asarray(azimuth_deg, dtype=float).ravel()
+    flat_el = np.asarray(elevation_deg, dtype=float).ravel()
+    u, v = _direction_uv(flat_az, flat_el)
     virtual_count = len(array.tx) * len(array.rx)
-    if np.isscalar(channel_weight):
-        weights = np.ones((len(flat_az), virtual_count), dtype=complex) * complex(
-            channel_weight
-        )
-    else:
-        weights = np.asarray(channel_weight, dtype=complex).reshape(
-            virtual_count, len(flat_az)
-        ).T
-    if _channel_pattern_has_any_phase(channel_patterns, array):
-        return weights
-    steering = _dbf_2d_scan_matrix(
-        array,
-        flat_az,
-        flat_el,
-        steering_sign=1,
+    channel_weight = _channel_pattern_weight(channel_patterns, array, flat_az, flat_el)
+    has_azimuth_phase = _channel_pattern_has_phase(channel_patterns, array, "azimuth")
+    has_elevation_phase = _channel_pattern_has_phase(
+        channel_patterns, array, "elevation"
     )
-    return steering * weights
+    if has_azimuth_phase:
+        # The horizontal cut samples the phase at el = 0, where u = sin(az).
+        # Off the cut, read it at the same direction cosine u so its geometric
+        # part stays pi*x*u (the elevation cut already follows v = sin(el)).
+        # Amplitudes stay at (az, el).
+        cut_azimuth = np.degrees(np.arcsin(np.clip(u, -1.0, 1.0)))
+        phase_weight = np.asarray(
+            _channel_pattern_weight(channel_patterns, array, cut_azimuth, flat_el),
+            dtype=complex,
+        )
+        channel_weight = np.abs(channel_weight) * phase_weight / np.abs(phase_weight)
+    response = np.asarray(channel_weight, dtype=complex) * np.ones(
+        (virtual_count, len(flat_az)), dtype=complex
+    )
+    if has_azimuth_phase and has_elevation_phase:
+        return response
+    virtual_xy = array.virtual_xy()
+    phase = np.zeros_like(response, dtype=float)
+    if not has_azimuth_phase:
+        phase += np.outer(virtual_xy[:, 0], u)
+    if not has_elevation_phase:
+        phase += np.outer(virtual_xy[:, 1], v)
+    return response * unit_phasor(phase_sign * np.pi * phase)
+
+
+def _imported_phase_sign(
+    array: AntennaArray,
+    channel_patterns: ChannelPatternSet | None,
+    azimuth_angles_deg: np.ndarray,
+    elevation_angles_deg: np.ndarray,
+) -> int:
+    """Sign of the phase progression in imported phase cuts (+1: exp(+j*pi*x*u)).
+
+    Only matters when one plane has imported phase and the other keeps the
+    geometric steering.  It is the opposite of the ideal-dictionary sign that
+    :func:`_select_dbf_steering_sign` picks for the imported axis.
+    """
+    has_azimuth_phase = _channel_pattern_has_phase(channel_patterns, array, "azimuth")
+    has_elevation_phase = _channel_pattern_has_phase(
+        channel_patterns, array, "elevation"
+    )
+    if has_azimuth_phase == has_elevation_phase:
+        return 1
+    axis, angles = (
+        ("azimuth", np.asarray(azimuth_angles_deg, dtype=float))
+        if has_azimuth_phase
+        else ("elevation", np.asarray(elevation_angles_deg, dtype=float))
+    )
+    signal_phase = _dbf_signal_matrix(array, angles, axis, channel_patterns)
+    return -_select_dbf_steering_sign(
+        array, angles, angles, signal_phase, axis, channel_patterns
+    )
 
 
 def _select_dbf_steering_sign(

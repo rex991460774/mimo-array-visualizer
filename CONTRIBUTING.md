@@ -1,29 +1,32 @@
-# Contributing
+# 参与贡献
 
-Thanks for helping improve MIMO Array Visualizer.
+感谢参与改进 MIMO Array Visualizer。
 
-## Development setup
+## 开发环境
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+.venv/bin/pip install -e ".[dev]"
+cd web && npm ci
 ```
 
-Before opening a pull request, run:
+后端：`.venv/bin/mimo-array-server --port 8000`；前端热更新：`cd web && npm run dev`。
+
+提交 PR 前请运行：
 
 ```bash
-pytest tests/ -x -q
-ruff check .
-pyright
+.venv/bin/python -m pytest -q
+.venv/bin/ruff check src tests
+cd web && npm test && npx tsc -b && npm run build
 ```
 
-## Pull requests
+## Pull Request
 
-- Keep changes focused and explain the user or engineering problem they solve.
-- Add or update tests for behavior changes.
-- For GUI changes, describe the affected platform and include a screenshot when it helps review.
-- Do not commit local state, generated `outputs/`, `build/`, or `dist/` files.
-- Preserve the existing layout JSON format and the public console entry points unless the change explicitly updates them.
+- 改动保持聚焦，说明它解决的用户或工程问题。
+- 行为变化需要补充或更新测试；修改计算核心时，不得改变现有测试锁定的数值结果。
+- 界面改动请附截图，并说明在哪些浏览器/宽度下验证过。
+- 新增 UI 文案时，`web/src/i18n/messages.ts` 中 zh/en/ja 三种语言都要补齐（有单元测试校验）。
+- 不要提交本地数据（`data/`）、构建产物（`src/virtual_array/server/static/`、`web/node_modules/`）。
+- 保持 v1 阵面 JSON 格式和 `/api` 接口兼容，除非改动明确是要升级它们。
 
-For larger changes, open an issue first so the scope and intended behavior can be discussed.
+较大的改动请先开 issue，讨论范围和预期行为。

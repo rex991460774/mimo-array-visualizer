@@ -1,5 +1,5 @@
-from .version import APP_VERSION
 from .geometry import AntennaArray, ArrayPoint, VirtualPoint
+from .version import APP_VERSION
 
 __version__ = APP_VERSION
 

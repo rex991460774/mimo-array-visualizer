@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 import numpy as np
 
@@ -41,7 +41,7 @@ class AntennaArray:
         tx_y: Iterable[float],
         rx_x: Iterable[float],
         rx_y: Iterable[float],
-    ) -> "AntennaArray":
+    ) -> AntennaArray:
         tx_x_values = tuple(tx_x)
         tx_y_values = tuple(tx_y)
         rx_x_values = tuple(rx_x)
@@ -66,12 +66,12 @@ class AntennaArray:
         self,
         tx_indices: Iterable[int] | None = None,
         rx_indices: Iterable[int] | None = None,
-    ) -> "AntennaArray":
+    ) -> AntennaArray:
         tx = self.tx if tx_indices is None else tuple(self.tx[i] for i in tx_indices)
         rx = self.rx if rx_indices is None else tuple(self.rx[i] for i in rx_indices)
         return AntennaArray(tx=tx, rx=rx)
 
-    def horizontal_subset(self, tx_y: float = 0.0, rx_y: float = -10.0) -> "AntennaArray":
+    def horizontal_subset(self, tx_y: float = 0.0, rx_y: float = -10.0) -> AntennaArray:
         tx = tuple(point for point in self.tx if point.y == tx_y)
         rx = tuple(point for point in self.rx if point.y == rx_y)
         return AntennaArray(tx=tx, rx=rx)

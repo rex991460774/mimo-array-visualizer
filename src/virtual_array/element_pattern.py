@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import csv
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 
 from .table_io import read_xlsx_rows
-
 
 ANGLE_HEADER_KEYWORDS = ("theta", "angle", "azimuth", "az", "deg")
 GAIN_HEADER_KEYWORDS = ("gain", "db", "dbi", "realized")
@@ -80,7 +79,7 @@ class ElementPattern:
             return f"{self.name} ({self.horizontal_column})"
         return f"{self.name} (H: {self.horizontal_column}; V: {self.elevation_column})"
 
-    def swapped_axes(self) -> "ElementPattern":
+    def swapped_axes(self) -> ElementPattern:
         if self.elevation_column is None or self.elevation_gain_db is None:
             return self
         return ElementPattern(
@@ -148,7 +147,7 @@ class ChannelPattern:
         kind: str,
         plane: str,
         series: PatternSeries | None,
-    ) -> "ChannelPattern":
+    ) -> ChannelPattern:
         values = {
             "amplitude_horizontal": self.amplitude_horizontal,
             "amplitude_elevation": self.amplitude_elevation,

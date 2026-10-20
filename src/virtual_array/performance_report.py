@@ -8,10 +8,11 @@ import math
 import os
 import textwrap
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 from matplotlib import colormaps, colors, rc_context
@@ -29,16 +30,18 @@ from .analysis import (
     ArrayMetrics,
     DbfAngleFrameSeries,
     DbfAngleMetrics,
+    EvaluationSettings,
     calculate_metrics_and_psf,
     dbf_angle_frame_series_from_spectra,
     dbf_angle_metrics_from_spectra,
     dbf_azimuth_spectrum_bank,
     dbf_elevation_spectrum_bank,
+    evaluate_dbf_axis,
 )
 from .dbf_dictionary import DbfDictionaryConfig
 from .element_pattern import ChannelPatternSet, ElementPattern, virtual_channel_names
 from .geometry import AntennaArray
-
+from .requirements import STATUS_FAIL, STATUS_PASS, RequirementCheck
 
 REPORT_SCHEMA_VERSION = 1
 LIGHT_SPEED_MM_PER_NS = 299.792458
@@ -218,6 +221,11 @@ class PerformanceReportSnapshot:
     current_config: dict[str, Any]
     app_version: str
     created_at: datetime
+    # FOV-bounded evaluation with refined peaks (web server); None keeps the
+    # legacy ±90° scan-grid behaviour.
+    evaluation: EvaluationSettings | None = None
+    requirement_checks: tuple[RequirementCheck, ...] = ()
+    band_ghz: tuple[float, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -636,6 +644,14 @@ def _compute_report_data(
     options: PerformanceReportOptions,
 ) -> _PerformanceReportData:
     unique, counts = snapshot.array.unique_virtual_xy()
+    fov_kwargs = (
+        {
+            "azimuth_fov": snapshot.evaluation.azimuth_fov_deg,
+            "elevation_fov": snapshot.evaluation.elevation_fov_deg,
+        }
+        if snapshot.evaluation is not None
+        else {}
+    )
     af_db, azimuths, elevations, metrics = calculate_metrics_and_psf(
         snapshot.array,
         unique,
@@ -643,6 +659,7 @@ def _compute_report_data(
         tx_pattern=snapshot.element_pattern,
         rx_pattern=snapshot.element_pattern,
         channel_patterns=snapshot.channel_patterns,
+        **fov_kwargs,
     )
     axes: list[_AxisReportData] = []
     axis_specs = (
@@ -740,6 +757,24 @@ def _compute_angle_error_axis(
     axis: str,
     bank_function: Callable[..., tuple[np.ndarray, np.ndarray, np.ndarray]],
 ) -> _AngleErrorAxisData:
+    if snapshot.evaluation is not None:
+        evaluation = evaluate_dbf_axis(
+            snapshot.array,
+            axis,
+            snapshot.evaluation,
+            channel_patterns=snapshot.channel_patterns,
+            dbf_dictionary=snapshot.dbf_dictionary,
+            ambiguity_margin_db=snapshot.ambiguity_margin_db,
+        )
+        return _AngleErrorAxisData(
+            axis=axis,
+            true_angles_deg=evaluation.true_angles_deg,
+            scan_angles_deg=evaluation.scan_angles_deg,
+            spectra_db=evaluation.spectra_db,
+            frame_series=evaluation.frame_series,
+            angle_metrics=evaluation.metrics,
+            display_range=angle_error_data_range(snapshot, axis, evaluation.true_angles_deg),
+        )
     true_angles, scan_angles, spectra = bank_function(
         snapshot.array,
         tx_pattern=snapshot.element_pattern,
@@ -1712,14 +1747,7 @@ def _report_manifest(
         "application_version": snapshot.app_version,
         "language": options.language,
         "frequency_ghz": snapshot.frequency_ghz,
-        "dbf_scan": {
-            "minimum_deg": DBF_SCAN_FOV[0],
-            "maximum_deg": DBF_SCAN_FOV[1],
-            "step_deg": DBF_SCAN_STEP_DEG,
-            "normalization": "normalized complex correlation; 0 dB equals correlation 1",
-            "peak_interpolation": "none; discrete scan-grid peak",
-            "tie_policy": "deterministic first maximum for performance metrics",
-        },
+        "dbf_scan": _scan_manifest(snapshot),
         "spectrum_plots": {
             "db_enabled": options.include_spectrum_db,
             "normalized_magnitude_enabled": options.include_spectrum_magnitude,
@@ -1727,9 +1755,30 @@ def _report_manifest(
             "layout": "one DBF spectrum plot per PDF page",
         },
         "array_factor_fov": {
-            "azimuth_deg": list(AZIMUTH_FOV),
-            "elevation_deg": list(ELEVATION_FOV),
+            "azimuth_deg": list(
+                snapshot.evaluation.azimuth_fov_deg if snapshot.evaluation else AZIMUTH_FOV
+            ),
+            "elevation_deg": list(
+                snapshot.evaluation.elevation_fov_deg if snapshot.evaluation else ELEVATION_FOV
+            ),
         },
+        "band_ghz": list(snapshot.band_ghz) if snapshot.band_ghz else None,
+        "requirement_checks": [
+            {
+                "key": check.key,
+                "axis": check.axis,
+                "target": check.target,
+                "actual": (
+                    None
+                    if check.actual is None
+                    else float(check.actual)
+                    if math.isfinite(check.actual)
+                    else str(check.actual)
+                ),
+                "status": check.status,
+            }
+            for check in snapshot.requirement_checks
+        ],
         "thresholds": {
             "ambiguity_margin_db_strictly_greater_than": snapshot.ambiguity_margin_db,
             "absolute_error_limit_deg": options.error_limit_deg,
@@ -1783,6 +1832,35 @@ def _report_manifest(
             "Normalized magnitude is derived as 10^(dB/20); it is not recomputed as a second spectrum.",
         ],
         "artifacts": [*data_files, "report_manifest.json"],
+    }
+
+
+def _scan_manifest(snapshot: PerformanceReportSnapshot) -> dict[str, Any]:
+    common = {
+        "step_deg": DBF_SCAN_STEP_DEG,
+        "normalization": "normalized complex correlation; 0 dB equals correlation 1",
+        "tie_policy": "deterministic first maximum for performance metrics",
+    }
+    settings = snapshot.evaluation
+    if settings is None:
+        return {
+            "minimum_deg": DBF_SCAN_FOV[0],
+            "maximum_deg": DBF_SCAN_FOV[1],
+            "peak_interpolation": "none; discrete scan-grid peak",
+            **common,
+        }
+    return {
+        "true_angle_fov_deg": {
+            "azimuth": list(settings.azimuth_fov_deg),
+            "elevation": list(settings.elevation_fov_deg),
+        },
+        "search_guard_deg": settings.search_guard_deg,
+        "peak_interpolation": (
+            "local re-evaluation of the correlation around the scan-grid peak (0.002° resolution)"
+            if settings.refine_peaks
+            else "none; discrete scan-grid peak"
+        ),
+        **common,
     }
 
 
@@ -1966,8 +2044,10 @@ def _basic_metric_rows(
         [
             "PSL / ISLR",
             (
-                f"Az {metrics.azimuth_psl_db:.2f} dB; El {metrics.elevation_psl_db:.2f} dB; "
-                f"2D {metrics.psl_db:.2f} dB; Az ISLR {_format_number(metrics.azimuth_islr_db, ' dB')}"
+                f"Az {_format_number(metrics.azimuth_psl_db, ' dB')}; "
+                f"El {_format_number(metrics.elevation_psl_db, ' dB')}; "
+                f"2D {_format_number(metrics.psl_db, ' dB')}; "
+                f"Az ISLR {_format_number(metrics.azimuth_islr_db, ' dB')}"
             ),
         ],
         [
@@ -1979,15 +2059,39 @@ def _basic_metric_rows(
                 f"{_format_db_angle(metrics.azimuth_grating_lobe_db, metrics.azimuth_grating_lobe_angle)}"
             ),
         ],
-        [
-            _label(language, "capability"),
-            (
-                f"{_status_label(metrics.front_radar_status, language)}; "
-                f"{_label(language, 'elevation_ambiguity')} "
-                f"{_ambiguity_label(metrics.elevation_ambiguity_level, language)}"
-            ),
-        ],
+        *_requirement_rows(snapshot, language),
     ]
+
+
+def _requirement_rows(snapshot: PerformanceReportSnapshot, language: str) -> list[list[str]]:
+    rows: list[list[str]] = []
+    if snapshot.evaluation is not None:
+        fov = snapshot.evaluation
+        text = (
+            f"Az {fov.azimuth_fov_deg[0]:g}°..{fov.azimuth_fov_deg[1]:g}°; "
+            f"El {fov.elevation_fov_deg[0]:g}°..{fov.elevation_fov_deg[1]:g}°"
+        )
+        if snapshot.band_ghz is not None:
+            text += f"; {_label(language, 'band')} {snapshot.band_ghz[0]:g}–{snapshot.band_ghz[1]:g} GHz"
+        rows.append([_label(language, "evaluation_fov"), text])
+    if snapshot.requirement_checks:
+        passed = sum(check.status == STATUS_PASS for check in snapshot.requirement_checks)
+        applicable = sum(check.status in {STATUS_PASS, STATUS_FAIL} for check in snapshot.requirement_checks)
+        failed = [
+            _requirement_label(check, language)
+            for check in snapshot.requirement_checks
+            if check.status == STATUS_FAIL
+        ]
+        summary = f"{passed}/{applicable} {_label(language, 'requirements_passed')}"
+        if failed:
+            summary += f"; {_label(language, 'requirements_failed')}: " + ", ".join(failed)
+        rows.append([_label(language, "requirements"), summary])
+    return rows
+
+
+def _requirement_label(check: RequirementCheck, language: str) -> str:
+    axis = f"{_axis_label(check.axis, language)} " if check.axis else ""
+    return f"{axis}{_label(language, 'requirement_' + check.key)}"
 
 
 def _axis_summary_row(axis_data: _AxisReportData, language: str) -> list[str]:
@@ -2268,6 +2372,16 @@ _REPORT_TEXT: dict[str, dict[str, str]] = {
     "first_sidelobe": {"zh": "首旁瓣", "en": "first sidelobe", "ja": "第1サイドローブ"},
     "grating_lobe": {"zh": "栅瓣", "en": "grating lobe", "ja": "グレーティングローブ"},
     "capability": {"zh": "前视能力评价", "en": "Front-radar capability", "ja": "前方レーダー能力"},
+    "evaluation_fov": {"zh": "评估视场", "en": "Evaluation FOV", "ja": "評価視野"},
+    "band": {"zh": "频段", "en": "band", "ja": "周波数帯"},
+    "requirements": {"zh": "规格检查", "en": "Requirement checks", "ja": "仕様チェック"},
+    "requirements_passed": {"zh": "项通过", "en": "passed", "ja": "項目合格"},
+    "requirements_failed": {"zh": "未通过", "en": "failed", "ja": "不合格"},
+    "requirement_resolution": {"zh": "分辨率", "en": "resolution", "ja": "分解能"},
+    "requirement_unambiguous_fov": {"zh": "视场内不模糊", "en": "unambiguous FOV", "ja": "視野内曖昧なし"},
+    "requirement_max_error": {"zh": "视场内最大误差", "en": "max error in FOV", "ja": "視野内最大誤差"},
+    "requirement_peak_margin": {"zh": "竞争峰裕量", "en": "peak margin", "ja": "競合ピークマージン"},
+    "requirement_psl": {"zh": "峰值旁瓣电平", "en": "peak sidelobe level", "ja": "ピークサイドローブ"},
     "elevation_ambiguity": {"zh": "俯仰模糊度", "en": "elevation ambiguity", "ja": "仰角曖昧度"},
     "note_main_plane": {
         "zh": "方位与俯仰结果是正交主平面 1D 诊断：方位扫描固定真实俯仰 0°，俯仰扫描固定真实方位 0°；不等同于完整联合二维误差体验证。",

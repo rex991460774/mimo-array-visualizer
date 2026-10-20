@@ -10,10 +10,10 @@ from virtual_array.analysis import dbf_azimuth_spectrum_bank
 from virtual_array.dbf_dictionary import (
     CHANNEL_MODE_PHYSICAL,
     CHANNEL_MODE_VIRTUAL,
-    DBF_DICTIONARY_QUALITY_DANGER,
-    DBF_DICTIONARY_QUALITY_OK,
     DBF_DICT_CHANNEL_PATTERN,
     DBF_DICT_CUSTOM,
+    DBF_DICTIONARY_QUALITY_DANGER,
+    DBF_DICTIONARY_QUALITY_OK,
     DbfDictionaryConfig,
     dictionary_quality_report,
     load_dbf_dictionary_table,

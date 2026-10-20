@@ -4,32 +4,30 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mimo-array-visualizer"
-version = "0.2.0"
-description = "Desktop visualizer and evaluator for MIMO Tx/Rx antenna array layouts."
+version = "1.0.0"
+description = "Web workbench for editing and evaluating MIMO Tx/Rx antenna array layouts."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.23",
     "matplotlib>=3.7",
     "openpyxl>=3.1",
-    "PySide6>=6.6",
-    "pyqtgraph>=0.13.7",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "python-multipart>=0.0.9",
+    "pydantic>=2.5",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
-]
-packaging = [
-    "pyinstaller>=6.20",
+    "httpx>=0.26",
 ]
 
 [project.scripts]
-mimo-array-visualizer = "virtual_array.gui:main"
+mimo-array-server = "virtual_array.server.cli:main"
 mimo-array-case4 = "virtual_array.examples.case4_5tx7rx_sel:main"
-virtual-array-gui = "virtual_array.gui:main"
-virtual-array-case4 = "virtual_array.examples.case4_5tx7rx_sel:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -39,15 +37,21 @@ virtual_array = [
     "assets/*.png",
     "assets/*.ico",
     "assets/*.icns",
+    "server/static/**/*",
 ]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"
+extend-exclude = ["web"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM"]
-ignore = ["E501"]
+# B905: zip(strict=) is not used to avoid changing long-standing core behavior.
+ignore = ["E501", "B905"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.File"]
 
 [tool.ruff.format]
 quote-style = "double"

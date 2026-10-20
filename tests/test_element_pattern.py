@@ -15,9 +15,9 @@ from virtual_array.element_pattern import (
     ElementPattern,
     PatternSeries,
     format_pattern_cut_metrics,
+    load_element_pattern,
     load_hfss_pattern_series,
     load_hfss_summary_pattern,
-    load_element_pattern,
     pattern_cut_metrics,
     virtual_channel_names,
 )

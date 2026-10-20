@@ -8,7 +8,7 @@ import numpy as np
 from .dbf_dictionary import DbfDictionaryConfig
 from .element_pattern import ChannelPatternSet, ElementPattern, virtual_channel_names
 from .geometry import AntennaArray
-
+from .phasor import unit_phasor
 
 AZIMUTH_FOV = (-75.0, 75.0)
 ELEVATION_FOV = (-15.0, 15.0)
@@ -31,6 +31,10 @@ DBF_CUT_REASON_BOUNDARY = "到达数据边界"
 DBF_QUALITY_OK = "正常"
 MAINLOBE_GUARD_AZ = 2.0
 MAINLOBE_GUARD_EL = 6.0
+MAINLOBE_MIN_DROP_DB = 3.0
+GRATING_MIN_ABS_ANGLE_DEG = 20.0
+DBF_SEARCH_GUARD_DEG = 10.0
+DBF_REFINE_STAGES = ((1.0, 0.05), (0.05, 0.002))
 DBF_CORRELATION_EPS = 1e-12
 
 
@@ -159,8 +163,14 @@ def dbf_angle_frame_series_from_spectra(
     true_angles_deg: np.ndarray,
     scan_angles_deg: np.ndarray,
     spectra_db: np.ndarray,
+    estimated_angles_deg: np.ndarray | None = None,
 ) -> DbfAngleFrameSeries:
-    """Extract per-frame DBF estimates, errors, peak margins, and quality flags."""
+    """Extract per-frame DBF estimates, errors, peak margins, and quality flags.
+
+    ``estimated_angles_deg`` optionally replaces the scan-grid peak angles with
+    refined estimates (see :func:`dbf_refine_peak_angles`); peak margins and
+    quality flags are still taken from the scan-grid spectra.
+    """
     true_angles = np.asarray(true_angles_deg, dtype=float)
     scan_angles = np.asarray(scan_angles_deg, dtype=float)
     spectra = np.asarray(spectra_db, dtype=float)
@@ -205,6 +215,11 @@ def dbf_angle_frame_series_from_spectra(
         quality_flags.append(quality_flag)
 
     estimate_array = np.asarray(estimates, dtype=float)
+    if estimated_angles_deg is not None:
+        refined = np.asarray(estimated_angles_deg, dtype=float)
+        if refined.shape != estimate_array.shape:
+            raise ValueError("estimated_angles_deg must have one value per true angle.")
+        estimate_array = refined.copy()
     return DbfAngleFrameSeries(
         true_angles_deg=true_angles.copy(),
         estimated_angles_deg=estimate_array,
@@ -224,6 +239,8 @@ def calculate_metrics_and_psf(
     tx_pattern: ElementPattern | None = None,
     rx_pattern: ElementPattern | None = None,
     channel_patterns: ChannelPatternSet | None = None,
+    azimuth_fov: tuple[float, float] = AZIMUTH_FOV,
+    elevation_fov: tuple[float, float] = ELEVATION_FOV,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, ArrayMetrics]:
     if unique is None or counts is None:
         unique, counts = array.unique_virtual_xy(decimals=decimals)
@@ -235,23 +252,31 @@ def calculate_metrics_and_psf(
     azimuth_resolution = estimate_resolution(x_aperture)
     elevation_resolution = estimate_resolution(y_aperture)
 
-    azimuths = np.linspace(AZIMUTH_FOV[0], AZIMUTH_FOV[1], AF_GRID_SIZE)
-    elevations = np.linspace(ELEVATION_FOV[0], ELEVATION_FOV[1], AF_GRID_SIZE)
+    azimuths = np.linspace(azimuth_fov[0], azimuth_fov[1], AF_GRID_SIZE)
+    elevations = np.linspace(elevation_fov[0], elevation_fov[1], AF_GRID_SIZE)
     az_grid, el_grid = np.meshgrid(azimuths, elevations)
     az_rad = np.radians(az_grid)
     el_rad = np.radians(el_grid)
     u = np.sin(az_rad) * np.cos(el_rad)
     v = np.sin(el_rad)
 
-    phase = np.pi * (
-        virtual_xy[:, 0, None, None] * u[None, :, :]
-        + virtual_xy[:, 1, None, None] * v[None, :, :]
-    )
-    steering = np.exp(1j * phase)
+    # A (channels x grid) matrix product avoids the large broadcast temporaries
+    # of the per-axis formulation; it is ~4x faster for 64+ virtual channels.
+    uv = np.stack([u.ravel(), v.ravel()])
+    steering = unit_phasor((np.pi * virtual_xy) @ uv)
     channel_weight = _channel_pattern_weight(
         channel_patterns, array, az_grid, el_grid
     )
-    array_factor = (steering * channel_weight).sum(axis=0)
+    if np.ndim(channel_weight) == 0:
+        flat_factor = complex(channel_weight) * (
+            np.ones(len(virtual_xy), dtype=complex) @ steering
+        )
+    else:
+        flat_weight = np.asarray(channel_weight, dtype=complex).reshape(
+            len(virtual_xy), -1
+        )
+        flat_factor = np.einsum("ng,ng->g", steering, flat_weight)
+    array_factor = flat_factor.reshape(az_grid.shape)
     pattern_weight = _element_pattern_weight(tx_pattern, az_grid, el_grid)
     pattern_weight *= _element_pattern_weight(rx_pattern, az_grid, el_grid)
     af = np.abs(array_factor * pattern_weight)
@@ -261,9 +286,25 @@ def calculate_metrics_and_psf(
     main_index = np.unravel_index(np.argmax(af_db), af_db.shape)
     main_azimuth = float(az_grid[main_index])
     main_elevation = float(el_grid[main_index])
+    # The main lobe extends to the first null on each principal cut through the
+    # peak (at least 3 dB down).  A fixed angular guard misclassifies the main
+    # lobe of small arrays (wide beams) as a sidelobe; an axis without aperture
+    # has no sidelobes at all.
+    az_bounds = (
+        _mainlobe_bounds(azimuths, af_db[main_index[0], :], int(main_index[1]))
+        if x_aperture > 0
+        else (float(azimuths[0]), float(azimuths[-1]))
+    )
+    el_bounds = (
+        _mainlobe_bounds(elevations, af_db[:, main_index[1]], int(main_index[0]))
+        if y_aperture > 0
+        else (float(elevations[0]), float(elevations[-1]))
+    )
     main_lobe_mask = (
-        (np.abs(az_grid - main_azimuth) <= MAINLOBE_GUARD_AZ)
-        & (np.abs(el_grid - main_elevation) <= MAINLOBE_GUARD_EL)
+        (az_grid >= az_bounds[0])
+        & (az_grid <= az_bounds[1])
+        & (el_grid >= el_bounds[0])
+        & (el_grid <= el_bounds[1])
     )
     sidelobe_values = np.where(~main_lobe_mask, af_db, -np.inf)
     sidelobe_index = np.unravel_index(
@@ -275,8 +316,18 @@ def calculate_metrics_and_psf(
     azimuth_cut = af_db[el0_index, :]
     elevation_cut = af_db[:, az0_index]
 
-    az_cut_mask = np.abs(azimuths) > MAINLOBE_GUARD_AZ
-    el_cut_mask = np.abs(elevations) > MAINLOBE_GUARD_EL
+    az_cut_bounds = (
+        _mainlobe_bounds(azimuths, azimuth_cut, int(np.argmax(azimuth_cut)))
+        if x_aperture > 0
+        else (float(azimuths[0]), float(azimuths[-1]))
+    )
+    el_cut_bounds = (
+        _mainlobe_bounds(elevations, elevation_cut, int(np.argmax(elevation_cut)))
+        if y_aperture > 0
+        else (float(elevations[0]), float(elevations[-1]))
+    )
+    az_cut_mask = (azimuths < az_cut_bounds[0]) | (azimuths > az_cut_bounds[1])
+    el_cut_mask = (elevations < el_cut_bounds[0]) | (elevations > el_cut_bounds[1])
     azimuth_psl_db = float(np.max(np.where(az_cut_mask, azimuth_cut, -np.inf)))
     elevation_psl_db = float(np.max(np.where(el_cut_mask, elevation_cut, -np.inf)))
 
@@ -287,7 +338,7 @@ def calculate_metrics_and_psf(
         azimuth_first_sidelobe(azimuths, azimuth_cut)
     )
     azimuth_grating_lobe_db, azimuth_grating_lobe_angle = azimuth_grating_lobe(
-        azimuths, azimuth_cut
+        azimuths, azimuth_cut, mainlobe_bounds=az_cut_bounds
     )
     elevation_3db_beamwidth = cut_3db_beamwidth(elevations, elevation_cut)
 
@@ -446,52 +497,127 @@ def dbf_2d_spectrum(
     normalization_max: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return one normalized-correlation 2D DBF spectrum for a true az/el angle."""
-    if scan_azimuths_deg is None:
-        scan_azimuths_deg = _default_dbf_angles()
-    else:
-        scan_azimuths_deg = np.asarray(scan_azimuths_deg, dtype=float)
-
-    if scan_elevations_deg is None:
-        scan_elevations_deg = _default_dbf_angles()
-    else:
-        scan_elevations_deg = np.asarray(scan_elevations_deg, dtype=float)
-
-    signal = _dbf_2d_signal_vector(
-        array,
-        true_azimuth_deg,
-        true_elevation_deg,
-        channel_patterns=channel_patterns,
-    )
-    az_grid, el_grid = np.meshgrid(scan_azimuths_deg, scan_elevations_deg)
-    if dbf_dictionary is not None and not dbf_dictionary.uses_auto_ideal_sign:
-        dictionary = dbf_dictionary.scan_matrix_2d(
-            array,
-            az_grid.ravel(),
-            el_grid.ravel(),
-            axis="azimuth",
-            channel_patterns=channel_patterns,
-        )
-    else:
-        steering_sign = _select_dbf_2d_steering_sign(
-            array,
-            float(true_azimuth_deg),
-            float(true_elevation_deg),
-            scan_azimuths_deg,
-            scan_elevations_deg,
-            signal,
-            channel_patterns=channel_patterns,
-        )
-        dictionary = _dbf_2d_scan_matrix(
-            array,
-            az_grid.ravel(),
-            el_grid.ravel(),
-            steering_sign=steering_sign,
-        )
     _ = tx_pattern, rx_pattern, normalization_max
-    spectra = _dbf_correlation_response(dictionary, signal)[:, 0]
-    spectra = spectra.reshape(len(scan_elevations_deg), len(scan_azimuths_deg))
-    spectra_db = 20.0 * np.log10(np.maximum(spectra, 1e-6))
-    return scan_azimuths_deg, scan_elevations_deg, spectra_db
+    scanner = Dbf2dScanner(
+        array,
+        scan_azimuths_deg=scan_azimuths_deg,
+        scan_elevations_deg=scan_elevations_deg,
+        channel_patterns=channel_patterns,
+        dbf_dictionary=dbf_dictionary,
+    )
+    spectra_db = scanner.spectrum_db(true_azimuth_deg, true_elevation_deg)
+    return scanner.scan_azimuths_deg, scanner.scan_elevations_deg, spectra_db
+
+
+class Dbf2dScanner:
+    """Evaluate 2D DBF spectra for many true angles with one scan dictionary.
+
+    Building the (scan points x channels) dictionary dominates the cost of a
+    2D spectrum.  The dictionary depends only on the array, channel patterns
+    and dictionary configuration, so animation and batch callers reuse it
+    across true angles.  Results are identical to :func:`dbf_2d_spectrum`.
+    """
+
+    def __init__(
+        self,
+        array: AntennaArray,
+        scan_azimuths_deg: np.ndarray | None = None,
+        scan_elevations_deg: np.ndarray | None = None,
+        channel_patterns: ChannelPatternSet | None = None,
+        dbf_dictionary: DbfDictionaryConfig | None = None,
+    ) -> None:
+        self.array = array
+        self.scan_azimuths_deg = (
+            _default_dbf_angles()
+            if scan_azimuths_deg is None
+            else np.asarray(scan_azimuths_deg, dtype=float)
+        )
+        self.scan_elevations_deg = (
+            _default_dbf_angles()
+            if scan_elevations_deg is None
+            else np.asarray(scan_elevations_deg, dtype=float)
+        )
+        self.channel_patterns = channel_patterns
+        self.dbf_dictionary = dbf_dictionary
+        az_grid, el_grid = np.meshgrid(self.scan_azimuths_deg, self.scan_elevations_deg)
+        self._flat_az = az_grid.ravel()
+        self._flat_el = el_grid.ravel()
+        self._uses_fixed_dictionary = (
+            dbf_dictionary is not None and not dbf_dictionary.uses_auto_ideal_sign
+        )
+        self._has_phase = _channel_pattern_has_any_phase(channel_patterns, array)
+        self._dictionaries: dict[int, np.ndarray] = {}
+
+    def _dictionary(self, steering_sign: int) -> np.ndarray:
+        key = 0 if self._uses_fixed_dictionary else steering_sign
+        cached = self._dictionaries.get(key)
+        if cached is not None:
+            return cached
+        if self._uses_fixed_dictionary:
+            assert self.dbf_dictionary is not None
+            dictionary = self.dbf_dictionary.scan_matrix_2d(
+                self.array,
+                self._flat_az,
+                self._flat_el,
+                axis="azimuth",
+                channel_patterns=self.channel_patterns,
+            )
+        else:
+            dictionary = _dbf_2d_scan_matrix(
+                self.array,
+                self._flat_az,
+                self._flat_el,
+                steering_sign=steering_sign,
+            )
+        self._dictionaries[key] = dictionary
+        return dictionary
+
+    def _steering_sign(
+        self,
+        true_azimuth_deg: float,
+        true_elevation_deg: float,
+        signal: np.ndarray,
+    ) -> int:
+        if not self._has_phase:
+            return DBF_DEFAULT_STEERING_SIGN
+        candidates: list[tuple[float, int]] = []
+        for steering_sign in (DBF_DEFAULT_STEERING_SIGN, 1):
+            score = np.abs(self._dictionary(steering_sign) @ signal) ** 2
+            peak = int(np.argmax(score))
+            error = math.hypot(
+                float(self._flat_az[peak]) - true_azimuth_deg,
+                float(self._flat_el[peak]) - true_elevation_deg,
+            )
+            candidates.append((error, steering_sign))
+        return min(
+            candidates,
+            key=lambda item: (
+                item[0],
+                0 if item[1] == DBF_DEFAULT_STEERING_SIGN else 1,
+            ),
+        )[1]
+
+    def spectrum_db(
+        self,
+        true_azimuth_deg: float,
+        true_elevation_deg: float,
+    ) -> np.ndarray:
+        """Return the (elevation x azimuth) correlation spectrum in dB."""
+        true_az = float(true_azimuth_deg)
+        true_el = float(true_elevation_deg)
+        signal = _dbf_2d_signal_vector(
+            self.array,
+            true_az,
+            true_el,
+            channel_patterns=self.channel_patterns,
+        )
+        if self._uses_fixed_dictionary:
+            dictionary = self._dictionary(0)
+        else:
+            dictionary = self._dictionary(self._steering_sign(true_az, true_el, signal))
+        spectra = _dbf_correlation_response(dictionary, signal)[:, 0]
+        spectra = spectra.reshape(len(self.scan_elevations_deg), len(self.scan_azimuths_deg))
+        return 20.0 * np.log10(np.maximum(spectra, 1e-6))
 
 
 def dbf_2d_normalization_reference(
@@ -576,6 +702,8 @@ def dbf_angle_metrics_from_spectra(
     spectra_db: np.ndarray,
     focus_limit_deg: float = DBF_ANGLE_FOCUS_DEG,
     ambiguity_margin_db: float = DBF_AMBIGUITY_MARGIN_DB,
+    estimated_angles_deg: np.ndarray | None = None,
+    focus_range_deg: tuple[float, float] | None = None,
 ) -> DbfAngleMetrics:
     true_angles = np.asarray(true_angles_deg, dtype=float)
     scan_angles = np.asarray(scan_angles_deg, dtype=float)
@@ -587,6 +715,7 @@ def dbf_angle_metrics_from_spectra(
         true_angles,
         scan_angles,
         spectra,
+        estimated_angles_deg=estimated_angles_deg,
     )
     true_angles = frame_series.true_angles_deg
     error_array = frame_series.errors_deg
@@ -599,7 +728,10 @@ def dbf_angle_metrics_from_spectra(
         ambiguity_margin_db=ambiguity_margin_db,
     )
 
-    focus_mask = np.abs(true_angles) <= focus_limit_deg
+    if focus_range_deg is not None:
+        focus_mask = (true_angles >= focus_range_deg[0]) & (true_angles <= focus_range_deg[1])
+    else:
+        focus_mask = np.abs(true_angles) <= focus_limit_deg
     focus_errors = np.abs(error_array[focus_mask])
     focus_max = float(np.max(focus_errors)) if focus_errors.size else None
     center_index = int(np.argmin(np.abs(true_angles)))
@@ -851,52 +983,241 @@ def _dbf_spectrum_bank(
     channel_patterns: ChannelPatternSet | None = None,
     dbf_dictionary: DbfDictionaryConfig | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    if true_angles_deg is None:
-        true_angles_deg = _default_dbf_angles()
-    else:
-        true_angles_deg = np.asarray(true_angles_deg, dtype=float)
-
-    if scan_angles_deg is None:
-        scan_angles_deg = _default_dbf_angles()
-    else:
-        scan_angles_deg = np.asarray(scan_angles_deg, dtype=float)
-
-    signal_phase = _dbf_signal_matrix(
-        array,
-        true_angles_deg,
-        axis=axis,
-        channel_patterns=channel_patterns,
-    )
-    if dbf_dictionary is not None and not dbf_dictionary.uses_auto_ideal_sign:
-        dictionary = dbf_dictionary.scan_matrix(
-            array,
-            scan_angles_deg,
-            axis=axis,
-            channel_patterns=channel_patterns,
-        )
-    else:
-        steering_sign = _select_dbf_steering_sign(
-            array,
-            true_angles_deg,
-            scan_angles_deg,
-            signal_phase,
-            axis=axis,
-            channel_patterns=channel_patterns,
-        )
-        dictionary = _dbf_scan_matrix(
-            array,
-            scan_angles_deg,
-            axis=axis,
-            steering_sign=steering_sign,
-        )
-    response = _dbf_correlation_response(dictionary, signal_phase)
-
     if axis not in {"azimuth", "elevation"}:
         raise ValueError(f"Unknown DBF axis: {axis!r}")
+    true_angles_deg, scan_angles_deg, signal_phase, dictionary_for = _dbf_axis_model(
+        array,
+        axis,
+        true_angles_deg,
+        scan_angles_deg,
+        channel_patterns=channel_patterns,
+        dbf_dictionary=dbf_dictionary,
+    )
+    response = _dbf_correlation_response(dictionary_for(scan_angles_deg), signal_phase)
     _ = tx_pattern, rx_pattern
     spectra = response.T
     spectra_db = 20.0 * np.log10(np.maximum(spectra, 1e-6))
     return true_angles_deg, scan_angles_deg, spectra_db
+
+
+def _dbf_axis_model(
+    array: AntennaArray,
+    axis: str,
+    true_angles_deg: np.ndarray | None,
+    scan_angles_deg: np.ndarray | None,
+    channel_patterns: ChannelPatternSet | None,
+    dbf_dictionary: DbfDictionaryConfig | None,
+):  # noqa: ANN202 - returns (true, scan, signals, dictionary builder)
+    """Signals for each true angle plus a dictionary builder for arbitrary angles.
+
+    The steering sign of the automatic ideal dictionary is chosen once on the
+    scan grid, so refined searches use exactly the same dictionary.
+    """
+    true_angles = (
+        _default_dbf_angles() if true_angles_deg is None else np.asarray(true_angles_deg, dtype=float)
+    )
+    scan_angles = (
+        _default_dbf_angles() if scan_angles_deg is None else np.asarray(scan_angles_deg, dtype=float)
+    )
+    signal_phase = _dbf_signal_matrix(
+        array,
+        true_angles,
+        axis=axis,
+        channel_patterns=channel_patterns,
+    )
+    if dbf_dictionary is not None and not dbf_dictionary.uses_auto_ideal_sign:
+        def dictionary_for(angles: np.ndarray) -> np.ndarray:
+            return dbf_dictionary.scan_matrix(
+                array,
+                np.asarray(angles, dtype=float),
+                axis=axis,
+                channel_patterns=channel_patterns,
+            )
+    else:
+        steering_sign = _select_dbf_steering_sign(
+            array,
+            true_angles,
+            scan_angles,
+            signal_phase,
+            axis=axis,
+            channel_patterns=channel_patterns,
+        )
+
+        def dictionary_for(angles: np.ndarray) -> np.ndarray:
+            return _dbf_scan_matrix(
+                array,
+                np.asarray(angles, dtype=float),
+                axis=axis,
+                steering_sign=steering_sign,
+            )
+
+    return true_angles, scan_angles, signal_phase, dictionary_for
+
+
+def dbf_refine_peak_angles(
+    array: AntennaArray,
+    axis: str,
+    true_angles_deg: np.ndarray,
+    scan_angles_deg: np.ndarray,
+    spectra_db: np.ndarray,
+    channel_patterns: ChannelPatternSet | None = None,
+    dbf_dictionary: DbfDictionaryConfig | None = None,
+    stages: tuple[tuple[float, float], ...] = DBF_REFINE_STAGES,
+) -> np.ndarray:
+    """Refine each frame's scan-grid peak by re-evaluating the correlation finely.
+
+    The coarse peak is the same strict ``argmax`` used for the performance
+    metrics.  Each stage searches ``±span`` around the current estimate with
+    ``step`` resolution (default 1°/0.05° then 0.05°/0.002°), using the exact
+    signal and dictionary of the spectrum bank, so the refinement adds no
+    interpolation bias.  Searches stay inside the scan range.
+    """
+    true_angles = np.asarray(true_angles_deg, dtype=float)
+    scan_angles = np.asarray(scan_angles_deg, dtype=float)
+    spectra = np.asarray(spectra_db, dtype=float)
+    estimates = scan_angles[np.argmax(spectra, axis=1)].astype(float)
+    if _dictionary_is_nearest_neighbour(dbf_dictionary, axis):
+        return estimates
+    _true, _scan, signals, dictionary_for = _dbf_axis_model(
+        array,
+        axis,
+        true_angles,
+        scan_angles,
+        channel_patterns=channel_patterns,
+        dbf_dictionary=dbf_dictionary,
+    )
+    low, high = float(scan_angles[0]), float(scan_angles[-1])
+    signal_norms = np.linalg.norm(signals, axis=0)
+    for span, step in stages:
+        offsets = np.arange(-span, span + step / 2.0, step)
+        for start in range(0, len(true_angles), 32):
+            stop = min(start + 32, len(true_angles))
+            candidates = np.clip(estimates[start:stop, None] + offsets[None, :], low, high)
+            dictionary = dictionary_for(candidates.ravel()).reshape(
+                stop - start, len(offsets), -1
+            )
+            response = np.abs(np.einsum("fkn,nf->fk", dictionary, signals[:, start:stop]))
+            norms = np.linalg.norm(dictionary, axis=2) * signal_norms[None, start:stop].T
+            correlation = np.divide(
+                response,
+                norms,
+                out=np.zeros_like(response),
+                where=norms > DBF_CORRELATION_EPS,
+            )
+            best = np.argmax(correlation, axis=1)
+            estimates[start:stop] = candidates[np.arange(stop - start), best]
+    return estimates
+
+
+def _dictionary_is_nearest_neighbour(
+    dbf_dictionary: DbfDictionaryConfig | None,
+    axis: str,
+) -> bool:
+    if dbf_dictionary is None or dbf_dictionary.mode != "custom":
+        return False
+    table = dbf_dictionary.custom_table_for_axis(axis)
+    return table is not None and table.is_2d
+
+
+@dataclass(frozen=True)
+class EvaluationSettings:
+    """Field of view and search settings for one radar evaluation.
+
+    True angles are swept across the FOV in 1° steps.  The DBF search (scan)
+    range extends ``search_guard_deg`` beyond the FOV so a target at the FOV
+    edge is not flagged as an edge peak; real radars likewise only search
+    the directions they serve, which keeps grating lobes outside the FOV from
+    being counted as in-FOV ambiguity.
+    """
+
+    azimuth_fov_deg: tuple[float, float] = AZIMUTH_FOV
+    elevation_fov_deg: tuple[float, float] = ELEVATION_FOV
+    search_guard_deg: float = DBF_SEARCH_GUARD_DEG
+    refine_peaks: bool = True
+
+    def __post_init__(self) -> None:
+        for name in ("azimuth_fov_deg", "elevation_fov_deg"):
+            low, high = (float(value) for value in getattr(self, name))
+            if not (DBF_SCAN_FOV[0] <= low < 0.0 < high <= DBF_SCAN_FOV[1]):
+                raise ValueError(f"{name} must satisfy -90 <= low < 0 < high <= 90.")
+            object.__setattr__(self, name, (low, high))
+        guard = float(self.search_guard_deg)
+        if not math.isfinite(guard) or guard < 0.0:
+            raise ValueError("search_guard_deg must be finite and non-negative.")
+        object.__setattr__(self, "search_guard_deg", guard)
+
+    def fov(self, axis: str) -> tuple[float, float]:
+        if axis == "azimuth":
+            return self.azimuth_fov_deg
+        if axis == "elevation":
+            return self.elevation_fov_deg
+        raise ValueError(f"Unknown DBF axis: {axis!r}")
+
+    def true_angles(self, axis: str) -> np.ndarray:
+        low, high = self.fov(axis)
+        return np.arange(math.ceil(low), math.floor(high) + DBF_SCAN_STEP_DEG / 2.0, DBF_SCAN_STEP_DEG)
+
+    def scan_angles(self, axis: str) -> np.ndarray:
+        low, high = self.fov(axis)
+        start = max(DBF_SCAN_FOV[0], math.ceil(low) - self.search_guard_deg)
+        stop = min(DBF_SCAN_FOV[1], math.floor(high) + self.search_guard_deg)
+        return np.arange(start, stop + DBF_SCAN_STEP_DEG / 2.0, DBF_SCAN_STEP_DEG)
+
+
+@dataclass(frozen=True)
+class DbfAxisEvaluation:
+    axis: str
+    true_angles_deg: np.ndarray
+    scan_angles_deg: np.ndarray
+    spectra_db: np.ndarray
+    frame_series: DbfAngleFrameSeries
+    metrics: DbfAngleMetrics
+
+
+def evaluate_dbf_axis(
+    array: AntennaArray,
+    axis: str,
+    settings: EvaluationSettings,
+    channel_patterns: ChannelPatternSet | None = None,
+    dbf_dictionary: DbfDictionaryConfig | None = None,
+    ambiguity_margin_db: float = DBF_AMBIGUITY_MARGIN_DB,
+) -> DbfAxisEvaluation:
+    """FOV-bounded DBF evaluation of one axis with optional peak refinement."""
+    bank = dbf_azimuth_spectrum_bank if axis == "azimuth" else dbf_elevation_spectrum_bank
+    if axis not in {"azimuth", "elevation"}:
+        raise ValueError(f"Unknown DBF axis: {axis!r}")
+    true_angles, scan_angles, spectra = bank(
+        array,
+        true_angles_deg=settings.true_angles(axis),
+        scan_angles_deg=settings.scan_angles(axis),
+        channel_patterns=channel_patterns,
+        dbf_dictionary=dbf_dictionary,
+    )
+    estimates = (
+        dbf_refine_peak_angles(
+            array,
+            axis,
+            true_angles,
+            scan_angles,
+            spectra,
+            channel_patterns=channel_patterns,
+            dbf_dictionary=dbf_dictionary,
+        )
+        if settings.refine_peaks
+        else None
+    )
+    frame_series = dbf_angle_frame_series_from_spectra(
+        true_angles, scan_angles, spectra, estimated_angles_deg=estimates
+    )
+    metrics = dbf_angle_metrics_from_spectra(
+        true_angles,
+        scan_angles,
+        spectra,
+        ambiguity_margin_db=ambiguity_margin_db,
+        estimated_angles_deg=estimates,
+        focus_range_deg=settings.fov(axis),
+    )
+    return DbfAxisEvaluation(axis, true_angles, scan_angles, spectra, frame_series, metrics)
 
 
 def _dbf_correlation_response(
@@ -943,7 +1264,7 @@ def _steering_matrix(
         raise ValueError(f"Unknown DBF axis: {axis!r}")
     u = np.sin(np.radians(angles_deg))
     phase = np.pi * positions[:, None] * u[None, :]
-    return np.exp(1j * phase)
+    return unit_phasor(phase)
 
 
 def _dbf_scan_matrix(
@@ -961,7 +1282,7 @@ def _dbf_scan_matrix(
         raise ValueError(f"Unknown DBF axis: {axis!r}")
     u = np.sin(np.radians(angles_deg))
     phase = steering_sign * np.pi * u[:, None] * positions[None, :]
-    return np.exp(1j * phase)
+    return unit_phasor(phase)
 
 
 def _direction_uv(
@@ -986,11 +1307,9 @@ def _dbf_2d_scan_matrix(
         np.asarray(azimuth_deg, dtype=float),
         np.asarray(elevation_deg, dtype=float),
     )
-    phase = steering_sign * np.pi * (
-        u[:, None] * virtual_xy[None, :, 0]
-        + v[:, None] * virtual_xy[None, :, 1]
-    )
-    return np.exp(1j * phase)
+    uv = np.column_stack([np.ravel(u), np.ravel(v)])
+    phase = uv @ (steering_sign * np.pi * virtual_xy.T)
+    return unit_phasor(phase.reshape(*np.shape(u), len(virtual_xy)))
 
 
 def _dbf_2d_steering_vector(
@@ -1004,7 +1323,7 @@ def _dbf_2d_steering_vector(
         np.asarray([elevation_deg], dtype=float),
     )
     phase = np.pi * (virtual_xy[:, 0] * float(u[0]) + virtual_xy[:, 1] * float(v[0]))
-    return np.exp(1j * phase)
+    return unit_phasor(phase)
 
 
 def _axis_pattern_angles(
@@ -1118,39 +1437,6 @@ def _select_dbf_steering_sign(
         error = estimates[selected] - true_angles_deg[selected]
         rms = float(np.sqrt(np.mean(error**2))) if len(error) else float("inf")
         candidates.append((rms, steering_sign))
-    return min(candidates, key=lambda item: (item[0], 0 if item[1] == DBF_DEFAULT_STEERING_SIGN else 1))[1]
-
-
-def _select_dbf_2d_steering_sign(
-    array: AntennaArray,
-    true_azimuth_deg: float,
-    true_elevation_deg: float,
-    scan_azimuths_deg: np.ndarray,
-    scan_elevations_deg: np.ndarray,
-    signal: np.ndarray,
-    channel_patterns: ChannelPatternSet | None,
-) -> int:
-    if not _channel_pattern_has_any_phase(channel_patterns, array):
-        return DBF_DEFAULT_STEERING_SIGN
-
-    az_grid, el_grid = np.meshgrid(scan_azimuths_deg, scan_elevations_deg)
-    candidates: list[tuple[float, int]] = []
-    for steering_sign in (DBF_DEFAULT_STEERING_SIGN, 1):
-        dictionary = _dbf_2d_scan_matrix(
-            array,
-            az_grid.ravel(),
-            el_grid.ravel(),
-            steering_sign=steering_sign,
-        )
-        score = np.abs(dictionary @ signal) ** 2
-        peak = int(np.argmax(score))
-        estimate_az = float(az_grid.ravel()[peak])
-        estimate_el = float(el_grid.ravel()[peak])
-        error = math.hypot(
-            estimate_az - true_azimuth_deg,
-            estimate_el - true_elevation_deg,
-        )
-        candidates.append((error, steering_sign))
     return min(candidates, key=lambda item: (item[0], 0 if item[1] == DBF_DEFAULT_STEERING_SIGN else 1))[1]
 
 
@@ -1292,13 +1578,17 @@ def azimuth_first_sidelobe(
 def azimuth_grating_lobe(
     azimuths: np.ndarray,
     azimuth_cut_db: np.ndarray,
-    min_abs_angle: float = 20.0,
+    min_abs_angle: float = GRATING_MIN_ABS_ANGLE_DEG,
+    mainlobe_bounds: tuple[float, float] | None = None,
 ) -> tuple[float | None, float | None]:
-    far_indices = np.flatnonzero(np.abs(azimuths) > min_abs_angle)
+    far = np.abs(azimuths) > min_abs_angle
+    if mainlobe_bounds is not None:
+        far &= (azimuths < mainlobe_bounds[0]) | (azimuths > mainlobe_bounds[1])
+    far_indices = np.flatnonzero(far)
     if len(far_indices) == 0:
         return None, None
     peak_indices = local_peak_indices(azimuth_cut_db)
-    far_peak_indices = peak_indices[np.abs(azimuths[peak_indices]) > min_abs_angle]
+    far_peak_indices = peak_indices[far[peak_indices]]
     candidates = far_peak_indices if len(far_peak_indices) else far_indices
     best_index = int(candidates[np.argmax(azimuth_cut_db[candidates])])
     return float(azimuth_cut_db[best_index]), float(azimuths[best_index])
@@ -1371,6 +1661,36 @@ def threshold_crossing_angle(
             return x0 + fraction * (x1 - x0)
         index += direction
     return None
+
+
+def _mainlobe_bounds(
+    angles: np.ndarray,
+    cut_db: np.ndarray,
+    peak_index: int,
+    min_drop_db: float = MAINLOBE_MIN_DROP_DB,
+) -> tuple[float, float]:
+    """Angles of the first nulls around a peak, at least ``min_drop_db`` down.
+
+    If the cut never drops by ``min_drop_db`` on one side, the main lobe is
+    taken to extend to the end of the cut on that side.
+    """
+    values = np.asarray(cut_db, dtype=float)
+    peak = float(values[peak_index])
+    bounds = []
+    for direction in (-1, 1):
+        index = peak_index
+        while 0 <= index + direction < len(values) and peak - values[index] < min_drop_db:
+            index += direction
+        if peak - values[index] < min_drop_db:
+            bounds.append(float(angles[index]))
+            continue
+        while (
+            0 <= index + direction < len(values)
+            and values[index + direction] <= values[index]
+        ):
+            index += direction
+        bounds.append(float(angles[index]))
+    return bounds[0], bounds[1]
 
 
 def first_null_index(values_db: np.ndarray, peak_index: int, direction: int) -> int | None:

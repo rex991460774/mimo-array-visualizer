@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from virtual_array.geometry import AntennaArray
 from virtual_array.examples.case4_5tx7rx_sel import build_array
+from virtual_array.geometry import AntennaArray
 from virtual_array.grid import snap_to_grid
 
 

@@ -1,0 +1,20 @@
+# systemd unit for a bare-metal Linux deployment.
+# Install: sudo cp deploy/mimo-array.service /etc/systemd/system/
+#          sudo systemctl daemon-reload && sudo systemctl enable --now mimo-array
+# Adjust User, WorkingDirectory and paths to the checkout location.
+[Unit]
+Description=MIMO Array Visualizer web workbench
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mimo
+WorkingDirectory=/opt/mimo-array-visualizer
+ExecStart=/opt/mimo-array-visualizer/.venv/bin/mimo-array-server --host 0.0.0.0 --port 8000 --data-dir /var/lib/mimo-array
+Restart=on-failure
+RestartSec=3
+Environment=MPLBACKEND=Agg
+
+[Install]
+WantedBy=multi-user.target

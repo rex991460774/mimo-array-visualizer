@@ -1,7 +1,8 @@
 {
   "venvPath": ".",
   "venv": ".venv",
-  "include": ["src", "tests", "GUI.py"],
+  "include": ["src", "tests"],
+  "exclude": ["web", "src/virtual_array/server/static"],
   "extraPaths": ["src"],
-  "pythonVersion": "3.14"
+  "pythonVersion": "3.10"
 }

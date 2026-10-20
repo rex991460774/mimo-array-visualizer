@@ -105,7 +105,7 @@ def _angle_error_plot_axis_data() -> SimpleNamespace:
 def _figure_legend_labels(figure: object) -> list[str]:
     return [
         text.get_text()
-        for legend in getattr(figure, "legends")
+        for legend in figure.legends
         for text in legend.get_texts()
     ]
 

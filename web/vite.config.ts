@@ -21,9 +21,11 @@ export default defineConfig({
     },
   },
   test: {
-    environment: "node",
+    // jsdom gives component tests a DOM; pure-logic tests run fine under it too.
+    environment: "jsdom",
     // Browser smoke tests in e2e/ run under Playwright, not Vitest.
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.{ts,tsx}"],
+    setupFiles: ["src/__tests__/setup.ts"],
     coverage: {
       provider: "v8",
       // Report every source file, not only those a unit test happens to import.

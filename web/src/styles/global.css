@@ -1207,6 +1207,17 @@ select.input {
   color: var(--danger);
 }
 
+@media (max-width: 1640px) {
+  .chip-label,
+  .controlbar .field-label {
+    display: none;
+  }
+
+  .controlbar .field input {
+    padding-left: 9px;
+  }
+}
+
 @media (max-width: 1180px) {
   :root {
     --overview-width: 280px;

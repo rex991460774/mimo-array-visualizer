@@ -40,11 +40,39 @@ export interface ChannelPatternBinding {
   column: string;
 }
 
+export type BandPreset = "60G" | "77G" | "92G" | "custom";
+
+export interface Band {
+  preset: BandPreset;
+  start_ghz: number;
+  stop_ghz: number;
+}
+
+export interface FieldOfView {
+  azimuth: [number, number];
+  elevation: [number, number];
+}
+
+export interface Requirements {
+  azimuth_resolution_deg: number | null;
+  elevation_resolution_deg: number | null;
+  azimuth_unambiguous_fov: boolean;
+  elevation_unambiguous_fov: boolean;
+  max_abs_error_deg: number | null;
+  min_peak_margin_db: number | null;
+  max_psl_db: number | null;
+}
+
 export interface Project {
   version: 2;
   name: string;
+  /** Design frequency: the layout's λ is defined here. */
   frequency_ghz: number;
   ambiguity_margin_db: number;
+  band: Band;
+  fov: FieldOfView;
+  grid_step_lambda: number;
+  requirements: Requirements;
   layout: Layout;
   dbf_dictionary: DictionarySettings;
   element_pattern: ElementPatternSettings | null;
@@ -117,6 +145,62 @@ export interface VirtualPointGroup {
 
 export type AmpPhaseState = "ideal" | "imported" | "mixed";
 
+export interface AxisResolution {
+  measured: WireNumber;
+  estimate: WireNumber;
+  value: WireNumber;
+}
+
+export type RequirementKey = "resolution" | "unambiguous_fov" | "max_error" | "peak_margin" | "psl";
+
+export interface RequirementCheck {
+  key: RequirementKey;
+  axis: Axis | null;
+  target: WireNumber;
+  actual: WireNumber;
+  status: "pass" | "fail" | "na";
+}
+
+export interface LayoutCheck {
+  code: "coincident" | "too_close" | "design_outside_band";
+  a?: string;
+  b?: string;
+  distance_lambda?: number;
+  distance_mm?: number;
+}
+
+export interface PerformanceSummary {
+  frequency_ghz: number;
+  wavelength_mm: number;
+  capability: { azimuth: boolean; elevation: boolean; two_d: boolean };
+  resolution: Record<Axis, AxisResolution>;
+  psl_db: WireNumber;
+  azimuth_psl_db: WireNumber;
+  elevation_psl_db: WireNumber;
+  angle: Record<Axis, AngleMetrics | { error: string } | null>;
+  requirements: RequirementCheck[];
+  passed: number;
+  failed: number;
+}
+
+export interface BandSweep {
+  band: Band;
+  design_ghz: number;
+  design_in_band: boolean;
+  uses_single_frequency_data: boolean;
+  points: (PerformanceSummary & { role: string })[];
+}
+
+export type CompareItem = {
+  name: string;
+  band: Band;
+  design_ghz: number;
+  tx_count: number;
+  rx_count: number;
+  fov: FieldOfView;
+  error: string | null;
+} & Partial<PerformanceSummary>;
+
 export interface Evaluation {
   wavelength_mm: number;
   half_wavelength_mm: number;
@@ -133,16 +217,21 @@ export interface Evaluation {
     x_aperture_mm: number;
     y_aperture_mm: number;
   };
+  resolution: Record<Axis, AxisResolution>;
   metrics: ArrayMetrics;
   capability: { azimuth: boolean; elevation: boolean; two_d: boolean };
+  fov: Record<Axis, [number, number]>;
   virtual_points: VirtualPointGroup[];
   angle: Record<Axis, AngleMetrics | { error: string } | null>;
+  requirements: RequirementCheck[];
+  layout_checks: LayoutCheck[];
   pattern_status: { amplitude: AmpPhaseState; phase: AmpPhaseState };
   notes: string[];
 }
 
 export interface DbfBank {
   axis: Axis;
+  fov: [number, number];
   true_angles: number[];
   scan_angles: number[];
   spectra_db: EncodedArray;
@@ -167,6 +256,7 @@ export interface Dbf2dFrame {
 }
 
 export interface Dbf2dResult {
+  fov: Record<Axis, [number, number]>;
   scan_azimuths: number[];
   scan_elevations: number[];
   frames: Dbf2dFrame[];
@@ -275,6 +365,8 @@ export interface ServerConfig {
     grid_step_lambda: number;
     max_asset_bytes: number;
     max_2d_frames_per_request: number;
+    grid_steps_lambda: number[];
   };
+  band_presets: Record<"60G" | "77G" | "92G", { start_ghz: number; stop_ghz: number; design_ghz: number }>;
   dbf: { scan_fov: [number, number]; scan_step_deg: number; scan_grid_size: number };
 }

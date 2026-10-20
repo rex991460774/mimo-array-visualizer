@@ -1,5 +1,7 @@
 import type {
   AssetInfo,
+  BandSweep,
+  CompareItem,
   Axis,
   ChannelPatternBinding,
   Dbf2dResult,
@@ -89,6 +91,8 @@ export const api = {
     post<Layout>("/api/layout/auto", { tx_count, rx_count }),
   evaluate: (project: Project, signal?: AbortSignal) =>
     post<Evaluation>("/api/evaluate", { project }, signal),
+  band: (project: Project, signal?: AbortSignal) => post<BandSweep>("/api/band", { project }, signal),
+  compare: (projects: Project[]) => post<CompareItem[]>("/api/compare", { projects }),
   dbfBank: (project: Project, axis: Axis, signal?: AbortSignal) =>
     post<DbfBank>("/api/dbf/bank", { project, axis }, signal),
   dbf2d: (project: Project, frames: { azimuth: number; elevation: number }[], signal?: AbortSignal) =>

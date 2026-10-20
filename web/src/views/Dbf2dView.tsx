@@ -38,8 +38,8 @@ function angleKey(az: number, el: number) {
   return `${az}|${el}`;
 }
 
-function wrapAngle(value: number) {
-  return value > 90 ? -90 : value;
+function wrapAngle(value: number, range: [number, number]) {
+  return value > range[1] ? range[0] : value;
 }
 
 function useFrameCache(project: Project, enabled: boolean, maxBatch: number) {
@@ -111,6 +111,8 @@ export function Dbf2dView() {
   const config = useStore((state) => state.config)!;
   const evaluation = useStore((state) => state.evaluation);
   const available = evaluation?.capability.two_d ?? true;
+  const azRange = project.fov.azimuth;
+  const elRange = project.fov.elevation;
   const [trueAz, setTrueAz] = useState(0);
   const [trueEl, setTrueEl] = useState(0);
   const [playAz, setPlayAz] = useState(false);
@@ -132,27 +134,33 @@ export function Dbf2dView() {
       let az = trueAz;
       let el = trueEl;
       for (let i = 0; i < PREFETCH; i += 1) {
-        if (playAz) az = wrapAngle(az + 1);
-        if (playEl) el = wrapAngle(el + 1);
+        if (playAz) az = wrapAngle(az + 1, azRange);
+        if (playEl) el = wrapAngle(el + 1, elRange);
         angles.push([az, el]);
       }
     }
     const timer = window.setTimeout(() => request(angles), playAz || playEl ? 0 : 60);
     return () => window.clearTimeout(timer);
-  }, [trueAz, trueEl, playAz, playEl, available, request, frames.version]);
+  }, [trueAz, trueEl, playAz, playEl, available, request, frames.version, azRange, elRange]);
 
   useEffect(() => {
     if (!playAz && !playEl) return;
     const timer = window.setInterval(() => {
-      const nextAz = playAz ? wrapAngle(trueAz + 1) : trueAz;
-      const nextEl = playEl ? wrapAngle(trueEl + 1) : trueEl;
+      const nextAz = playAz ? wrapAngle(trueAz + 1, azRange) : trueAz;
+      const nextEl = playEl ? wrapAngle(trueEl + 1, elRange) : trueEl;
       if (get(nextAz, nextEl)) {
         setTrueAz(nextAz);
         setTrueEl(nextEl);
       }
     }, 1000 / PLAY_FPS);
     return () => window.clearInterval(timer);
-  }, [playAz, playEl, trueAz, trueEl, get]);
+  }, [playAz, playEl, trueAz, trueEl, get, azRange, elRange]);
+
+  // Keep the true angle inside the FOV when it changes.
+  useEffect(() => {
+    setTrueAz((value) => Math.min(Math.max(value, azRange[0]), azRange[1]));
+    setTrueEl((value) => Math.min(Math.max(value, elRange[0]), elRange[1]));
+  }, [azRange, elRange]);
 
   const loading = available && !current;
 
@@ -190,6 +198,7 @@ export function Dbf2dView() {
           {available && shown && frames.scan && (
             <Heatmap
               frame={shown}
+              fov={project.fov}
               scanAz={frames.scan.az}
               scanEl={frames.scan.el}
               trueAz={trueAz}
@@ -197,8 +206,8 @@ export function Dbf2dView() {
               onPick={(az, el) => {
                 setPlayAz(false);
                 setPlayEl(false);
-                setTrueAz(Math.round(az));
-                setTrueEl(Math.round(el));
+                setTrueAz(Math.min(Math.max(Math.round(az), azRange[0]), azRange[1]));
+                setTrueEl(Math.min(Math.max(Math.round(el), elRange[0]), elRange[1]));
               }}
             />
           )}
@@ -228,6 +237,7 @@ export function Dbf2dView() {
             <div className="dbf2d-controls">
               <AxisScrubber
                 label={t("dbf2d.trueAz")}
+                range={azRange}
                 value={trueAz}
                 playing={playAz}
                 playLabel={t("dbf2d.playAz")}
@@ -240,6 +250,7 @@ export function Dbf2dView() {
               />
               <AxisScrubber
                 label={t("dbf2d.trueEl")}
+                range={elRange}
                 value={trueEl}
                 playing={playEl}
                 playLabel={t("dbf2d.playEl")}
@@ -273,6 +284,7 @@ export function Dbf2dView() {
 
 function AxisScrubber({
   label,
+  range,
   value,
   playing,
   playLabel,
@@ -281,6 +293,7 @@ function AxisScrubber({
   onChange,
 }: {
   label: string;
+  range: [number, number];
   value: number;
   playing: boolean;
   playLabel: string;
@@ -299,8 +312,8 @@ function AxisScrubber({
       <input
         type="range"
         className="slider"
-        min={-90}
-        max={90}
+        min={range[0]}
+        max={range[1]}
         step={1}
         value={value}
         aria-label={label}
@@ -313,6 +326,7 @@ function AxisScrubber({
 
 function Heatmap({
   frame,
+  fov,
   scanAz,
   scanEl,
   trueAz,
@@ -320,6 +334,7 @@ function Heatmap({
   onPick,
 }: {
   frame: DecodedFrame;
+  fov: { azimuth: [number, number]; elevation: [number, number] };
   scanAz: number[];
   scanEl: number[];
   trueAz: number;
@@ -377,13 +392,21 @@ function Heatmap({
         margin: { l: 58, r: 8, t: 12, b: 46 },
         hovermode: "closest",
         shapes: [
-          { type: "line", x0: trueAz, x1: trueAz, y0: -90, y1: 90, line: { color: "rgba(255,255,255,0.85)", width: 1 } },
-          { type: "line", x0: -90, x1: 90, y0: trueEl, y1: trueEl, line: { color: "rgba(255,255,255,0.85)", width: 1 } },
+          { type: "line", x0: trueAz, x1: trueAz, y0: scanEl[0], y1: scanEl[scanEl.length - 1], line: { color: "rgba(255,255,255,0.85)", width: 1 } },
+          { type: "line", x0: scanAz[0], x1: scanAz[scanAz.length - 1], y0: trueEl, y1: trueEl, line: { color: "rgba(255,255,255,0.85)", width: 1 } },
+          {
+            type: "rect",
+            x0: fov.azimuth[0],
+            x1: fov.azimuth[1],
+            y0: fov.elevation[0],
+            y1: fov.elevation[1],
+            line: { color: "rgba(255,255,255,0.55)", width: 1, dash: "dot" },
+          },
         ],
-        xaxis: { title: { text: t("axis.azAngle") }, range: [-90.5, 90.5], dtick: 30, showgrid: false, zeroline: false },
-        yaxis: { title: { text: t("axis.elAngle") }, range: [-90.5, 90.5], dtick: 30, showgrid: false, zeroline: false },
+        xaxis: { title: { text: t("axis.azAngle") }, range: [scanAz[0] - 0.5, scanAz[scanAz.length - 1] + 0.5], showgrid: false, zeroline: false },
+        yaxis: { title: { text: t("axis.elAngle") }, range: [scanEl[0] - 0.5, scanEl[scanEl.length - 1] + 0.5], showgrid: false, zeroline: false },
       }),
-    [theme, trueAz, trueEl, t],
+    [theme, trueAz, trueEl, t, scanAz, scanEl, fov],
   );
 
   return (

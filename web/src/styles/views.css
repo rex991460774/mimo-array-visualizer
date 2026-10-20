@@ -609,3 +609,70 @@ details.collapsible[open] > summary .chevron {
     margin-left: 0;
   }
 }
+
+.checks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checks li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.check-label {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.check-value {
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.notes li.bad svg {
+  color: var(--danger);
+}
+
+.overview-section h3 .badge {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.metric-table td:first-child {
+  color: var(--text-secondary);
+}
+
+.metric-table td.num svg {
+  vertical-align: -2px;
+}
+
+.metric-table td.cell-fail {
+  background: var(--danger-fill);
+}
+
+.pick-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: center;
+}
+
+.pick-item {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.pick-item .subtle {
+  font-size: 12px;
+}

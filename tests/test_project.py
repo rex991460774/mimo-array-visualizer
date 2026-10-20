@@ -113,13 +113,16 @@ def test_project_from_v2_document_round_trips() -> None:
     assert restored == project
 
 
-def test_auto_layout_centers_rows_on_half_lambda_grid() -> None:
+def test_auto_layout_builds_filled_half_lambda_virtual_ula() -> None:
     layout = auto_layout(3, 4)
 
-    assert [point.x for point in layout.tx] == [-1.0, 0.0, 1.0]
-    assert [point.x for point in layout.rx] == [-1.5, -0.5, 0.5, 1.5]
+    assert [point.x for point in layout.tx] == [-2.0, 0.0, 2.0]
+    assert [point.x for point in layout.rx] == [-1.0, -0.5, 0.0, 0.5]
     assert {point.y for point in layout.tx} == {2.0}
     assert {point.y for point in layout.rx} == {-2.0}
+    virtual_x = sorted(tx.x + rx.x for tx in layout.tx for rx in layout.rx)
+    assert len(set(virtual_x)) == 12
+    assert np.allclose(np.diff(virtual_x), 0.5)
     with pytest.raises(ValueError):
         auto_layout(0, 4)
 

@@ -31,6 +31,7 @@ export function PhysicalEditor({
   selection,
   deleteMode,
   mmPerLambda,
+  gridStep,
   fitSignal,
   onSelect,
   onCommit,
@@ -42,6 +43,7 @@ export function PhysicalEditor({
   selection: ElementRef | null;
   deleteMode: boolean;
   mmPerLambda: number;
+  gridStep: number;
   fitSignal: number;
   onSelect: (ref: ElementRef | null) => void;
   onCommit: (layout: Layout, selection: ElementRef | null) => void;
@@ -145,7 +147,7 @@ export function PhysicalEditor({
       const next = { ...drag, position, moved };
       setDrag(next);
       if (moved) {
-        const snapped = { x: snap(position.x), y: snap(position.y) };
+        const snapped = { x: snap(position.x, gridStep), y: snap(position.y, gridStep) };
         onPreview(withPosition(layout, drag.ref, snapped));
         onStatus?.(
           `${elementName(drag.ref.kind, drag.ref.index)}  x=${trimNumber(snapped.x)} λ  y=${trimNumber(snapped.y)} λ`,
@@ -166,7 +168,7 @@ export function PhysicalEditor({
   const onPointerUp = (event: React.PointerEvent) => {
     if (drag && event.pointerId === drag.pointerId) {
       if (drag.moved) {
-        const snapped = { x: snap(drag.position.x), y: snap(drag.position.y) };
+        const snapped = { x: snap(drag.position.x, gridStep), y: snap(drag.position.y, gridStep) };
         onCommit(withPosition(layout, drag.ref, snapped), drag.ref);
       }
       setDrag(null);
@@ -181,7 +183,8 @@ export function PhysicalEditor({
 
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (!selection) return;
-    const step = event.shiftKey ? 2.5 : 0.5;
+    const base = gridStep > 0 ? gridStep : 0.1;
+    const step = event.shiftKey ? base * 5 : base;
     const delta: Record<string, [number, number]> = {
       ArrowLeft: [-step, 0],
       ArrowRight: [step, 0],
@@ -193,7 +196,10 @@ export function PhysicalEditor({
       event.preventDefault();
       const point = layout[selection.kind][selection.index];
       if (!point) return;
-      onCommit(withPosition(layout, selection, { x: snap(point.x + move[0]), y: snap(point.y + move[1]) }), selection);
+      onCommit(
+        withPosition(layout, selection, { x: snap(point.x + move[0], gridStep), y: snap(point.y + move[1], gridStep) }),
+        selection,
+      );
     }
   };
 
@@ -257,7 +263,7 @@ export function PhysicalEditor({
 
   const hovered = hover ? displayLayout[hover.kind][hover.index] : null;
   const hoverScreen = hovered ? toScreen(hovered.x, hovered.y) : null;
-  const snapGhost = drag?.moved ? { x: snap(drag.position.x), y: snap(drag.position.y) } : null;
+  const snapGhost = drag?.moved && gridStep > 0 ? { x: snap(drag.position.x, gridStep), y: snap(drag.position.y, gridStep) } : null;
   const ghostScreen = snapGhost ? toScreen(snapGhost.x, snapGhost.y) : null;
 
   return (
@@ -292,7 +298,7 @@ export function PhysicalEditor({
               />
             </clipPath>
           </defs>
-          <PlaneGrid width={size.width} height={size.height} {...plane} />
+          <PlaneGrid width={size.width} height={size.height} minorStep={gridStep > 0 ? gridStep : 0.5} {...plane} />
           <g clipPath="url(#physical-clip)">
             {ghostScreen && (
               <circle

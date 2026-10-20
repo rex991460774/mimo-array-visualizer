@@ -10,6 +10,13 @@ export function usePlayback(count: number, initialIndex: number) {
   const indexRef = useRef(index);
   indexRef.current = index;
 
+  // A new spectrum bank (e.g. another FOV) moves the reference frame: stop and
+  // return to it instead of keeping a stale index.
+  useEffect(() => {
+    setPlaying(false);
+    setIndex(initialIndex);
+  }, [initialIndex, count]);
+
   useEffect(() => {
     if (!playing || count <= 0) return;
     let frame = 0;

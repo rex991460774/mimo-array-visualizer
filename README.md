@@ -2,9 +2,9 @@
 
 **中文** | [English](#english)
 
-MIMO 阵列工作台：在浏览器中交互式编辑、评估 MIMO 雷达 Tx/Rx 天线阵列布局。部署在本地服务器上，局域网内用浏览器即可使用，无需在每台电脑上安装软件。
+MIMO 阵列工作台：评估 60 GHz / 77 GHz / 92 GHz 毫米波 FMCW 雷达的 MIMO Tx/Rx 天线阵列性能。部署在本地服务器上，局域网内用浏览器即可使用，无需在每台电脑上安装软件。
 
-可计算虚拟阵列几何、2D 阵列因子与方向图指标（PSL、ISLR、3 dB 波束宽度、栅瓣），以及基于 DBF 字典的测角性能（不模糊范围、测角误差、竞争峰裕量、截断原因），并输出多页 PDF 性能报告。
+可计算虚拟阵列几何、阵列方向图指标（实测 3 dB 分辨率、PSL、ISLR、栅瓣），以及基于 DBF 字典、限定在雷达视场内的测角性能（不模糊范围、亚度级测角误差、竞争峰裕量），并给出频段内性能、规格检查和多方案对比，输出多页 PDF 性能报告。
 
 ---
 
@@ -18,6 +18,15 @@ MIMO 阵列工作台：在浏览器中交互式编辑、评估 MIMO 雷达 Tx/Rx
 - **测角性能**：逐帧测角误差和竞争峰裕量曲线，标注不模糊范围和裕量阈值，可导出出版级 PNG。
 - **阵列概览**：通道数、虚拟通道利用率、口径（mm/λ）、分辨率、测角评估、方向图指标和提示。
 - 中文 / English / 日本語界面，浅色 / 深色 / 跟随系统主题，桌面和手机宽度均可用。
+
+### 雷达评估
+
+- **频段**：60G（57–64 GHz）、77G（76–81 GHz）、92G（默认 90–94 GHz，需按芯片修改）预设，可自定义扫频范围；阵列坐标以设计频率下的 λ 保存。
+- **评估视场**：测角评估与方向图指标都限定在雷达视场内（DBF 搜索外扩 10°），视场外栅瓣不计入视场内模糊。
+- **频段内性能**：天线物理位置固定，在扫频起止与设计频率处重新评估分辨率、不模糊范围、误差、裕量和 PSL。
+- **规格检查**：分辨率、视场内不模糊、视场内最大误差、竞争峰裕量、2D 峰值旁瓣逐项判定通过/未通过。
+- **方案对比**：从项目库选取多个方案（如 60/77/92 GHz 各自的阵列）与当前项目并排比较。
+- **布局检查**：阵元重合、间距小于 λ/2（可能物理重叠）、设计频率不在扫频范围内时给出提示。
 
 ### 功能
 
@@ -125,6 +134,19 @@ tests/                                             pytest
 deploy/, scripts/, Dockerfile, docker-compose.yml  部署
 ```
 
+### 评估方法说明
+
+| 项目 | 做法 | 原因 |
+| --- | --- | --- |
+| 分辨率 | 阵列响应 0° 切面的实测 3 dB 波束宽度；0.886/D 公式仅作参考 | 公式对稀疏/小阵列不准（case4 公式 1.35°，实测 1.72°） |
+| PSL 主瓣区 | 主峰两侧至第一零点（至少下降 3 dB） | 固定 ±2°/±6° 保护区会把小阵列（如 60 GHz 3T4R）的主瓣算成旁瓣 |
+| 测角范围 | 真实角在视场内 1° 步进；搜索范围外扩 10° | 实际雷达只在视场内搜索；全 ±90° 搜索会把视场外栅瓣误判为模糊 |
+| 测角误差 | 1° 网格取峰后，在峰附近重新计算相关细化到 0.002° | 只用 1° 网格时误差只能是整数度，无法评估 HFSS 实测数据的亚度级误差 |
+| 频段内性能 | 物理坐标固定，电长度按 f/f<sub>设计</sub> 缩放；字典按工作频率匹配 | 反映 FMCW 扫频内栅瓣起始角和分辨率的漂移 |
+| 自动排阵 | Rx 间距 λ/2、Tx 间距 N<sub>Rx</sub>·λ/2 | 得到无重复、无栅瓣的 λ/2 虚拟 ULA（标准 MIMO 布局） |
+
+导入的 HFSS 通道相位和自定义字典是单频点数据，频段内评估只缩放几何、不改变这些数据，界面会给出提示。
+
 ### 从桌面版迁移
 
 桌面版（PySide6）已由 Web 版取代，代码保留在 git 历史中。桌面版导出的阵面 JSON 可直接通过「导入 → 导入阵面 JSON」打开，频率和裕量设置会一并读取。桌面版中按本地路径引用的字典和方向图文件，需要在 Web 版中重新上传一次；之后会保存在服务器上，也可以随项目包一起迁移。
@@ -136,7 +158,7 @@ deploy/, scripts/, Dockerfile, docker-compose.yml  部署
 MIMO Array Visualizer is a web workbench for editing and evaluating MIMO radar Tx/Rx antenna layouts. Run it on a local server and use it from any browser on the LAN.
 
 - **UI**: drag-and-snap SVG array editor with undo/redo, live virtual-array preview, 1D DBF spectrum playback, 2D DBF heatmap, angle-error/peak-margin view, overview panel; Chinese/English/Japanese; light/dark themes.
-- **Analysis**: virtual geometry, 2D array factor metrics (PSL, ISLR, beamwidth, grating lobes), DBF-dictionary angle evaluation (no-fold range, error, peak margin, cut reasons) with ideal, reversed, channel-calibrated or imported CSV/XLSX dictionaries, HFSS channel amp/phase and element patterns.
+- **Analysis** for 60/77/92 GHz FMCW radars: band presets with sweep ranges, FOV-bounded DBF angle evaluation with sub-degree peak refinement, measured 3 dB resolution, first-null PSL, in-band performance at the sweep edges, requirement pass/fail, design comparison, layout overlap checks; ideal, reversed, channel-calibrated or imported dictionaries, HFSS channel amp/phase and element patterns.
 - **Workflow**: shared server-side project library, desktop-compatible layout JSON, portable `.mimo.zip` bundles, background PDF reports with CSV/JSON data packages, REST API at `/api/docs`.
 
 **Deploy with Docker**: `docker compose up -d --build`, then open `http://<server>:8000/`.

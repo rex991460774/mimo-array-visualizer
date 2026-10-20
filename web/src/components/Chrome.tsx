@@ -18,9 +18,11 @@ import {
   Package,
   Radar,
   Save,
+  Settings2,
   Sun,
   Target,
   Upload,
+  Waves,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { LANGUAGE_LABELS, useT } from "../i18n";
@@ -160,16 +162,18 @@ export function TopBar() {
   );
 }
 
-const VIEWS: { id: ViewId; icon: ReactNode; key: "view.array" | "view.dbf1d" | "view.dbf2d" | "view.angle" }[] = [
+const VIEWS: { id: ViewId; icon: ReactNode; key: "view.array" | "view.dbf1d" | "view.dbf2d" | "view.angle" | "view.band" }[] = [
   { id: "array", icon: <Grid3x3 size={15} />, key: "view.array" },
   { id: "dbf1d", icon: <LineChart size={15} />, key: "view.dbf1d" },
   { id: "dbf2d", icon: <MapIcon size={15} />, key: "view.dbf2d" },
   { id: "angle", icon: <Target size={15} />, key: "view.angle" },
+  { id: "band", icon: <Waves size={15} />, key: "view.band" },
 ];
 
 export function ControlBar() {
   const t = useT();
   const project = useStore((state) => state.project)!;
+  const config = useStore((state) => state.config)!;
   const view = useStore((state) => state.view);
   const display = useStore((state) => state.display);
   const evaluation = useStore((state) => state.evaluation);
@@ -196,7 +200,28 @@ export function ControlBar() {
         ))}
       </div>
       <div className="controlbar-group">
-        <label className="field" title={t("top.frequency")}>
+        <Segmented
+          label={t("top.band")}
+          value={project.band.preset}
+          options={[
+            { value: "60G", label: "60G", title: "57–64 GHz" },
+            { value: "77G", label: "77G", title: "76–81 GHz" },
+            { value: "92G", label: "92G" },
+            { value: "custom", label: t("top.bandCustom") },
+          ]}
+          onChange={(preset) => {
+            if (preset === "custom") {
+              openDialog("settings");
+              return;
+            }
+            const values = config.band_presets[preset];
+            updateProject({
+              band: { preset, start_ghz: values.start_ghz, stop_ghz: values.stop_ghz },
+              frequency_ghz: values.design_ghz,
+            });
+          }}
+        />
+        <label className="field" title={t("top.designTitle")}>
           <span className="field-label">{t("top.frequency")}</span>
           <NumberInput
             className=""
@@ -243,6 +268,13 @@ export function ControlBar() {
             })}
           </span>
         </button>
+        <Button
+          variant="ghost"
+          icon={<Settings2 size={16} />}
+          onClick={() => openDialog("settings")}
+          title={t("top.settings")}
+          aria-label={t("top.settings")}
+        />
         <Segmented
           label={t("top.display")}
           value={display}

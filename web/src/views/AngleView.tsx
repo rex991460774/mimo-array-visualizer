@@ -110,8 +110,8 @@ function AngleChart({ bank, kind }: { bank: DbfBank; kind: "error" | "margin" })
         (value, i) =>
           Number.isFinite(value) && (left === null || right === null || right <= left || (x[i] >= left && x[i] <= right)),
       );
-      const spread = Math.max(1, ...inRange.map((value) => Math.abs(value)));
-      const limit = Math.min(Math.max(spread * 1.25, 2), 180);
+      const spread = Math.max(0, ...inRange.map((value) => Math.abs(value)));
+      const limit = Math.min(Math.max(spread * 1.25, 0.1), 180);
       return {
         data: [
           {
@@ -121,12 +121,12 @@ function AngleChart({ bank, kind }: { bank: DbfBank; kind: "error" | "margin" })
             y,
             line: { color: theme.line, width: 1.8 },
             name: t("angle.errorSeries"),
-            hovertemplate: "%{x:+.0f}°  %{y:+.2f}°<extra></extra>",
+            hovertemplate: "%{x:+.0f}°  %{y:+.3f}°<extra></extra>",
           },
         ],
         layout: baseLayout(theme, {
           shapes: band,
-          xaxis: { title: { text: t("axis.trueAngle") }, range: [-90, 90], dtick: 30 },
+          xaxis: { title: { text: t("axis.trueAngle") }, range: [x[0], x[x.length - 1]], dtick: x[x.length - 1] - x[0] > 90 ? 30 : 10 },
           yaxis: { title: { text: t("axis.error") }, range: [-limit, limit], zeroline: true },
         }),
       };
@@ -161,7 +161,7 @@ function AngleChart({ bank, kind }: { bank: DbfBank; kind: "error" | "margin" })
           ...band,
           { type: "line", xref: "paper", x0: 0, x1: 1, y0: threshold, y1: threshold, line: { color: theme.danger, width: 1.2, dash: "dash" } },
         ],
-        xaxis: { title: { text: t("axis.trueAngle") }, range: [-90, 90], dtick: 30 },
+        xaxis: { title: { text: t("axis.trueAngle") }, range: [x[0], x[x.length - 1]], dtick: x[x.length - 1] - x[0] > 90 ? 30 : 10 },
         yaxis: { title: { text: t("axis.margin") }, range: [0, top * 1.04], rangemode: "tozero" },
       }),
     };

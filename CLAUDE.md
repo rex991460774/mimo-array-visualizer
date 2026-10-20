@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MIMO Array Visualizer — a web workbench for interactively editing and evaluating MIMO Tx/Rx antenna array layouts. A Python FastAPI server runs the computation core (virtual array geometry, 2D array factor, DBF dictionary spectra, angle-estimation metrics, PDF reports); a React + TypeScript client provides the UI. It is deployed on a local server and used from a browser.
+MIMO Array Visualizer — a web workbench for evaluating MIMO Tx/Rx antenna arrays of 60/77/92 GHz FMCW radars. A Python FastAPI server runs the computation core (virtual array geometry, 2D array factor, DBF dictionary spectra, angle-estimation metrics, PDF reports); a React + TypeScript client provides the UI. It is deployed on a local server and used from a browser.
 
 ## Commands
 
@@ -43,12 +43,14 @@ docker compose up -d --build
 - **`element_pattern.py`** — element patterns and per-channel HFSS amplitude/phase series (`ChannelPatternSet`).
 - **`performance_report.py`** — multi-page PDF report, angle-error PNG, CSV/JSON data package (matplotlib).
 - **`phasor.py`** — fast `exp(1j*phase)` helper used in hot loops.
+- **`EvaluationSettings` / `evaluate_dbf_axis`** (in `analysis.py`) — FOV-bounded true angles, scan = FOV ± 10° guard, refined peaks (`dbf_refine_peak_angles`, 0.002°). The legacy bank functions keep the ±90° grid for backward compatibility.
+- **`requirements.py`** — `RequirementSpec` → `check_requirements()` pass/fail list; resolution uses the measured 3 dB beamwidth.
 
 ### Service layer
 
-- **`project.py`** — Pydantic `Project` document (schema version 2, coordinates in **λ**, grid 0.5 λ). Imported files are referenced by asset ID. Converts to the core array via `project_array()` (λ → λ/2). Reads/writes the desktop-era v1 layout JSON (`layout_from_v1`, `layout_to_v1`).
+- **`project.py`** — Pydantic `Project` document (schema version 2, coordinates in **λ at the design frequency `frequency_ghz`**), plus `band` (60G/77G/92G presets, sweep range), `fov`, `grid_step_lambda`, `requirements`. `project_array(project, operating_ghz)` scales electrical positions by f/f_design. v1 import keeps exact coordinates (no snapping). Imported files are referenced by asset ID. Converts to the core array via `project_array()` (λ → λ/2). Reads/writes the desktop-era v1 layout JSON (`layout_from_v1`, `layout_to_v1`).
 - **`assets.py`** — content-addressed store (`<data>/assets/<sha256>/<original name>`).
-- **`engine.py`** — `Engine` turns a project into core objects and returns JSON-ready payloads (`evaluate`, `dbf_bank`, `dbf_2d`, `dictionary_preview`, `resolve_channel_patterns`, `layout_document`, `report_snapshot`). LRU caches are keyed by the JSON digest of only the fields each result depends on.
+- **`engine.py`** — `Engine` turns a project into core objects and returns JSON-ready payloads (`evaluate`, `dbf_bank`, `dbf_2d`, `band_sweep`, `compare`, `dictionary_preview`, `resolve_channel_patterns`, `layout_document`, `report_snapshot`). LRU caches are keyed by the JSON digest of only the fields each result depends on.
 
 ### Server (`src/virtual_array/server/`)
 
@@ -61,8 +63,8 @@ docker compose up -d --build
 
 - `api/` typed client + payload types (mirror `project.py` / `engine.py`).
 - `state/store.ts` (zustand: project, undo/redo of layout edits, selection, UI prefs; persisted to localStorage), `state/compute.ts` (debounced evaluation, DBF bank cache), `state/actions.ts` (save/open/import/export), `state/jobs.ts`.
-- `views/` — `ArrayView` (SVG `PhysicalEditor` with drag/snap/zoom + `VirtualPlot`), `DbfView` (1D playback, client-side from one bank request), `Dbf2dView` (heatmap, prefetching frame batches), `AngleView`.
-- `dialogs/` — DBF dictionary, channel amp/phase + element pattern, report, project library, help.
+- `views/` — `ArrayView` (SVG `PhysicalEditor` with drag/snap/zoom + `VirtualPlot`), `DbfView` (1D playback, client-side from one bank request), `Dbf2dView` (heatmap, prefetching frame batches), `AngleView`, `BandView` (in-band performance + design comparison).
+- `dialogs/` — evaluation settings (band/FOV/requirements/grid), DBF dictionary, channel amp/phase + element pattern, report, project library, help.
 - `i18n/messages.ts` — zh/en/ja strings (zh is the reference; a unit test checks keys and placeholders match).
 - `charts/` — lazily loaded Plotly wrapper and theme tokens.
 
@@ -70,14 +72,16 @@ docker compose up -d --build
 
 ```
 Browser edits Project ──POST /api/evaluate──▶ Engine.evaluate ─▶ ArrayMetrics + DBF angle metrics
-                      ──POST /api/dbf/bank──▶ 181×181 spectra (base64 float32) → 1D playback in browser
+                      ──POST /api/dbf/bank──▶ FOV true × (FOV±10°) scan spectra + refined peaks → 1D playback in browser
+                      ──POST /api/band, /api/compare──▶ in-band sweep / design comparison summaries
                       ──POST /api/dbf/2d────▶ batched 2D frames (Dbf2dScanner)
                       ──POST /api/reports───▶ background job → PDF/zip download
 ```
 
 ## Conventions
 
-- Project/API coordinates are λ; the core uses λ/2. Convert only in `project_array()`.
+- Project/API coordinates are λ at the design frequency; the core uses λ/2. Convert only in `project_array()`.
+- All angle evaluation goes through `EvaluationSettings` built from `project.fov` (`engine.evaluation_settings`); do not call the ±90° bank functions directly from new service code.
 - Channel names derive from list order (`Tx1…`, `Rx1…`); the client renumbers by (x, y) after every edit, like the desktop tool.
 - Non-finite numbers travel as `"Infinity"` / `"-Infinity"` strings; large matrices as `{dtype, shape, data(base64)}`.
 - Keep core numerics unchanged when refactoring — the analysis tests pin them.

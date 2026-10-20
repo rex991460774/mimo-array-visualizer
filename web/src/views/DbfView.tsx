@@ -121,11 +121,11 @@ function FrameReadout({ bank, frame }: { bank: DbfBank; frame: number }) {
       </span>
       <span className="readout-item">
         <span className="readout-label">{t("dbf.peak")}</span>
-        <span className="readout-value">{fmtSigned(bank.frames.estimated[frame], 0)}</span>
+        <span className="readout-value">{fmtSigned(bank.frames.estimated[frame], 2)}</span>
       </span>
       <span className="readout-item">
         <span className="readout-label">{t("dbf.error")}</span>
-        <span className={`readout-value ${errorTone}`}>{fmtSigned(error, 1)}</span>
+        <span className={`readout-value ${errorTone}`}>{fmtSigned(error, Math.abs(error) < 1 ? 3 : 2)}</span>
       </span>
       <span className="readout-item">
         <span className="readout-label">{t("dbf.margin")}</span>
@@ -151,8 +151,11 @@ function SpectrumChart({ bank, frame, onSeek }: { bank: DbfBank; frame: number; 
   const values = useMemo(() => displayValues(matrixRow(matrix, frame), display), [matrix, frame, display]);
   const scan = bank.scan_angles;
   const peakAngle = bank.frames.estimated[frame];
-  const peakIndex = scan.indexOf(peakAngle);
-  const trueIndex = scan.reduce((best, angle, i) => (Math.abs(angle - trueAngle) < Math.abs(scan[best] - trueAngle) ? i : best), 0);
+  const nearest = (target: number) =>
+    scan.reduce((best, angle, i) => (Math.abs(angle - target) < Math.abs(scan[best] - target) ? i : best), 0);
+  const peakIndex = nearest(peakAngle);
+  const trueIndex = nearest(trueAngle);
+  const [fovLow, fovHigh] = bank.fov;
   const magnitude = display === "magnitude";
 
   const data = useMemo(
@@ -181,7 +184,7 @@ function SpectrumChart({ bank, frame, onSeek }: { bank: DbfBank; frame: number; 
         type: "scatter",
         mode: "markers",
         x: [peakAngle],
-        y: [values[peakIndex >= 0 ? peakIndex : 0]],
+        y: [values[peakIndex]],
         marker: { size: 11, symbol: "x-thin", color: theme.peak, line: { color: theme.peak, width: 2.5 } },
         name: t("dbf.legendPeak"),
         hoverinfo: "skip",
@@ -197,6 +200,15 @@ function SpectrumChart({ bank, frame, onSeek }: { bank: DbfBank; frame: number; 
         showlegend: true,
         legend: { orientation: "h", x: 1, xanchor: "right", y: 1.02, yanchor: "bottom", font: { size: 11 } },
         shapes: [
+          ...[fovLow, fovHigh].map((edge) => ({
+            type: "line",
+            x0: edge,
+            x1: edge,
+            yref: "paper",
+            y0: 0,
+            y1: 1,
+            line: { color: theme.zero, width: 1, dash: "dot" },
+          })),
           {
             type: "line",
             x0: trueAngle,
@@ -207,7 +219,12 @@ function SpectrumChart({ bank, frame, onSeek }: { bank: DbfBank; frame: number; 
             line: { color: theme.trueAngle, width: 1.6 },
           },
         ],
-        xaxis: { title: { text: axisTitle }, range: [-90, 90], dtick: 30, zeroline: false },
+        xaxis: {
+          title: { text: axisTitle },
+          range: [scan[0], scan[scan.length - 1]],
+          dtick: scan[scan.length - 1] - scan[0] > 90 ? 30 : 10,
+          zeroline: false,
+        },
         yaxis: {
           title: { text: t(magnitude ? "axis.correlationMag" : "axis.correlationDb") },
           range: magnitude ? [-0.02, 1.04] : [-40.5, 1],
@@ -215,7 +232,7 @@ function SpectrumChart({ bank, frame, onSeek }: { bank: DbfBank; frame: number; 
           zeroline: false,
         },
       }),
-    [theme, trueAngle, axisTitle, magnitude, t],
+    [theme, trueAngle, axisTitle, magnitude, t, scan, fovLow, fovHigh],
   );
 
   return (

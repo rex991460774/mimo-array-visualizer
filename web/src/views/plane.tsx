@@ -130,6 +130,7 @@ export function PlaneGrid({
   toScreen,
   toWorld,
   showMinor = true,
+  minorStep = 0.5,
 }: {
   width: number;
   height: number;
@@ -137,6 +138,7 @@ export function PlaneGrid({
   toScreen: (x: number, y: number) => { sx: number; sy: number };
   toWorld: (sx: number, sy: number) => { x: number; y: number };
   showMinor?: boolean;
+  minorStep?: number;
 }) {
   const lines = useMemo(() => {
     const left = PLOT_MARGIN.left;
@@ -146,7 +148,7 @@ export function PlaneGrid({
     const topLeft = toWorld(left, top);
     const bottomRight = toWorld(right, bottom);
     const major = niceStep(viewport.scale, 46);
-    const minor = 0.5;
+    const minor = minorStep;
     const result: { minor: string[]; major: string[]; xLabels: [number, number][]; yLabels: [number, number][] } = {
       minor: [],
       major: [],
@@ -170,7 +172,7 @@ export function PlaneGrid({
       if (isMajor) result.yLabels.push([sy, y]);
     }
     return { ...result, left, right, top, bottom };
-  }, [width, height, viewport, toScreen, toWorld, showMinor]);
+  }, [width, height, viewport, toScreen, toWorld, showMinor, minorStep]);
 
   const format = (value: number) => (Math.abs(value) < 1e-9 ? "0" : String(Math.round(value * 100) / 100));
 

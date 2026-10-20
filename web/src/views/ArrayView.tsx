@@ -16,11 +16,38 @@ import { Button, NumberInput } from "../components/ui";
 import { useT } from "../i18n";
 import { elementName, nextElementPosition, snap, virtualGroups } from "../lib/geometry";
 import { parseNumber, trimNumber } from "../lib/format";
-import { useStore } from "../state/store";
+import { type CoordUnit, useStore } from "../state/store";
+import { Segmented } from "../components/ui";
 import { PhysicalEditor } from "./PhysicalEditor";
 import { VirtualPlot } from "./VirtualPlot";
 
 const STARTER_LAYOUT: Layout = { tx: [{ x: 0, y: 2 }], rx: [{ x: 0, y: -2 }] };
+
+/** Coordinate entry in λ or mm; typed values are kept exactly (no grid snap). */
+function CoordInput({
+  value,
+  unit,
+  mmPerLambda,
+  onCommit,
+  className,
+}: {
+  value: number;
+  unit: CoordUnit;
+  mmPerLambda: number;
+  onCommit: (lambda: number) => void;
+  className?: string;
+}) {
+  const scale = unit === "mm" ? mmPerLambda : 1;
+  return (
+    <NumberInput
+      className={className}
+      value={value * scale}
+      parse={(text) => parseNumber(text, unit === "mm" ? ["mm"] : ["λ"])}
+      format={(v) => trimNumber(v, unit === "mm" ? 3 : 4)}
+      onCommit={(v) => onCommit(snap(v / scale, 0))}
+    />
+  );
+}
 
 export function ArrayView() {
   const t = useT();
@@ -31,7 +58,8 @@ export function ArrayView() {
   const past = useStore((state) => state.past.length);
   const future = useStore((state) => state.future.length);
   const evaluation = useStore((state) => state.evaluation);
-  const { commitLayout, select, setDeleteMode, undo, redo, setStatus } = useStore.getState();
+  const unit = useStore((state) => state.coordUnit);
+  const { commitLayout, select, setDeleteMode, undo, redo, setStatus, setCoordUnit } = useStore.getState();
 
   const [preview, setPreview] = useState<Layout | null>(null);
   const [fitSignal, setFitSignal] = useState(0);
@@ -169,6 +197,7 @@ export function ArrayView() {
               selection={selection}
               deleteMode={deleteMode}
               mmPerLambda={mmPerLambda}
+              gridStep={project.grid_step_lambda}
               fitSignal={fitSignal}
               onSelect={select}
               onCommit={commitMove}
@@ -187,29 +216,40 @@ export function ArrayView() {
                   <span className={`badge ${selection.kind}`}>{elementName(selection.kind, selection.index)}</span>
                   <label className="field">
                     <span className="field-label">{t("inspector.x")}</span>
-                    <NumberInput
+                    <CoordInput
                       className=""
                       value={selected.x}
-                      parse={(text) => parseNumber(text, ["λ"])}
-                      format={(value) => trimNumber(value)}
-                      onCommit={(value) => updatePoint(selection.kind, selection.index, { x: snap(value), y: selected.y })}
+                      unit={unit}
+                      mmPerLambda={mmPerLambda}
+                      onCommit={(x) => updatePoint(selection.kind, selection.index, { x, y: selected.y })}
                     />
-                    <span className="field-unit">λ</span>
+                    <span className="field-unit">{unit === "mm" ? "mm" : "λ"}</span>
                   </label>
                   <label className="field">
                     <span className="field-label">{t("inspector.y")}</span>
-                    <NumberInput
+                    <CoordInput
                       className=""
                       value={selected.y}
-                      parse={(text) => parseNumber(text, ["λ"])}
-                      format={(value) => trimNumber(value)}
-                      onCommit={(value) => updatePoint(selection.kind, selection.index, { x: selected.x, y: snap(value) })}
+                      unit={unit}
+                      mmPerLambda={mmPerLambda}
+                      onCommit={(y) => updatePoint(selection.kind, selection.index, { x: selected.x, y })}
                     />
-                    <span className="field-unit">λ</span>
+                    <span className="field-unit">{unit === "mm" ? "mm" : "λ"}</span>
                   </label>
                   <span className="subtle mono">
-                    ({trimNumber(selected.x * mmPerLambda, 2)}, {trimNumber(selected.y * mmPerLambda, 2)}) mm
+                    {unit === "mm"
+                      ? `(${trimNumber(selected.x)}, ${trimNumber(selected.y)}) λ`
+                      : `(${trimNumber(selected.x * mmPerLambda, 2)}, ${trimNumber(selected.y * mmPerLambda, 2)}) mm`}
                   </span>
+                  <Segmented
+                    label={t("inspector.unit")}
+                    value={unit}
+                    options={[
+                      { value: "lambda", label: "λ" },
+                      { value: "mm", label: "mm" },
+                    ]}
+                    onChange={setCoordUnit}
+                  />
                 </>
               ) : (
                 <span className="subtle">{t("inspector.none")}</span>
@@ -324,23 +364,17 @@ function CoordinateTable({
                   <span className={`badge ${kind}`}>{elementName(kind, index)}</span>
                 </td>
                 <td className="num">
-                  <NumberInput
-                    value={point.x}
-                    parse={(text) => parseNumber(text, ["λ"])}
-                    format={(value) => trimNumber(value)}
-                    onCommit={(value) => onChange(kind, index, { x: snap(value), y: point.y })}
-                  />
+                  <CoordInput value={point.x} unit="lambda" mmPerLambda={mmPerLambda} className="input num" onCommit={(x) => onChange(kind, index, { x, y: point.y })} />
                 </td>
                 <td className="num">
-                  <NumberInput
-                    value={point.y}
-                    parse={(text) => parseNumber(text, ["λ"])}
-                    format={(value) => trimNumber(value)}
-                    onCommit={(value) => onChange(kind, index, { x: point.x, y: snap(value) })}
-                  />
+                  <CoordInput value={point.y} unit="lambda" mmPerLambda={mmPerLambda} className="input num" onCommit={(y) => onChange(kind, index, { x: point.x, y })} />
                 </td>
-                <td className="num mono">{trimNumber(point.x * mmPerLambda, 2)}</td>
-                <td className="num mono">{trimNumber(point.y * mmPerLambda, 2)}</td>
+                <td className="num">
+                  <CoordInput value={point.x} unit="mm" mmPerLambda={mmPerLambda} className="input num" onCommit={(x) => onChange(kind, index, { x, y: point.y })} />
+                </td>
+                <td className="num">
+                  <CoordInput value={point.y} unit="mm" mmPerLambda={mmPerLambda} className="input num" onCommit={(y) => onChange(kind, index, { x: point.x, y })} />
+                </td>
               </tr>
             ))}
           </tbody>

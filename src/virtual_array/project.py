@@ -274,20 +274,29 @@ def project_array(project: Project, operating_frequency_ghz: float | None = None
     return AntennaArray(tx=tx, rx=rx)
 
 
-def centered_positions(count: int) -> list[float]:
-    offset = (count - 1) * AUTO_LAYOUT_SPACING_LAMBDA / 2.0
-    return [snap_lambda(index * AUTO_LAYOUT_SPACING_LAMBDA - offset) for index in range(count)]
+def centered_positions(count: int, spacing: float = AUTO_LAYOUT_SPACING_LAMBDA) -> list[float]:
+    """Positions centred on 0 as far as the λ/2 grid allows (even counts sit ½ step left)."""
+    offset = snap_lambda((count - 1) * spacing / 2.0)
+    return [_clean(index * spacing - offset) for index in range(count)]
 
 
 def auto_layout(tx_count: int, rx_count: int) -> Layout:
-    """Centered Tx and Rx rows: the desktop tool's "Apply Array" quick start."""
+    """Standard TDM/DDM-MIMO azimuth layout: a filled λ/2 virtual ULA.
+
+    Rx are spaced λ/2 and Tx are spaced ``rx_count · λ/2``, so the
+    ``tx_count · rx_count`` virtual channels form a uniform λ/2 line without
+    duplicates or grating lobes (e.g. 3T4R → 12-element virtual ULA).  Tx and
+    Rx sit on separate rows only so they are distinguishable in the editor.
+    """
     if not 1 <= tx_count <= MAX_TX_COUNT:
         raise ValueError(f"Tx count must be from 1 to {MAX_TX_COUNT}.")
     if not 1 <= rx_count <= MAX_RX_COUNT:
         raise ValueError(f"Rx count must be from 1 to {MAX_RX_COUNT}.")
+    rx_spacing = GRID_STEP_LAMBDA
+    tx_spacing = rx_count * GRID_STEP_LAMBDA
     return Layout(
-        tx=[Point(x=x, y=AUTO_LAYOUT_TX_Y_LAMBDA) for x in centered_positions(tx_count)],
-        rx=[Point(x=x, y=AUTO_LAYOUT_RX_Y_LAMBDA) for x in centered_positions(rx_count)],
+        tx=[Point(x=x, y=AUTO_LAYOUT_TX_Y_LAMBDA) for x in centered_positions(tx_count, tx_spacing)],
+        rx=[Point(x=x, y=AUTO_LAYOUT_RX_Y_LAMBDA) for x in centered_positions(rx_count, rx_spacing)],
     )
 
 

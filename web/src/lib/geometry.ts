@@ -7,8 +7,10 @@ export interface ElementRef {
   index: number;
 }
 
+/** Snap to the editor grid; step 0 means free placement (1e-6 λ resolution). */
 export function snap(value: number, step = GRID_STEP): number {
-  const snapped = Math.round(value / step) * step;
+  const grid = step > 0 ? step : 1e-6;
+  const snapped = Math.round(Math.round(value / grid) * grid * 1e9) / 1e9;
   return Object.is(snapped, -0) ? 0 : snapped;
 }
 

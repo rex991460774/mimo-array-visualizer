@@ -11,9 +11,15 @@ export function evaluationKey(project: Project): string {
   return JSON.stringify(rest);
 }
 
-/** Fields that affect DBF spectra (frequency, margin and element pattern do not). */
+/** Fields that affect DBF spectra and metrics (frequency and element pattern do not). */
 export function dbfKey(project: Project): string {
-  return JSON.stringify([project.layout, project.channel_patterns, project.dbf_dictionary]);
+  return JSON.stringify([
+    project.layout,
+    project.channel_patterns,
+    project.dbf_dictionary,
+    project.fov,
+    project.ambiguity_margin_db,
+  ]);
 }
 
 export function useEvaluationSync(): void {

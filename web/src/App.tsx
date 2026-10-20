@@ -17,9 +17,11 @@ const DictionaryDialog = lazy(() => import("./dialogs/DictionaryDialog").then((m
 const PatternsDialog = lazy(() => import("./dialogs/PatternsDialog").then((m) => ({ default: m.PatternsDialog })));
 const ReportDialog = lazy(() => import("./dialogs/ReportDialog").then((m) => ({ default: m.ReportDialog })));
 const ProjectsDialog = lazy(() => import("./dialogs/ProjectsDialog").then((m) => ({ default: m.ProjectsDialog })));
+const SettingsDialog = lazy(() => import("./dialogs/SettingsDialog").then((m) => ({ default: m.SettingsDialog })));
+const BandView = lazy(() => import("./views/BandView").then((m) => ({ default: m.BandView })));
 const HelpDialog = lazy(() => import("./dialogs/HelpDialog").then((m) => ({ default: m.HelpDialog })));
 
-const VIEW_KEYS: Record<string, ViewId> = { "1": "array", "2": "dbf1d", "3": "dbf2d", "4": "angle" };
+const VIEW_KEYS: Record<string, ViewId> = { "1": "array", "2": "dbf1d", "3": "dbf2d", "4": "angle", "5": "band" };
 
 function useThemeAttribute(theme: ThemeMode) {
   useEffect(() => {
@@ -152,6 +154,7 @@ function Workbench() {
             {view === "dbf1d" && <DbfView />}
             {view === "dbf2d" && <Dbf2dView />}
             {view === "angle" && <AngleView />}
+            {view === "band" && <BandView />}
           </Suspense>
         </main>
         <Overview />
@@ -163,6 +166,7 @@ function Workbench() {
         {dialog === "report" && <ReportDialog onClose={close} />}
         {dialog === "projects" && <ProjectsDialog onClose={close} />}
         {dialog === "help" && <HelpDialog onClose={close} />}
+        {dialog === "settings" && <SettingsDialog onClose={close} />}
       </Suspense>
     </div>
   );

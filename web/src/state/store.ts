@@ -3,11 +3,12 @@ import type { Evaluation, Layout, Project, ServerConfig } from "../api/types";
 import { type ElementRef, layoutsEqual, renumber } from "../lib/geometry";
 import type { MessageKey } from "../i18n/messages";
 
-export type ViewId = "array" | "dbf1d" | "dbf2d" | "angle";
+export type ViewId = "array" | "dbf1d" | "dbf2d" | "angle" | "band";
 export type Language = "zh" | "en" | "ja";
 export type ThemeMode = "system" | "light" | "dark";
 export type DisplayMode = "db" | "magnitude";
-export type DialogId = "dictionary" | "patterns" | "report" | "projects" | "help" | null;
+export type CoordUnit = "lambda" | "mm";
+export type DialogId = "dictionary" | "patterns" | "report" | "projects" | "help" | "settings" | null;
 
 export interface StatusMessage {
   key: MessageKey;
@@ -29,6 +30,7 @@ interface PersistedState {
   theme: ThemeMode;
   display: DisplayMode;
   view: ViewId;
+  coordUnit: CoordUnit;
 }
 
 function readPersisted(): Partial<PersistedState> {
@@ -55,6 +57,17 @@ function detectLanguage(): Language {
   return "zh";
 }
 
+function withDefaults(draft: Project, defaults: Project): Project {
+  return {
+    ...defaults,
+    ...draft,
+    band: draft.band ?? defaults.band,
+    fov: draft.fov ?? defaults.fov,
+    grid_step_lambda: draft.grid_step_lambda ?? defaults.grid_step_lambda,
+    requirements: { ...defaults.requirements, ...(draft.requirements ?? {}) },
+  };
+}
+
 export function projectSnapshot(project: Project): string {
   return JSON.stringify(project);
 }
@@ -73,6 +86,7 @@ interface AppState {
   language: Language;
   theme: ThemeMode;
   display: DisplayMode;
+  coordUnit: CoordUnit;
   status: StatusMessage | null;
   evaluation: Evaluation | null;
   evaluationError: string | null;
@@ -93,6 +107,7 @@ interface AppState {
   setLanguage(language: Language): void;
   setTheme(theme: ThemeMode): void;
   setDisplay(display: DisplayMode): void;
+  setCoordUnit(unit: CoordUnit): void;
   setEvaluation(evaluation: Evaluation | null, error: string | null): void;
   setEvaluating(evaluating: boolean): void;
 }
@@ -113,6 +128,7 @@ export const useStore = create<AppState>((set, get) => ({
   language: persisted.language ?? (typeof navigator === "undefined" ? "zh" : detectLanguage()),
   theme: persisted.theme ?? "system",
   display: persisted.display ?? "db",
+  coordUnit: persisted.coordUnit ?? "lambda",
   status: null,
   evaluation: null,
   evaluationError: null,
@@ -120,7 +136,9 @@ export const useStore = create<AppState>((set, get) => ({
 
   initialize(config) {
     const draft = persisted.project;
-    const project = draft && draft.version === 2 && draft.layout ? draft : config.default_project;
+    const usable = draft && draft.version === 2 && draft.layout;
+    // Drafts saved before bands/FOV existed: fill new fields from the defaults.
+    const project = usable ? withDefaults(draft, config.default_project) : config.default_project;
     set({ config, project });
   },
 
@@ -221,6 +239,9 @@ export const useStore = create<AppState>((set, get) => ({
   setDisplay(display) {
     set({ display });
   },
+  setCoordUnit(coordUnit) {
+    set({ coordUnit });
+  },
   setEvaluation(evaluation, error) {
     set({ evaluation, evaluationError: error });
   },
@@ -240,6 +261,7 @@ useStore.subscribe((state) => {
     theme: state.theme,
     display: state.display,
     view: state.view,
+    coordUnit: state.coordUnit,
   });
 });
 

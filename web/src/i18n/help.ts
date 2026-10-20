@@ -14,9 +14,9 @@ export const SHORTCUTS: { keys: string[]; zh: string; en: string; ja: string }[]
   { keys: ["Ctrl", "S"], zh: "保存到项目库", en: "Save to the project library", ja: "プロジェクトライブラリに保存" },
   { keys: ["Ctrl", "O"], zh: "导入阵面 JSON / 项目包", en: "Import array JSON / bundle", ja: "配置 JSON / パッケージを読み込む" },
   { keys: ["Ctrl", "E"], zh: "导出阵面 JSON", en: "Export array JSON", ja: "配置 JSON を書き出す" },
-  { keys: ["1", "–", "4"], zh: "切换视图（阵列 / 1D / 2D / 测角）", en: "Switch view (array / 1D / 2D / angle)", ja: "表示切替（配置 / 1D / 2D / 測角）" },
+  { keys: ["1", "–", "5"], zh: "切换视图（阵列 / 1D / 2D / 测角 / 频段与对比）", en: "Switch view (array / 1D / 2D / angle / band & compare)", ja: "表示切替（配置 / 1D / 2D / 測角 / 周波数帯・比較）" },
   { keys: ["Delete"], zh: "删除选中通道", en: "Delete the selected channel", ja: "選択チャネルを削除" },
-  { keys: ["←", "→", "↑", "↓"], zh: "微调选中通道 0.5 λ（Shift：2.5 λ）", en: "Nudge selection by 0.5 λ (Shift: 2.5 λ)", ja: "選択を 0.5 λ 移動（Shift：2.5 λ）" },
+  { keys: ["←", "→", "↑", "↓"], zh: "按编辑网格微调选中通道（Shift：5 倍）", en: "Nudge selection by one grid step (Shift: ×5)", ja: "選択をグリッド 1 目盛り移動（Shift：5 倍）" },
   { keys: ["Esc"], zh: "取消拖动 / 退出删除模式 / 清除选择", en: "Cancel drag / exit delete mode / clear selection", ja: "ドラッグ取消 / 削除モード終了 / 選択解除" },
 ];
 
@@ -30,6 +30,18 @@ const zh: HelpSection[] = [
       "右侧「阵列概览」实时显示通道数、虚拟通道利用率、口径和分辨率，以及方位/俯仰的测角评估。",
       "切换到「1D DBF」播放或拖动真实角，确认峰值是否连续跟随；「测角性能」给出逐帧误差和竞争峰裕量。",
       "满意后点击「保存」存入项目库，或「导出」为阵面 JSON / 项目包，再用「性能报告」生成 PDF。",
+    ],
+  },
+  {
+    id: "band",
+    title: "频段、视场与规格",
+    bullets: [
+      "顶部「频段」可在 60G（57–64 GHz）、77G（76–81 GHz）、92G 之间切换，同时设置设计频率。阵列坐标以设计频率下的 λ 保存，切换频段时 λ 布局不变、毫米尺寸随之变化。92 GHz 默认 90–94 GHz 只是占位值，请在「评估设置」中改为芯片的实际扫频范围。",
+      "「评估视场」限定测角评估和方向图指标的统计范围。实际雷达只在视场内搜索，视场外的栅瓣不再算作视场内模糊；视场外目标需要靠单元方向图抑制。",
+      "分辨率以阵列响应实测 3 dB 波束宽度为准；口径公式 0.886/D 对小阵列和稀疏阵列偏乐观，仅作参考。PSL 的主瓣区按第一零点自动确定。",
+      "「规格要求」逐项给出通过/未通过：分辨率、视场内不模糊、视场内最大误差、竞争峰裕量、2D 峰值旁瓣。",
+      "「频段与对比」视图：频段内性能在扫频起止和设计频率处重新评估（天线位置固定、电长度变化）；方案对比可把项目库中的 60/77/92 GHz 方案与当前项目并排比较。",
+      "编辑网格可选 λ/2、λ/4、λ/8 或自由；坐标可以按 λ 或 mm 输入。导入的阵面坐标保持原值，不再强制吸附。阵元间距小于 λ/2 或位置重合时会在提示中报出。",
     ],
   },
   {
@@ -55,7 +67,7 @@ const zh: HelpSection[] = [
     id: "dbf1d",
     title: "1D DBF 角谱",
     paragraphs: [
-      "每个方向有 181 帧，模拟真实角 −90°～+90°（1° 步进）的信号与 DBF 字典的归一化相关。",
+      "真实角在评估视场内以 1° 步进逐帧模拟，DBF 搜索范围比视场外扩 10°；峰值先在 1° 网格上取最大，再在附近重新计算相关细化到 0.002°，因此可以评估亚度级误差。",
     ],
     bullets: [
       "「播放」从当前帧开始，播放到 +90° 自动停止；拖动滑条或点击图中任意位置跳转到该真实角。",
@@ -126,6 +138,18 @@ const en: HelpSection[] = [
     ],
   },
   {
+    id: "band",
+    title: "Band, FOV and requirements",
+    bullets: [
+      "The Band control switches between 60G (57–64 GHz), 77G (76–81 GHz) and 92G and sets the design frequency. Coordinates are stored in λ at the design frequency, so switching bands keeps the λ layout and rescales millimetres. The 92 GHz default of 90–94 GHz is a placeholder; set your chip's sweep in Evaluation settings.",
+      "The evaluation FOV bounds the angle evaluation and the array-pattern metrics. Real radars only search their FOV, so grating lobes outside it are no longer counted as in-FOV ambiguity; out-of-FOV targets must be suppressed by the element pattern.",
+      "Resolution is the measured 3 dB beamwidth of the array response; the 0.886/D aperture formula is optimistic for small and sparse arrays and shown for reference. The PSL main lobe is bounded at the first nulls.",
+      "Requirements give pass/fail for resolution, unambiguous FOV, max error in FOV, peak margin and 2D peak sidelobe.",
+      "The Band & compare view re-evaluates the array at the sweep edges and the design frequency (antennas fixed, electrical spacing changing), and compares library designs (e.g. 60/77/92 GHz) side by side.",
+      "The editor grid can be λ/2, λ/4, λ/8 or free, and coordinates can be typed in λ or mm. Imported coordinates are kept as given. Elements closer than λ/2 or coincident are reported.",
+    ],
+  },
+  {
     id: "layout",
     title: "Editing the array",
     bullets: [
@@ -148,7 +172,7 @@ const en: HelpSection[] = [
     id: "dbf1d",
     title: "1D DBF spectra",
     paragraphs: [
-      "Each axis has 181 frames simulating true angles from −90° to +90° (1° steps), correlated with the DBF dictionary.",
+      "True angles are simulated across the evaluation FOV in 1° steps; the DBF search extends 10° beyond the FOV. Peaks are taken on the 1° grid and then refined to 0.002° by re-evaluating the correlation, so sub-degree errors are visible.",
     ],
     bullets: [
       "Play starts from the current frame and stops at +90°. Drag the slider or click anywhere in the chart to jump.",
@@ -219,6 +243,18 @@ const ja: HelpSection[] = [
     ],
   },
   {
+    id: "band",
+    title: "周波数帯・視野・仕様",
+    bullets: [
+      "上部の周波数帯で 60G（57–64 GHz）、77G（76–81 GHz）、92G を切り替え、設計周波数も設定します。座標は設計周波数での λ で保存されるため、切り替えても λ 配置は変わらず mm 寸法が変わります。92 GHz の 90–94 GHz は仮の値なので、評価設定でチップの実際の掃引範囲を入力してください。",
+      "評価視野は測角評価とアレイパターン指標の範囲を決めます。実際のレーダーは視野内のみ探索するため、視野外のグレーティングローブは視野内の曖昧さとして扱いません。視野外の目標は素子パターンで抑圧する必要があります。",
+      "分解能はアレイ応答の実測 3 dB ビーム幅です。開口式 0.886/D は小規模・スパースアレイで楽観的なため参考値です。PSL のメインローブは第 1 ヌルで決めます。",
+      "仕様では分解能、視野内の曖昧なし、視野内最大誤差、競合ピークマージン、2D ピークサイドローブを合否判定します。",
+      "「周波数帯・比較」では掃引の両端と設計周波数で再評価し（アンテナ位置固定・電気長変化）、ライブラリの設計（60/77/92 GHz など）を並べて比較できます。",
+      "編集グリッドは λ/2・λ/4・λ/8・自由から選べ、座標は λ または mm で入力できます。読み込んだ座標はそのまま保持されます。λ/2 未満の間隔や重なりは注意として表示します。",
+    ],
+  },
+  {
     id: "layout",
     title: "アレイ編集",
     bullets: [
@@ -240,7 +276,7 @@ const ja: HelpSection[] = [
   {
     id: "dbf1d",
     title: "1D DBF スペクトル",
-    paragraphs: ["各軸 181 フレームで、真の角度 −90°〜+90°（1° 刻み）の信号と DBF 辞書の正規化相関を示します。"],
+    paragraphs: ["真の角度は評価視野内を 1° 刻みで模擬し、DBF 探索は視野の 10° 外側まで行います。ピークは 1° グリッドで求めた後、相関を再計算して 0.002° まで細分化するため、1° 未満の誤差も評価できます。"],
     bullets: [
       "再生は現在のフレームから始まり +90° で停止します。スライダーまたはグラフのクリックで移動できます。",
       "黄色の線が真の角度、赤い × がピークです。下部に誤差、競合ピークマージン、ピーク品質を表示します。",

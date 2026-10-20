@@ -10,9 +10,11 @@ import { type Language, useStore } from "../state/store";
 
 type RangeKey = "azimuth_focus" | "elevation_focus" | "azimuth_hold" | "elevation_hold";
 
-function angleParser(text: string) {
-  const value = parseNumber(text, ["°"]);
-  return value !== null && value >= -90 && value <= 90 ? value : null;
+function angleParser(range: [number, number]) {
+  return (text: string) => {
+    const value = parseNumber(text, ["°"]);
+    return value !== null && value >= range[0] && value <= range[1] ? value : null;
+  };
 }
 
 export function ReportDialog({ onClose }: { onClose: () => void }) {
@@ -22,10 +24,10 @@ export function ReportDialog({ onClose }: { onClose: () => void }) {
   const capability = useStore((state) => state.evaluation?.capability) ?? { azimuth: true, elevation: true, two_d: true };
   const [options, setOptions] = useState<ReportOptions>(() => ({
     title: translate(language, "reportDialog.defaultTitle"),
-    azimuth_focus: { start: -70, stop: 70 },
-    elevation_focus: { start: -15, stop: 15 },
-    azimuth_hold: { start: -70, stop: 70 },
-    elevation_hold: { start: -15, stop: 15 },
+    azimuth_focus: { start: project.fov.azimuth[0], stop: project.fov.azimuth[1] },
+    elevation_focus: { start: project.fov.elevation[0], stop: project.fov.elevation[1] },
+    azimuth_hold: { start: project.fov.azimuth[0], stop: project.fov.azimuth[1] },
+    elevation_hold: { start: project.fov.elevation[0], stop: project.fov.elevation[1] },
     azimuth_hold_stride_frames: 1,
     elevation_hold_stride_frames: 1,
     error_limit_deg: 1,
@@ -50,17 +52,20 @@ export function ReportDialog({ onClose }: { onClose: () => void }) {
     });
   const noOutput = !options.include_spectrum_db && !options.include_spectrum_magnitude;
 
-  const rangeRow = (key: RangeKey, label: string) => (
+  const rangeRow = (key: RangeKey, label: string) => {
+    const parse = angleParser(project.fov[key.startsWith("azimuth") ? "azimuth" : "elevation"]);
+    return (
     <>
       <label>{label}</label>
       <span className="range-input">
-        <NumberInput value={options[key].start} parse={angleParser} format={(v) => trimNumber(v, 1)} onCommit={(v) => setRange(key, "start", v)} aria-label={`${label} ${t("reportDialog.start")}`} />
+        <NumberInput value={options[key].start} parse={parse} format={(v) => trimNumber(v, 1)} onCommit={(v) => setRange(key, "start", v)} aria-label={`${label} ${t("reportDialog.start")}`} />
         <span className="subtle">~</span>
-        <NumberInput value={options[key].stop} parse={angleParser} format={(v) => trimNumber(v, 1)} onCommit={(v) => setRange(key, "stop", v)} aria-label={`${label} ${t("reportDialog.stop")}`} />
+        <NumberInput value={options[key].stop} parse={parse} format={(v) => trimNumber(v, 1)} onCommit={(v) => setRange(key, "stop", v)} aria-label={`${label} ${t("reportDialog.stop")}`} />
         <span className="subtle">°</span>
       </span>
     </>
-  );
+    );
+  };
 
   const strideRow = (key: "azimuth_hold_stride_frames" | "elevation_hold_stride_frames") => (
     <>

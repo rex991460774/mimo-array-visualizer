@@ -30,16 +30,13 @@ from .analysis import (
     DBF_CUT_REASON_ERROR_JUMP,
     DBF_CUT_REASON_FLAT,
     DBF_QUALITY_OK,
-    DBF_SCAN_FOV,
-    DBF_SCAN_GRID_SIZE,
     ArrayMetrics,
     Dbf2dScanner,
     DbfAngleMetrics,
+    DbfAxisEvaluation,
+    EvaluationSettings,
     calculate_metrics_and_psf,
-    dbf_angle_frame_series_from_spectra,
-    dbf_angle_metrics_from_spectra,
-    dbf_azimuth_spectrum_bank,
-    dbf_elevation_spectrum_bank,
+    evaluate_dbf_axis,
 )
 from .assets import AssetStore
 from .dbf_dictionary import (
@@ -66,15 +63,27 @@ from .element_pattern import (
 )
 from .geometry import AntennaArray
 from .project import (
+    LIGHT_SPEED_MM_PER_NS,
     ChannelPatternBinding,
     Project,
     json_number,
     layout_to_v1,
     project_array,
 )
+from .requirements import (
+    STATUS_FAIL,
+    STATUS_PASS,
+    RequirementCheck,
+    RequirementSpec,
+    check_requirements,
+    measured_resolution,
+)
 from .version import APP_VERSION
 
 AXES = ("azimuth", "elevation")
+MIN_ELEMENT_SPACING_LAMBDA = 0.5
+MAX_LAYOUT_WARNINGS = 12
+MAX_COMPARE_PROJECTS = 8
 HALF_LAMBDA_TO_LAMBDA = 0.5
 ROUND_DECIMALS = 9
 
@@ -125,6 +134,8 @@ class StudyContext:
     element_pattern: ElementPattern | None
     channel_patterns: ChannelPatternSet
     dictionary: DbfDictionaryConfig
+    settings: EvaluationSettings
+    operating_ghz: float
 
 
 def encode_array(values: np.ndarray, dtype: str = "float32") -> dict[str, Any]:
@@ -170,15 +181,19 @@ class Engine:
 
     # ── Project → core objects ───────────────────────────────────────
 
-    def context(self, project: Project) -> StudyContext:
+    def context(self, project: Project, operating_ghz: float | None = None) -> StudyContext:
+        """Core objects for the project at an operating frequency (default: design)."""
         self._require_assets(project)
-        array = project_array(project)
+        frequency = project.frequency_ghz if operating_ghz is None else float(operating_ghz)
+        array = project_array(project, frequency)
         return StudyContext(
             project=project,
             array=array,
             element_pattern=self._element_pattern(project),
             channel_patterns=self._channel_pattern_set(project),
             dictionary=self._dictionary_config(project, array),
+            settings=evaluation_settings(project),
+            operating_ghz=frequency,
         )
 
     def _require_assets(self, project: Project) -> None:
@@ -263,16 +278,20 @@ class Engine:
     # ── Cache keys ───────────────────────────────────────────────────
 
     @staticmethod
-    def _pattern_key(project: Project) -> str:
+    def _key(context: StudyContext, fields: set[str]) -> str:
+        project = context.project
         return _digest(
-            project.model_dump(include={"layout", "element_pattern", "channel_patterns"})
+            [
+                project.model_dump(include=fields | {"layout", "fov"}),
+                round(context.operating_ghz / project.frequency_ghz, 12),
+            ]
         )
 
-    @staticmethod
-    def _dbf_key(project: Project) -> str:
-        return _digest(
-            project.model_dump(include={"layout", "channel_patterns", "dbf_dictionary"})
-        )
+    def _pattern_key(self, context: StudyContext) -> str:
+        return self._key(context, {"element_pattern", "channel_patterns"})
+
+    def _dbf_key(self, context: StudyContext) -> str:
+        return self._key(context, {"channel_patterns", "dbf_dictionary", "ambiguity_margin_db"})
 
     # ── Evaluations ──────────────────────────────────────────────────
 
@@ -286,55 +305,77 @@ class Engine:
                 tx_pattern=context.element_pattern,
                 rx_pattern=context.element_pattern,
                 channel_patterns=context.channel_patterns,
+                azimuth_fov=context.settings.azimuth_fov_deg,
+                elevation_fov=context.settings.elevation_fov_deg,
             )
 
-        return self._metrics.get_or_create(self._pattern_key(context.project), build)
+        return self._metrics.get_or_create(self._pattern_key(context), build)
 
-    def _bank(self, context: StudyContext, axis: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _axis(self, context: StudyContext, axis: str) -> DbfAxisEvaluation:
         if axis not in AXES:
             raise ValueError(f"Unknown DBF axis: {axis!r}")
-        bank_function = dbf_azimuth_spectrum_bank if axis == "azimuth" else dbf_elevation_spectrum_bank
 
-        def build() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        def build() -> DbfAxisEvaluation:
             try:
-                return bank_function(
+                return evaluate_dbf_axis(
                     context.array,
-                    tx_pattern=context.element_pattern,
-                    rx_pattern=context.element_pattern,
+                    axis,
+                    context.settings,
                     channel_patterns=context.channel_patterns,
                     dbf_dictionary=context.dictionary,
+                    ambiguity_margin_db=context.project.ambiguity_margin_db,
                 )
             except ValueError as exc:
                 raise ProjectComputationError(str(exc)) from exc
 
-        return self._banks.get_or_create((self._dbf_key(context.project), axis), build)
+        return self._banks.get_or_create((self._dbf_key(context), axis), build)
+
+    def _angle_metrics(
+        self, context: StudyContext, capability: dict[str, bool]
+    ) -> tuple[dict[str, DbfAngleMetrics | None], dict[str, str]]:
+        metrics: dict[str, DbfAngleMetrics | None] = {}
+        errors: dict[str, str] = {}
+        for axis in AXES:
+            metrics[axis] = None
+            if not capability[axis]:
+                continue
+            try:
+                metrics[axis] = self._axis(context, axis).metrics
+            except ProjectComputationError as exc:
+                errors[axis] = str(exc)
+        return metrics, errors
+
+    def _checks(
+        self,
+        context: StudyContext,
+        metrics: ArrayMetrics,
+        angle: dict[str, DbfAngleMetrics | None],
+    ) -> list[RequirementCheck]:
+        return check_requirements(
+            requirement_spec(context.project),
+            metrics,
+            angle,
+            {axis: context.settings.fov(axis) for axis in AXES},
+        )
 
     def evaluate(self, project: Project) -> dict[str, Any]:
         context = self.context(project)
         array = context.array
-        af_db, azimuths, elevations, metrics = self._array_metrics(context)
-        _ = af_db, azimuths, elevations
+        _af, _az, _el, metrics = self._array_metrics(context)
         capability = axis_capability(metrics)
         half_wavelength_mm = project.wavelength_mm / 2.0
-
-        angle: dict[str, Any] = {}
-        for axis in AXES:
-            if not capability[axis]:
-                angle[axis] = None
-                continue
-            try:
-                true_angles, scan_angles, spectra = self._bank(context, axis)
-                angle[axis] = angle_metrics_payload(
-                    dbf_angle_metrics_from_spectra(
-                        true_angles,
-                        scan_angles,
-                        spectra,
-                        ambiguity_margin_db=project.ambiguity_margin_db,
-                    )
-                )
-            except ProjectComputationError as exc:
-                angle[axis] = {"error": str(exc)}
-
+        angle_metrics, angle_errors = self._angle_metrics(context, capability)
+        angle: dict[str, Any] = {
+            axis: (
+                {"error": angle_errors[axis]}
+                if axis in angle_errors
+                else None
+                if angle_metrics[axis] is None
+                else angle_metrics_payload(angle_metrics[axis])
+            )
+            for axis in AXES
+        }
+        checks = self._checks(context, metrics, angle_metrics)
         utilization = metrics.unique_count / metrics.virtual_count if metrics.virtual_count else 0.0
         return {
             "wavelength_mm": project.wavelength_mm,
@@ -352,45 +393,46 @@ class Engine:
                 "x_aperture_mm": metrics.x_aperture * half_wavelength_mm,
                 "y_aperture_mm": metrics.y_aperture * half_wavelength_mm,
             },
+            "resolution": resolution_payload(metrics),
             "metrics": array_metrics_payload(metrics),
             "capability": capability,
+            "fov": {axis: list(context.settings.fov(axis)) for axis in AXES},
             "virtual_points": virtual_points_payload(array),
             "angle": angle,
+            "requirements": [check_payload(check) for check in checks],
+            "layout_checks": layout_checks(project),
             "pattern_status": pattern_status(project),
-            "notes": note_codes(metrics),
+            "notes": note_codes(metrics, project),
         }
 
     def dbf_bank(self, project: Project, axis: str) -> dict[str, Any]:
         context = self.context(project)
-        true_angles, scan_angles, spectra = self._bank(context, axis)
-        series = dbf_angle_frame_series_from_spectra(true_angles, scan_angles, spectra)
-        metrics = dbf_angle_metrics_from_spectra(
-            true_angles,
-            scan_angles,
-            spectra,
-            ambiguity_margin_db=project.ambiguity_margin_db,
-        )
+        evaluation = self._axis(context, axis)
+        series = evaluation.frame_series
         return {
             "axis": axis,
-            "true_angles": num_list(true_angles),
-            "scan_angles": num_list(scan_angles),
-            "spectra_db": encode_array(spectra),
+            "fov": list(context.settings.fov(axis)),
+            "true_angles": num_list(evaluation.true_angles_deg),
+            "scan_angles": num_list(evaluation.scan_angles_deg),
+            "spectra_db": encode_array(evaluation.spectra_db),
             "frames": {
-                "estimated": num_list(series.estimated_angles_deg),
-                "errors": num_list(series.errors_deg, 6),
+                "estimated": num_list(series.estimated_angles_deg, 4),
+                "errors": num_list(series.errors_deg, 4),
                 "main_peak_db": num_list(series.main_peak_db, 4),
                 "competitor_peak_db": num_list(series.competitor_peak_db, 4),
                 "margins_db": num_list(series.peak_margins_db, 4),
                 "quality": [CUT_REASON_CODES.get(flag, flag) for flag in series.quality_flags],
             },
-            "metrics": angle_metrics_payload(metrics),
+            "metrics": angle_metrics_payload(evaluation.metrics),
         }
 
     def _scanner(self, context: StudyContext) -> Dbf2dScanner:
         return self._scanners.get_or_create(
-            self._dbf_key(context.project),
+            self._dbf_key(context),
             lambda: Dbf2dScanner(
                 context.array,
+                scan_azimuths_deg=context.settings.scan_angles("azimuth"),
+                scan_elevations_deg=context.settings.scan_angles("elevation"),
                 channel_patterns=context.channel_patterns,
                 dbf_dictionary=context.dictionary,
             ),
@@ -417,10 +459,89 @@ class Engine:
                 }
             )
         return {
+            "fov": {axis: list(context.settings.fov(axis)) for axis in AXES},
             "scan_azimuths": num_list(scanner.scan_azimuths_deg),
             "scan_elevations": num_list(scanner.scan_elevations_deg),
             "frames": results,
         }
+
+    def performance_summary(self, project: Project, operating_ghz: float | None = None) -> dict[str, Any]:
+        """Compact key-metric summary (used by the band sweep and comparisons)."""
+        context = self.context(project, operating_ghz)
+        _af, _az, _el, metrics = self._array_metrics(context)
+        capability = axis_capability(metrics)
+        angle, errors = self._angle_metrics(context, capability)
+        checks = self._checks(context, metrics, angle)
+        return {
+            "frequency_ghz": context.operating_ghz,
+            "wavelength_mm": LIGHT_SPEED_MM_PER_NS / context.operating_ghz,
+            "capability": capability,
+            "resolution": resolution_payload(metrics),
+            "psl_db": num(metrics.psl_db),
+            "azimuth_psl_db": num(metrics.azimuth_psl_db),
+            "elevation_psl_db": num(metrics.elevation_psl_db),
+            "angle": {
+                axis: (
+                    {"error": errors[axis]}
+                    if axis in errors
+                    else None
+                    if angle[axis] is None
+                    else angle_metrics_payload(angle[axis])
+                )
+                for axis in AXES
+            },
+            "requirements": [check_payload(check) for check in checks],
+            "passed": sum(check.status == STATUS_PASS for check in checks),
+            "failed": sum(check.status == STATUS_FAIL for check in checks),
+        }
+
+    def band_sweep(self, project: Project) -> dict[str, Any]:
+        """Performance at the band edges and the design frequency.
+
+        The layout is physical, so its electrical spacing scales with the
+        operating frequency: grating-lobe onset, no-fold range and resolution
+        drift across an FMCW sweep.  Imported channel phase data are single-
+        frequency measurements and are reused unchanged at every point.
+        """
+        band = project.band
+        frequencies = sorted({band.start_ghz, project.frequency_ghz, band.stop_ghz})
+        points = [
+            {**self.performance_summary(project, frequency), "role": _band_role(project, frequency)}
+            for frequency in frequencies
+        ]
+        uses_measured_phase = any(binding.kind == "phase" for binding in project.channel_patterns) or (
+            project.dbf_dictionary.mode == DBF_DICT_CUSTOM
+        )
+        return {
+            "band": band.model_dump(),
+            "design_ghz": project.frequency_ghz,
+            "design_in_band": band.start_ghz <= project.frequency_ghz <= band.stop_ghz,
+            "uses_single_frequency_data": uses_measured_phase,
+            "points": points,
+        }
+
+    def compare(self, projects: list[Project]) -> list[dict[str, Any]]:
+        if not 1 <= len(projects) <= MAX_COMPARE_PROJECTS:
+            raise ValueError(f"Compare between 1 and {MAX_COMPARE_PROJECTS} projects.")
+        results = []
+        for project in projects:
+            try:
+                summary = self.performance_summary(project)
+                summary["error"] = None
+            except (ProjectComputationError, ValueError) as exc:
+                summary = {"error": str(exc)}
+            results.append(
+                {
+                    "name": project.name,
+                    "band": project.band.model_dump(),
+                    "design_ghz": project.frequency_ghz,
+                    "tx_count": len(project.layout.tx),
+                    "rx_count": len(project.layout.rx),
+                    "fov": project.fov.model_dump(),
+                    **summary,
+                }
+            )
+        return results
 
     # ── Import helpers ───────────────────────────────────────────────
 
@@ -499,7 +620,7 @@ class Engine:
         if axis not in AXES:
             raise ValueError(f"Unknown DBF axis: {axis!r}")
         context = self.context(project)
-        angles = np.linspace(DBF_SCAN_FOV[0], DBF_SCAN_FOV[1], DBF_SCAN_GRID_SIZE)
+        angles = context.settings.scan_angles(axis)
         try:
             matrix = context.dictionary.scan_matrix(
                 context.array,
@@ -559,6 +680,8 @@ class Engine:
         from .performance_report import PerformanceReportSnapshot
 
         context = self.context(project)
+        _af, _az, _el, metrics = self._array_metrics(context)
+        angle, _errors = self._angle_metrics(context, axis_capability(metrics))
         return PerformanceReportSnapshot(
             array=context.array,
             frequency_ghz=project.frequency_ghz,
@@ -569,10 +692,97 @@ class Engine:
             current_config=self.layout_document(project),
             app_version=APP_VERSION,
             created_at=datetime.now().astimezone(),
+            evaluation=context.settings,
+            requirement_checks=tuple(self._checks(context, metrics, angle)),
+            band_ghz=(project.band.start_ghz, project.band.stop_ghz),
         )
 
 
 # ── Payload helpers ──────────────────────────────────────────────────
+
+
+def evaluation_settings(project: Project) -> EvaluationSettings:
+    return EvaluationSettings(
+        azimuth_fov_deg=tuple(float(v) for v in project.fov.azimuth),
+        elevation_fov_deg=tuple(float(v) for v in project.fov.elevation),
+    )
+
+
+def requirement_spec(project: Project) -> RequirementSpec:
+    return RequirementSpec(**project.requirements.model_dump())
+
+
+def check_payload(check: RequirementCheck) -> dict[str, Any]:
+    return {
+        "key": check.key,
+        "axis": check.axis,
+        "target": num(check.target),
+        "actual": num(check.actual),
+        "status": check.status,
+    }
+
+
+def resolution_payload(metrics: ArrayMetrics) -> dict[str, Any]:
+    """Measured 3 dB beamwidth (primary) and the aperture-formula estimate."""
+    return {
+        axis: {
+            "measured": num(
+                metrics.azimuth_3db_beamwidth if axis == "azimuth" else metrics.elevation_3db_beamwidth
+            ),
+            "estimate": num(
+                metrics.azimuth_resolution if axis == "azimuth" else metrics.elevation_resolution
+            ),
+            "value": num(measured_resolution(metrics, axis)),
+        }
+        for axis in AXES
+    }
+
+
+def _band_role(project: Project, frequency: float) -> str:
+    roles = []
+    if math.isclose(frequency, project.band.start_ghz):
+        roles.append("start")
+    if math.isclose(frequency, project.frequency_ghz):
+        roles.append("design")
+    if math.isclose(frequency, project.band.stop_ghz):
+        roles.append("stop")
+    return "+".join(roles)
+
+
+def layout_checks(project: Project) -> list[dict[str, Any]]:
+    """Physical plausibility: coincident or overlapping antennas.
+
+    Patch/series antennas at these bands are roughly λ/2 wide, so centres
+    closer than λ/2 overlap on the PCB; coincident positions are impossible.
+    """
+    wavelength_mm = project.wavelength_mm
+    elements = [
+        (name, point)
+        for names, points in (
+            (project.tx_names, project.layout.tx),
+            (project.rx_names, project.layout.rx),
+        )
+        for name, point in zip(names, points)
+    ]
+    issues: list[dict[str, Any]] = []
+    for index, (name_a, a) in enumerate(elements):
+        for name_b, b in elements[index + 1 :]:
+            distance = math.hypot(a.x - b.x, a.y - b.y)
+            if distance >= MIN_ELEMENT_SPACING_LAMBDA - 1e-9:
+                continue
+            issues.append(
+                {
+                    "code": "coincident" if distance < 1e-9 else "too_close",
+                    "a": name_a,
+                    "b": name_b,
+                    "distance_lambda": round(distance, 6),
+                    "distance_mm": round(distance * wavelength_mm, 4),
+                }
+            )
+    issues.sort(key=lambda item: (item["code"] != "coincident", item["distance_lambda"]))
+    if not (project.band.start_ghz <= project.frequency_ghz <= project.band.stop_ghz):
+        issues.insert(0, {"code": "design_outside_band"})
+    return issues[:MAX_LAYOUT_WARNINGS]
 
 
 def axis_capability(metrics: ArrayMetrics) -> dict[str, bool]:
@@ -652,16 +862,20 @@ def pattern_status(project: Project) -> dict[str, str]:
     return status
 
 
-def note_codes(metrics: ArrayMetrics) -> list[str]:
+def note_codes(metrics: ArrayMetrics, project: Project | None = None) -> list[str]:
     notes = []
     if metrics.duplicate_excess > 0:
         notes.append("duplicate_virtual")
-    if metrics.azimuth_psl_db > -10.0:
+    if metrics.x_aperture > 0 and metrics.azimuth_psl_db > -10.0:
         notes.append("windowing")
-    if metrics.elevation_ambiguity_level == "High":
+    if metrics.psl_db > -6.0:
         notes.append("ambiguity_high")
-    elif metrics.elevation_ambiguity_level == "Medium":
+    elif metrics.psl_db > -10.0:
         notes.append("ambiguity_medium")
+    estimate = metrics.azimuth_resolution
+    measured = metrics.azimuth_3db_beamwidth
+    if estimate is not None and measured is not None and measured > estimate * 1.15:
+        notes.append("resolution_optimistic")
     return notes
 
 
@@ -670,6 +884,7 @@ _NOTE_TEXT_ZH = {
     "windowing": "建议加窗降低旁瓣",
     "ambiguity_high": "俯仰模糊风险高",
     "ambiguity_medium": "俯仰模糊风险中",
+    "resolution_optimistic": "口径公式估算的分辨率偏乐观",
 }
 
 
@@ -741,4 +956,6 @@ def layout_evaluation(project: Project, metrics: ArrayMetrics, assets: AssetStor
             "configured_series": len(project.channel_patterns),
         },
         "notes": [_NOTE_TEXT_ZH[code] for code in note_codes(metrics)],
+        "band_ghz": [project.band.start_ghz, project.band.stop_ghz],
+        "fov_deg": project.fov.model_dump(),
     }

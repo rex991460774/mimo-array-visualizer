@@ -7,6 +7,7 @@ from virtual_array.analysis import (
     AF_GRID_SIZE,
     DBF_QUALITY_OK,
     DBF_SCAN_GRID_SIZE,
+    EvaluationSettings,
     calculate_metrics_and_psf,
     dbf_2d_normalization_reference,
     dbf_2d_spectrum,
@@ -15,13 +16,17 @@ from virtual_array.analysis import (
     dbf_azimuth_angle_metrics,
     dbf_azimuth_spectrum,
     dbf_azimuth_spectrum_bank,
+    dbf_elevation_angle_metrics,
     dbf_elevation_spectrum,
     dbf_elevation_spectrum_bank,
     dbf_peak_index,
     estimate_resolution,
+    evaluate_dbf_axis,
 )
+from virtual_array.dbf_dictionary import DbfDictionaryConfig
 from virtual_array.element_pattern import (
     PATTERN_KIND_AMPLITUDE,
+    PATTERN_KIND_PHASE,
     PATTERN_PLANE_HORIZONTAL,
     ChannelPatternSet,
     PatternSeries,
@@ -77,8 +82,43 @@ def test_single_element_array_factor_is_flat() -> None:
     assert np.allclose(af_db, 0.0)
     assert metrics.azimuth_resolution is None
     assert metrics.elevation_resolution is None
-    assert metrics.azimuth_psl_db == pytest.approx(0.0)
-    assert metrics.psl_grade == "Bad"
+    # No aperture on either axis: the whole FOV is main lobe, so no sidelobe exists.
+    assert np.isneginf(metrics.azimuth_psl_db)
+    assert np.isneginf(metrics.psl_db)
+
+
+def test_small_ula_psl_uses_first_null_mainlobe() -> None:
+    # 4-element λ/2 ULA (e.g. a 60 GHz 1T4R module): wide beam, -11.3 dB sidelobes.
+    array = AntennaArray.from_xy(tx_x=[0], tx_y=[0], rx_x=[0, 1, 2, 3], rx_y=[0, 0, 0, 0])
+
+    _af, _az, _el, metrics = calculate_metrics_and_psf(array)
+
+    assert metrics.azimuth_psl_db == pytest.approx(-11.30, abs=0.05)
+    assert metrics.psl_db == pytest.approx(-11.30, abs=0.05)
+    assert np.isneginf(metrics.elevation_psl_db)
+    assert metrics.elevation_ambiguity_level == "Low"
+
+
+def test_twelve_element_virtual_ula_psl_matches_uniform_theory() -> None:
+    array = AntennaArray.from_xy(
+        tx_x=[0, 4, 8], tx_y=[0, 0, 0], rx_x=[0, 1, 2, 3], rx_y=[0, 0, 0, 0]
+    )
+
+    _af, _az, _el, metrics = calculate_metrics_and_psf(array)
+
+    assert metrics.azimuth_psl_db == pytest.approx(-13.1, abs=0.15)
+    assert metrics.azimuth_3db_beamwidth == pytest.approx(8.46, abs=0.1)
+
+
+def test_metrics_follow_configured_fov() -> None:
+    array = build_array()
+
+    _af, azimuths, elevations, _metrics = calculate_metrics_and_psf(
+        array, azimuth_fov=(-60.0, 60.0), elevation_fov=(-30.0, 30.0)
+    )
+
+    assert azimuths[0] == -60.0 and azimuths[-1] == 60.0
+    assert elevations[0] == -30.0 and elevations[-1] == 30.0
 
 
 def test_dbf_azimuth_spectrum_defaults_to_full_scan_range() -> None:
@@ -461,3 +501,74 @@ def test_dbf_angle_metrics_treat_flat_spectrum_as_unusable() -> None:
 def test_estimate_resolution_uses_half_lambda_aperture_units() -> None:
     assert estimate_resolution(0.0) is None
     assert estimate_resolution(75.0) == pytest.approx(1.3537, abs=1e-4)
+
+
+def test_evaluation_settings_bound_true_and_scan_angles() -> None:
+    settings = EvaluationSettings(azimuth_fov_deg=(-60, 60), elevation_fov_deg=(-15, 15))
+
+    assert settings.true_angles("azimuth")[[0, -1]].tolist() == [-60.0, 60.0]
+    assert settings.scan_angles("azimuth")[[0, -1]].tolist() == [-70.0, 70.0]
+    assert settings.scan_angles("elevation")[[0, -1]].tolist() == [-25.0, 25.0]
+    with pytest.raises(ValueError):
+        EvaluationSettings(azimuth_fov_deg=(5, 60))
+
+
+def test_fov_bounded_evaluation_ignores_out_of_fov_grating_lobes() -> None:
+    # case4 elevation virtual spacing is λ: grating lobes at ±90° make the
+    # full-hemisphere search ambiguous, but a ±15° radar FOV is unambiguous.
+    array = build_array()
+
+    full = dbf_elevation_angle_metrics(array)
+    bounded = evaluate_dbf_axis(array, "elevation", EvaluationSettings()).metrics
+
+    assert full.no_fold_width == 0.0
+    assert bounded.no_fold_left == -15.0
+    assert bounded.no_fold_right == 15.0
+
+
+def test_refined_peaks_are_exact_for_ideal_array_and_resolve_subdegree_errors() -> None:
+    array = AntennaArray.from_xy(
+        tx_x=[0, 4, 8], tx_y=[0, 0, 0], rx_x=[0, 1, 2, 3], rx_y=[0, 0, 0, 0]
+    )
+    ideal = evaluate_dbf_axis(array, "azimuth", EvaluationSettings())
+    assert np.max(np.abs(ideal.frame_series.errors_deg)) < 0.005
+
+    # Imported phase cuts carry the geometry; a 3°-per-element error on the Rx
+    # steers the beam by a fraction of a degree: invisible on the 1° scan
+    # grid, resolved by the refinement.
+    angles = np.arange(-90.0, 91.0, 1.0)
+    geometry = {"Tx1": 0, "Tx2": 4, "Tx3": 8, "Rx1": 0, "Rx2": 1, "Rx3": 2, "Rx4": 3}
+    patterns = ChannelPatternSet()
+    for name, x in geometry.items():
+        error = 3.0 * (x if name.startswith("Rx") else 0)
+        patterns.set_series(
+            name,
+            PATTERN_KIND_PHASE,
+            PATTERN_PLANE_HORIZONTAL,
+            PatternSeries(
+                name="phase.csv",
+                source_path="phase.csv",
+                angle_column="Theta",
+                value_column=name,
+                value_kind=PATTERN_KIND_PHASE,
+                angles_deg=angles,
+                values=np.degrees(np.pi * x * np.sin(np.radians(angles))) + error,
+            ),
+        )
+    coarse = evaluate_dbf_axis(
+        array,
+        "azimuth",
+        EvaluationSettings(refine_peaks=False),
+        channel_patterns=patterns,
+        dbf_dictionary=DbfDictionaryConfig(mode="ideal"),
+    )
+    refined = evaluate_dbf_axis(
+        array,
+        "azimuth",
+        EvaluationSettings(),
+        channel_patterns=patterns,
+        dbf_dictionary=DbfDictionaryConfig(mode="ideal"),
+    )
+    center = int(np.argmin(np.abs(refined.true_angles_deg)))
+    assert coarse.frame_series.errors_deg[center] in (0.0, 1.0, -1.0)
+    assert 0.0 < abs(refined.frame_series.errors_deg[center]) < 1.0

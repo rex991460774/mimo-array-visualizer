@@ -21,7 +21,9 @@ from ..assets import MAX_ASSET_BYTES, AssetNotFoundError, AssetStore, sanitize_f
 from ..engine import Engine, ProjectComputationError
 from ..logging_config import configure_logging
 from ..project import (
+    BAND_PRESETS,
     GRID_STEP_LAMBDA,
+    GRID_STEPS_LAMBDA,
     MAX_RX_COUNT,
     MAX_TX_COUNT,
     ChannelPatternBinding,
@@ -136,6 +138,10 @@ class SaveProjectRequest(ProjectRequest):
     pass
 
 
+class CompareRequest(BaseModel):
+    projects: list[Project] = Field(min_length=1, max_length=8)
+
+
 # ── Application ──────────────────────────────────────────────────────
 
 
@@ -203,7 +209,9 @@ def create_app(data_dir: str | Path | None = None, static_dir: str | Path | None
                 "grid_step_lambda": GRID_STEP_LAMBDA,
                 "max_asset_bytes": MAX_ASSET_BYTES,
                 "max_2d_frames_per_request": MAX_2D_FRAMES_PER_REQUEST,
+                "grid_steps_lambda": list(GRID_STEPS_LAMBDA),
             },
+            "band_presets": BAND_PRESETS,
             "dbf": {
                 "scan_fov": list(DBF_SCAN_FOV),
                 "scan_step_deg": DBF_SCAN_STEP_DEG,
@@ -220,6 +228,14 @@ def create_app(data_dir: str | Path | None = None, static_dir: str | Path | None
     @app.post("/api/evaluate")
     def evaluate(request: ProjectRequest) -> dict[str, Any]:
         return engine.evaluate(request.project)
+
+    @app.post("/api/band")
+    def band_sweep(request: ProjectRequest) -> dict[str, Any]:
+        return engine.band_sweep(request.project)
+
+    @app.post("/api/compare")
+    def compare(request: CompareRequest) -> list[dict[str, Any]]:
+        return engine.compare(request.projects)
 
     @app.post("/api/dbf/bank")
     def dbf_bank(request: BankRequest) -> dict[str, Any]:

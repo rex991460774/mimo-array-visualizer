@@ -43,7 +43,7 @@ def test_layout_v1_example_imports_with_lambda_coordinates() -> None:
     assert layout.rx[6] == Point(x=9, y=5)
 
 
-def test_layout_v1_snaps_to_half_lambda_grid_and_accepts_legacy_unit() -> None:
+def test_layout_v1_keeps_exact_coordinates_and_accepts_legacy_unit() -> None:
     layout = layout_from_v1(
         {
             "version": 1,
@@ -53,8 +53,9 @@ def test_layout_v1_snaps_to_half_lambda_grid_and_accepts_legacy_unit() -> None:
         }
     )
 
-    assert layout.tx[0] == Point(x=1.5, y=-0.5)
-    assert layout.rx[0] == Point(x=0.0, y=0.0)
+    # Real layouts are not always on the λ/2 grid; import must not move antennas.
+    assert layout.tx[0] == Point(x=1.5, y=-0.6)
+    assert layout.rx[0] == Point(x=0.2, y=0.0)
 
 
 @pytest.mark.parametrize(

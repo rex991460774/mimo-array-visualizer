@@ -12,6 +12,7 @@ only in :func:`project_array`.
 
 from __future__ import annotations
 
+import contextlib
 import math
 from typing import Any, Literal
 
@@ -43,6 +44,18 @@ AUTO_LAYOUT_TX_Y_LAMBDA = 2.0
 AUTO_LAYOUT_RX_Y_LAMBDA = -2.0
 COORDINATE_LIMIT_LAMBDA = 500.0
 LIGHT_SPEED_MM_PER_NS = 299.792458
+GRID_STEPS_LAMBDA = (0.5, 0.25, 0.125, 0.0)
+DEFAULT_AZIMUTH_FOV = (-75, 75)
+DEFAULT_ELEVATION_FOV = (-15, 15)
+
+# FMCW radar band presets: sweep range and the design (λ reference) frequency.
+# 92 GHz has no single harmonised allocation; the 90–94 GHz default is a
+# placeholder that projects should overwrite with their chip's sweep range.
+BAND_PRESETS: dict[str, dict[str, float]] = {
+    "60G": {"start_ghz": 57.0, "stop_ghz": 64.0, "design_ghz": 60.0},
+    "77G": {"start_ghz": 76.0, "stop_ghz": 81.0, "design_ghz": 77.0},
+    "92G": {"start_ghz": 90.0, "stop_ghz": 94.0, "design_ghz": 92.0},
+}
 
 LAYOUT_UNITS_LAMBDA = {"lambda", "λ"}
 LEGACY_LAYOUT_UNITS_HALF_LAMBDA = {"lambda/2", "λ/2"}
@@ -119,15 +132,79 @@ class ChannelPatternBinding(_Model):
     column: str = ""
 
 
+class Band(_Model):
+    """FMCW sweep range of the radar the array is designed for."""
+
+    preset: Literal["60G", "77G", "92G", "custom"] = "77G"
+    start_ghz: float = Field(default=76.0, gt=0.0, le=1000.0)
+    stop_ghz: float = Field(default=81.0, gt=0.0, le=1000.0)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> Band:
+        if self.start_ghz >= self.stop_ghz:
+            raise ValueError("Band start frequency must be below the stop frequency.")
+        return self
+
+
+class FieldOfView(_Model):
+    """Angular coverage the radar must serve; bounds all angle evaluations."""
+
+    azimuth: tuple[int, int] = DEFAULT_AZIMUTH_FOV
+    elevation: tuple[int, int] = DEFAULT_ELEVATION_FOV
+
+    @field_validator("azimuth", "elevation")
+    @classmethod
+    def _contains_boresight(cls, value: tuple[int, int]) -> tuple[int, int]:
+        low, high = value
+        if not (-90 <= low < 0 < high <= 90):
+            raise ValueError("FOV must satisfy -90 <= start < 0 < stop <= 90 degrees.")
+        return value
+
+
+class Requirements(_Model):
+    """Optional pass/fail targets; ``None`` means not checked."""
+
+    azimuth_resolution_deg: float | None = Field(default=None, gt=0.0, le=180.0)
+    elevation_resolution_deg: float | None = Field(default=None, gt=0.0, le=180.0)
+    azimuth_unambiguous_fov: bool = True
+    elevation_unambiguous_fov: bool = True
+    max_abs_error_deg: float | None = Field(default=None, gt=0.0, le=90.0)
+    min_peak_margin_db: float | None = Field(default=None, ge=0.0, le=60.0)
+    max_psl_db: float | None = Field(default=None, le=0.0, ge=-80.0)
+
+
 class Project(_Model):
     version: int = PROJECT_SCHEMA_VERSION
     name: str = Field(default="未命名阵列", max_length=120)
+    # Design frequency: the layout's λ is defined at this frequency.
     frequency_ghz: float = Field(default=DEFAULT_FREQUENCY_GHZ, gt=0.0, le=1000.0)
     ambiguity_margin_db: float = Field(default=DEFAULT_AMBIGUITY_MARGIN_DB, ge=0.0, le=60.0)
+    band: Band = Field(default_factory=Band)
+    fov: FieldOfView = Field(default_factory=FieldOfView)
+    grid_step_lambda: float = 0.5
+    requirements: Requirements = Field(default_factory=Requirements)
     layout: Layout
     dbf_dictionary: DictionarySettings = Field(default_factory=DictionarySettings)
     element_pattern: ElementPatternSettings | None = None
     channel_patterns: list[ChannelPatternBinding] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _infer_band(cls, data: Any) -> Any:
+        # Documents written before bands existed: pick the preset containing
+        # the design frequency instead of silently defaulting to 77 GHz.
+        if isinstance(data, dict) and "band" not in data:
+            frequency = data.get("frequency_ghz", DEFAULT_FREQUENCY_GHZ)
+            with contextlib.suppress(TypeError, ValueError):
+                data = {**data, "band": band_for_frequency(float(frequency)).model_dump()}
+        return data
+
+    @field_validator("grid_step_lambda")
+    @classmethod
+    def _known_grid(cls, value: float) -> float:
+        if value not in GRID_STEPS_LAMBDA:
+            raise ValueError(f"grid_step_lambda must be one of {GRID_STEPS_LAMBDA}.")
+        return value
 
     @property
     def tx_names(self) -> list[str]:
@@ -159,19 +236,39 @@ class Project(_Model):
         return ids
 
 
+def band_for_frequency(frequency_ghz: float) -> Band:
+    """The preset whose sweep contains the frequency, else a ±2.5% custom band."""
+    for name, preset in BAND_PRESETS.items():
+        if preset["start_ghz"] <= frequency_ghz <= preset["stop_ghz"]:
+            return Band(preset=name, start_ghz=preset["start_ghz"], stop_ghz=preset["stop_ghz"])
+    return Band(
+        preset="custom",
+        start_ghz=round(frequency_ghz * 0.975, 3),
+        stop_ghz=round(frequency_ghz * 1.025, 3),
+    )
+
+
 def snap_lambda(value: float) -> float:
     """Snap a λ coordinate to the λ/2 editor grid."""
     return round(value / GRID_STEP_LAMBDA) * GRID_STEP_LAMBDA + 0.0
 
 
-def project_array(project: Project) -> AntennaArray:
-    """Build the core array (λ/2 units) from a project."""
+def project_array(project: Project, operating_frequency_ghz: float | None = None) -> AntennaArray:
+    """Build the core array (λ/2 units) from a project.
+
+    The layout is physical: its λ is defined at the design frequency.  At an
+    operating frequency ``f`` the electrical positions scale by ``f / f_design``
+    (the antennas do not move, the wavelength does).
+    """
+    scale = HALF_LAMBDA_PER_LAMBDA
+    if operating_frequency_ghz is not None:
+        scale *= float(operating_frequency_ghz) / project.frequency_ghz
     tx = [
-        ArrayPoint(name=name, x=point.x * HALF_LAMBDA_PER_LAMBDA, y=point.y * HALF_LAMBDA_PER_LAMBDA)
+        ArrayPoint(name=name, x=point.x * scale, y=point.y * scale)
         for name, point in zip(project.tx_names, project.layout.tx)
     ]
     rx = [
-        ArrayPoint(name=name, x=point.x * HALF_LAMBDA_PER_LAMBDA, y=point.y * HALF_LAMBDA_PER_LAMBDA)
+        ArrayPoint(name=name, x=point.x * scale, y=point.y * scale)
         for name, point in zip(project.rx_names, project.layout.rx)
     ]
     return AntennaArray(tx=tx, rx=rx)
@@ -200,7 +297,7 @@ def default_project() -> Project:
 
     scale = 1.0 / HALF_LAMBDA_PER_LAMBDA
     return Project(
-        name="Case4 8T8R",
+        name="Case4 8T8R 77G",
         layout=Layout(
             tx=[Point(x=x * scale, y=y * scale) for x, y in zip(TX_X, TX_Y)],
             rx=[Point(x=x * scale, y=y * scale) for x, y in zip(RX_X, RX_Y)],
@@ -212,7 +309,9 @@ def layout_from_v1(config: Any) -> Layout:
     """Parse a desktop-tool layout JSON (version 1) into a layout.
 
     Element names in the file are ignored: channels are numbered by list
-    order, exactly as the desktop importer did.
+    order, exactly as the desktop importer did.  Coordinates are kept as
+    given (the desktop importer snapped them to λ/2, which silently moved
+    off-grid antennas of real layouts).
     """
     if not isinstance(config, dict):
         raise ValueError("Layout config must be a JSON object.")
@@ -237,8 +336,8 @@ def layout_from_v1(config: Any) -> Layout:
             if not isinstance(raw_point, dict):
                 raise ValueError(f"{kind}[{index}] must be an object.")
             try:
-                x = snap_lambda(float(raw_point["x"]) * scale)
-                y = snap_lambda(float(raw_point["y"]) * scale)
+                x = _clean(float(raw_point["x"]) * scale)
+                y = _clean(float(raw_point["y"]) * scale)
                 parsed.append(Point(x=x, y=y))
             except KeyError as exc:
                 raise ValueError(f"{kind}[{index}] is missing coordinate {exc}.") from exc
@@ -262,6 +361,7 @@ def project_from_document(document: Any) -> Project:
             updates: dict[str, Any] = {}
             if frequency is not None and frequency > 0:
                 updates["frequency_ghz"] = frequency
+                updates["band"] = band_for_frequency(frequency)
             if margin is not None and margin >= 0:
                 updates["ambiguity_margin_db"] = margin
             if updates:
@@ -289,6 +389,11 @@ def layout_to_v1(project: Project, evaluation: dict[str, Any] | None = None) -> 
     if evaluation is not None:
         document["evaluation"] = evaluation
     return document
+
+
+def _clean(value: float) -> float:
+    rounded = round(value, 9)
+    return 0.0 if rounded == 0 else rounded
 
 
 def json_number(value: float | None, digits: int = 6) -> float | int | None:
@@ -325,7 +430,11 @@ __all__ = [
     "DBF_DICT_CUSTOM",
     "DBF_DICT_IDEAL",
     "DBF_DICT_IDEAL_REVERSED",
+    "BAND_PRESETS",
+    "Band",
     "ChannelPatternBinding",
+    "FieldOfView",
+    "Requirements",
     "DictionarySettings",
     "ElementPatternSettings",
     "Layout",

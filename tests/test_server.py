@@ -12,8 +12,9 @@ from fastapi.testclient import TestClient
 
 from virtual_array.analysis import (
     Dbf2dScanner,
+    EvaluationSettings,
     dbf_2d_spectrum,
-    dbf_azimuth_spectrum_bank,
+    evaluate_dbf_axis,
 )
 from virtual_array.element_pattern import (
     PATTERN_KIND_PHASE,
@@ -166,12 +167,13 @@ def test_evaluate_rejects_invalid_project(client, project) -> None:
 def test_dbf_bank_matches_core_computation(client, project) -> None:
     result = client.post("/api/dbf/bank", json={"project": project, "axis": "azimuth"}).json()
 
-    _true, _scan, expected = dbf_azimuth_spectrum_bank(build_array())
+    expected = evaluate_dbf_axis(build_array(), "azimuth", EvaluationSettings())
     spectra = decode(result["spectra_db"])
-    assert spectra.shape == (181, 181)
-    assert np.allclose(spectra, expected, atol=1e-4)
-    assert len(result["frames"]["errors"]) == 181
-    assert result["frames"]["quality"][90] == "normal"
+    # Default FOV ±75° (true angles) with a 10° search guard (scan ±85°).
+    assert spectra.shape == (151, 171)
+    assert np.allclose(spectra, expected.spectra_db, atol=1e-4)
+    assert len(result["frames"]["errors"]) == 151
+    assert result["frames"]["quality"][75] == "normal"
 
 
 def test_dbf_2d_returns_frames(client, project) -> None:
@@ -182,7 +184,8 @@ def test_dbf_2d_returns_frames(client, project) -> None:
 
     assert response.status_code == 200
     frame = response.json()["frames"][0]
-    assert decode(frame["spectrum_db"]).shape == (181, 181)
+    # Scan grid: azimuth ±85°, elevation ±25° (FOV plus search guard).
+    assert decode(frame["spectrum_db"]).shape == (51, 171)
     assert frame["peak_azimuth"] == pytest.approx(10.0)
 
 
@@ -291,7 +294,7 @@ def test_custom_dictionary_preview_and_mismatch_error(client) -> None:
 
     assert preview["channel_count"] == 6
     assert preview["tables"]["azimuth"]["channel_mode"] == "virtual"
-    assert decode(preview["phase_deg"]).shape == (181, 6)
+    assert decode(preview["phase_deg"]).shape == (171, 6)
     assert mismatch.status_code == 422
     assert "virtual channel" in mismatch.json()["detail"]
 
@@ -396,3 +399,119 @@ def test_report_rejects_invalid_options(client) -> None:
 
     assert response.status_code == 422
     assert client.get("/api/jobs/" + "f" * 32).status_code == 404
+
+
+# ── Radar-band evaluation ────────────────────────────────────────────
+
+
+def test_config_exposes_band_presets(client) -> None:
+    presets = client.get("/api/config").json()["band_presets"]
+    assert presets["60G"] == {"start_ghz": 57.0, "stop_ghz": 64.0, "design_ghz": 60.0}
+    assert set(presets) == {"60G", "77G", "92G"}
+
+
+def test_evaluate_reports_measured_resolution_fov_and_requirements(client, project) -> None:
+    project["requirements"] = {"azimuth_resolution_deg": 1.5, "max_psl_db": -10}
+
+    result = client.post("/api/evaluate", json={"project": project}).json()
+
+    assert result["fov"] == {"azimuth": [-75, 75], "elevation": [-15, 15]}
+    assert result["resolution"]["azimuth"]["measured"] == pytest.approx(1.72, abs=0.01)
+    assert result["resolution"]["azimuth"]["estimate"] == pytest.approx(1.354, abs=0.01)
+    # case4 elevation virtual spacing is λ, but the ±15° FOV is unambiguous.
+    assert result["angle"]["elevation"]["no_fold_left"] == -15
+    statuses = {(c["key"], c["axis"]): c["status"] for c in result["requirements"]}
+    assert statuses[("resolution", "azimuth")] == "fail"
+    assert statuses[("unambiguous_fov", "azimuth")] == "pass"
+    assert statuses[("unambiguous_fov", "elevation")] == "pass"
+    assert statuses[("psl", None)] == "fail"
+    assert "resolution_optimistic" in result["notes"]
+
+
+def test_dbf_bank_is_bounded_by_fov_with_search_guard(client, project) -> None:
+    project["fov"] = {"azimuth": [-60, 60], "elevation": [-20, 20]}
+
+    result = client.post("/api/dbf/bank", json={"project": project, "axis": "azimuth"}).json()
+
+    assert result["true_angles"][0] == -60 and result["true_angles"][-1] == 60
+    assert result["scan_angles"][0] == -70 and result["scan_angles"][-1] == 70
+    assert decode(result["spectra_db"]).shape == (121, 141)
+    assert max(abs(e) for e in result["frames"]["errors"]) < 0.01
+
+
+def test_layout_checks_flag_overlapping_antennas(client) -> None:
+    project = small_project()
+    project["layout"]["rx"][1] = {"x": 0.25, "y": -2}
+    project["layout"]["tx"][1] = {"x": 0, "y": 0}
+
+    checks = client.post("/api/evaluate", json={"project": project}).json()["layout_checks"]
+
+    assert checks[0]["code"] == "coincident"
+    assert {checks[0]["a"], checks[0]["b"]} == {"Tx1", "Tx2"}
+    assert any(c["code"] == "too_close" and c["distance_lambda"] == 0.25 for c in checks)
+
+
+def test_band_sweep_scales_electrical_spacing_with_frequency(client) -> None:
+    project = default_project().model_dump(mode="json")
+    project["frequency_ghz"] = 60.0
+    project["band"] = {"preset": "60G", "start_ghz": 57.0, "stop_ghz": 64.0}
+    project["fov"] = {"azimuth": [-90, 90], "elevation": [-15, 15]}
+    # λ/2 ULA at 60 GHz: unambiguous over ±90° only up to the design frequency.
+    project["layout"] = {
+        "tx": [{"x": 0, "y": 0}, {"x": 2, "y": 0}],
+        "rx": [{"x": 0, "y": 0}, {"x": 0.5, "y": 0}, {"x": 1, "y": 0}, {"x": 1.5, "y": 0}],
+    }
+
+    sweep = client.post("/api/band", json={"project": project}).json()
+
+    assert [p["frequency_ghz"] for p in sweep["points"]] == [57.0, 60.0, 64.0]
+    assert [p["role"] for p in sweep["points"]] == ["start", "design", "stop"]
+    resolution = [p["resolution"]["azimuth"]["value"] for p in sweep["points"]]
+    assert resolution[0] > resolution[1] > resolution[2]
+    width_at_stop = sweep["points"][2]["angle"]["azimuth"]["no_fold_width"]
+    width_at_design = sweep["points"][1]["angle"]["azimuth"]["no_fold_width"]
+    assert width_at_stop < width_at_design
+
+
+def test_compare_summarises_several_projects(client, project) -> None:
+    other = small_project()
+    other["name"] = "small"
+
+    result = client.post("/api/compare", json={"projects": [project, other]}).json()
+
+    assert [item["name"] for item in result] == [project["name"], "small"]
+    assert result[0]["tx_count"] == 8 and result[1]["tx_count"] == 2
+    assert result[0]["error"] is None
+    assert client.post("/api/compare", json={"projects": []}).status_code == 422
+
+
+def test_legacy_document_infers_band_from_frequency(client) -> None:
+    project = default_project().model_dump(mode="json")
+    project.pop("band")
+    project["frequency_ghz"] = 60.5
+
+    imported = client.post("/api/import/document", json={"document": project}).json()
+
+    assert imported["project"]["band"]["preset"] == "60G"
+
+
+def test_report_includes_fov_and_requirement_rows(client) -> None:
+    project = small_project()
+    project["requirements"] = {"azimuth_resolution_deg": 30}
+    job = client.post(
+        "/api/reports",
+        json={"project": project, "options": {"title": "fov report", "include_raw_data": True}},
+    ).json()
+
+    status = wait_for_job(client, job)
+    download = client.get(f"/api/jobs/{job['id']}/download")
+
+    assert status["status"] == "succeeded", status
+    with zipfile.ZipFile(io.BytesIO(download.content)) as archive:
+        manifest_name = next(n for n in archive.namelist() if n.endswith("report_manifest.json"))
+        import json
+
+        manifest = json.loads(archive.read(manifest_name))
+    assert manifest["array_factor_fov"]["azimuth_deg"] == [-75.0, 75.0]
+    assert manifest["dbf_scan"]["search_guard_deg"] == 10.0
+    assert manifest["requirement_checks"][0]["key"] == "resolution"

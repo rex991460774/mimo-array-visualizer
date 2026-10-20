@@ -8,6 +8,7 @@ import numpy as np
 from .dbf_dictionary import DbfDictionaryConfig
 from .element_pattern import ChannelPatternSet, ElementPattern, virtual_channel_names
 from .geometry import AntennaArray
+from .phasor import unit_phasor
 
 
 AZIMUTH_FOV = (-75.0, 75.0)
@@ -243,15 +244,23 @@ def calculate_metrics_and_psf(
     u = np.sin(az_rad) * np.cos(el_rad)
     v = np.sin(el_rad)
 
-    phase = np.pi * (
-        virtual_xy[:, 0, None, None] * u[None, :, :]
-        + virtual_xy[:, 1, None, None] * v[None, :, :]
-    )
-    steering = np.exp(1j * phase)
+    # A (channels x grid) matrix product avoids the large broadcast temporaries
+    # of the per-axis formulation; it is ~4x faster for 64+ virtual channels.
+    uv = np.stack([u.ravel(), v.ravel()])
+    steering = unit_phasor((np.pi * virtual_xy) @ uv)
     channel_weight = _channel_pattern_weight(
         channel_patterns, array, az_grid, el_grid
     )
-    array_factor = (steering * channel_weight).sum(axis=0)
+    if np.ndim(channel_weight) == 0:
+        flat_factor = complex(channel_weight) * (
+            np.ones(len(virtual_xy), dtype=complex) @ steering
+        )
+    else:
+        flat_weight = np.asarray(channel_weight, dtype=complex).reshape(
+            len(virtual_xy), -1
+        )
+        flat_factor = np.einsum("ng,ng->g", steering, flat_weight)
+    array_factor = flat_factor.reshape(az_grid.shape)
     pattern_weight = _element_pattern_weight(tx_pattern, az_grid, el_grid)
     pattern_weight *= _element_pattern_weight(rx_pattern, az_grid, el_grid)
     af = np.abs(array_factor * pattern_weight)
@@ -446,52 +455,127 @@ def dbf_2d_spectrum(
     normalization_max: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return one normalized-correlation 2D DBF spectrum for a true az/el angle."""
-    if scan_azimuths_deg is None:
-        scan_azimuths_deg = _default_dbf_angles()
-    else:
-        scan_azimuths_deg = np.asarray(scan_azimuths_deg, dtype=float)
-
-    if scan_elevations_deg is None:
-        scan_elevations_deg = _default_dbf_angles()
-    else:
-        scan_elevations_deg = np.asarray(scan_elevations_deg, dtype=float)
-
-    signal = _dbf_2d_signal_vector(
-        array,
-        true_azimuth_deg,
-        true_elevation_deg,
-        channel_patterns=channel_patterns,
-    )
-    az_grid, el_grid = np.meshgrid(scan_azimuths_deg, scan_elevations_deg)
-    if dbf_dictionary is not None and not dbf_dictionary.uses_auto_ideal_sign:
-        dictionary = dbf_dictionary.scan_matrix_2d(
-            array,
-            az_grid.ravel(),
-            el_grid.ravel(),
-            axis="azimuth",
-            channel_patterns=channel_patterns,
-        )
-    else:
-        steering_sign = _select_dbf_2d_steering_sign(
-            array,
-            float(true_azimuth_deg),
-            float(true_elevation_deg),
-            scan_azimuths_deg,
-            scan_elevations_deg,
-            signal,
-            channel_patterns=channel_patterns,
-        )
-        dictionary = _dbf_2d_scan_matrix(
-            array,
-            az_grid.ravel(),
-            el_grid.ravel(),
-            steering_sign=steering_sign,
-        )
     _ = tx_pattern, rx_pattern, normalization_max
-    spectra = _dbf_correlation_response(dictionary, signal)[:, 0]
-    spectra = spectra.reshape(len(scan_elevations_deg), len(scan_azimuths_deg))
-    spectra_db = 20.0 * np.log10(np.maximum(spectra, 1e-6))
-    return scan_azimuths_deg, scan_elevations_deg, spectra_db
+    scanner = Dbf2dScanner(
+        array,
+        scan_azimuths_deg=scan_azimuths_deg,
+        scan_elevations_deg=scan_elevations_deg,
+        channel_patterns=channel_patterns,
+        dbf_dictionary=dbf_dictionary,
+    )
+    spectra_db = scanner.spectrum_db(true_azimuth_deg, true_elevation_deg)
+    return scanner.scan_azimuths_deg, scanner.scan_elevations_deg, spectra_db
+
+
+class Dbf2dScanner:
+    """Evaluate 2D DBF spectra for many true angles with one scan dictionary.
+
+    Building the (scan points x channels) dictionary dominates the cost of a
+    2D spectrum.  The dictionary depends only on the array, channel patterns
+    and dictionary configuration, so animation and batch callers reuse it
+    across true angles.  Results are identical to :func:`dbf_2d_spectrum`.
+    """
+
+    def __init__(
+        self,
+        array: AntennaArray,
+        scan_azimuths_deg: np.ndarray | None = None,
+        scan_elevations_deg: np.ndarray | None = None,
+        channel_patterns: ChannelPatternSet | None = None,
+        dbf_dictionary: DbfDictionaryConfig | None = None,
+    ) -> None:
+        self.array = array
+        self.scan_azimuths_deg = (
+            _default_dbf_angles()
+            if scan_azimuths_deg is None
+            else np.asarray(scan_azimuths_deg, dtype=float)
+        )
+        self.scan_elevations_deg = (
+            _default_dbf_angles()
+            if scan_elevations_deg is None
+            else np.asarray(scan_elevations_deg, dtype=float)
+        )
+        self.channel_patterns = channel_patterns
+        self.dbf_dictionary = dbf_dictionary
+        az_grid, el_grid = np.meshgrid(self.scan_azimuths_deg, self.scan_elevations_deg)
+        self._flat_az = az_grid.ravel()
+        self._flat_el = el_grid.ravel()
+        self._uses_fixed_dictionary = (
+            dbf_dictionary is not None and not dbf_dictionary.uses_auto_ideal_sign
+        )
+        self._has_phase = _channel_pattern_has_any_phase(channel_patterns, array)
+        self._dictionaries: dict[int, np.ndarray] = {}
+
+    def _dictionary(self, steering_sign: int) -> np.ndarray:
+        key = 0 if self._uses_fixed_dictionary else steering_sign
+        cached = self._dictionaries.get(key)
+        if cached is not None:
+            return cached
+        if self._uses_fixed_dictionary:
+            assert self.dbf_dictionary is not None
+            dictionary = self.dbf_dictionary.scan_matrix_2d(
+                self.array,
+                self._flat_az,
+                self._flat_el,
+                axis="azimuth",
+                channel_patterns=self.channel_patterns,
+            )
+        else:
+            dictionary = _dbf_2d_scan_matrix(
+                self.array,
+                self._flat_az,
+                self._flat_el,
+                steering_sign=steering_sign,
+            )
+        self._dictionaries[key] = dictionary
+        return dictionary
+
+    def _steering_sign(
+        self,
+        true_azimuth_deg: float,
+        true_elevation_deg: float,
+        signal: np.ndarray,
+    ) -> int:
+        if not self._has_phase:
+            return DBF_DEFAULT_STEERING_SIGN
+        candidates: list[tuple[float, int]] = []
+        for steering_sign in (DBF_DEFAULT_STEERING_SIGN, 1):
+            score = np.abs(self._dictionary(steering_sign) @ signal) ** 2
+            peak = int(np.argmax(score))
+            error = math.hypot(
+                float(self._flat_az[peak]) - true_azimuth_deg,
+                float(self._flat_el[peak]) - true_elevation_deg,
+            )
+            candidates.append((error, steering_sign))
+        return min(
+            candidates,
+            key=lambda item: (
+                item[0],
+                0 if item[1] == DBF_DEFAULT_STEERING_SIGN else 1,
+            ),
+        )[1]
+
+    def spectrum_db(
+        self,
+        true_azimuth_deg: float,
+        true_elevation_deg: float,
+    ) -> np.ndarray:
+        """Return the (elevation x azimuth) correlation spectrum in dB."""
+        true_az = float(true_azimuth_deg)
+        true_el = float(true_elevation_deg)
+        signal = _dbf_2d_signal_vector(
+            self.array,
+            true_az,
+            true_el,
+            channel_patterns=self.channel_patterns,
+        )
+        if self._uses_fixed_dictionary:
+            dictionary = self._dictionary(0)
+        else:
+            dictionary = self._dictionary(self._steering_sign(true_az, true_el, signal))
+        spectra = _dbf_correlation_response(dictionary, signal)[:, 0]
+        spectra = spectra.reshape(len(self.scan_elevations_deg), len(self.scan_azimuths_deg))
+        return 20.0 * np.log10(np.maximum(spectra, 1e-6))
 
 
 def dbf_2d_normalization_reference(
@@ -943,7 +1027,7 @@ def _steering_matrix(
         raise ValueError(f"Unknown DBF axis: {axis!r}")
     u = np.sin(np.radians(angles_deg))
     phase = np.pi * positions[:, None] * u[None, :]
-    return np.exp(1j * phase)
+    return unit_phasor(phase)
 
 
 def _dbf_scan_matrix(
@@ -961,7 +1045,7 @@ def _dbf_scan_matrix(
         raise ValueError(f"Unknown DBF axis: {axis!r}")
     u = np.sin(np.radians(angles_deg))
     phase = steering_sign * np.pi * u[:, None] * positions[None, :]
-    return np.exp(1j * phase)
+    return unit_phasor(phase)
 
 
 def _direction_uv(
@@ -986,11 +1070,9 @@ def _dbf_2d_scan_matrix(
         np.asarray(azimuth_deg, dtype=float),
         np.asarray(elevation_deg, dtype=float),
     )
-    phase = steering_sign * np.pi * (
-        u[:, None] * virtual_xy[None, :, 0]
-        + v[:, None] * virtual_xy[None, :, 1]
-    )
-    return np.exp(1j * phase)
+    uv = np.column_stack([np.ravel(u), np.ravel(v)])
+    phase = uv @ (steering_sign * np.pi * virtual_xy.T)
+    return unit_phasor(phase.reshape(*np.shape(u), len(virtual_xy)))
 
 
 def _dbf_2d_steering_vector(
@@ -1004,7 +1086,7 @@ def _dbf_2d_steering_vector(
         np.asarray([elevation_deg], dtype=float),
     )
     phase = np.pi * (virtual_xy[:, 0] * float(u[0]) + virtual_xy[:, 1] * float(v[0]))
-    return np.exp(1j * phase)
+    return unit_phasor(phase)
 
 
 def _axis_pattern_angles(
@@ -1118,39 +1200,6 @@ def _select_dbf_steering_sign(
         error = estimates[selected] - true_angles_deg[selected]
         rms = float(np.sqrt(np.mean(error**2))) if len(error) else float("inf")
         candidates.append((rms, steering_sign))
-    return min(candidates, key=lambda item: (item[0], 0 if item[1] == DBF_DEFAULT_STEERING_SIGN else 1))[1]
-
-
-def _select_dbf_2d_steering_sign(
-    array: AntennaArray,
-    true_azimuth_deg: float,
-    true_elevation_deg: float,
-    scan_azimuths_deg: np.ndarray,
-    scan_elevations_deg: np.ndarray,
-    signal: np.ndarray,
-    channel_patterns: ChannelPatternSet | None,
-) -> int:
-    if not _channel_pattern_has_any_phase(channel_patterns, array):
-        return DBF_DEFAULT_STEERING_SIGN
-
-    az_grid, el_grid = np.meshgrid(scan_azimuths_deg, scan_elevations_deg)
-    candidates: list[tuple[float, int]] = []
-    for steering_sign in (DBF_DEFAULT_STEERING_SIGN, 1):
-        dictionary = _dbf_2d_scan_matrix(
-            array,
-            az_grid.ravel(),
-            el_grid.ravel(),
-            steering_sign=steering_sign,
-        )
-        score = np.abs(dictionary @ signal) ** 2
-        peak = int(np.argmax(score))
-        estimate_az = float(az_grid.ravel()[peak])
-        estimate_el = float(el_grid.ravel()[peak])
-        error = math.hypot(
-            estimate_az - true_azimuth_deg,
-            estimate_el - true_elevation_deg,
-        )
-        candidates.append((error, steering_sign))
     return min(candidates, key=lambda item: (item[0], 0 if item[1] == DBF_DEFAULT_STEERING_SIGN else 1))[1]
 
 

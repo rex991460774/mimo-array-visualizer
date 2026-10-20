@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 
 from virtual_array.logging_config import (
     LOG_FILE_NAME,
@@ -13,10 +14,11 @@ from virtual_array.logging_config import (
 
 
 def test_default_log_dir_uses_appdata(monkeypatch) -> None:
-    monkeypatch.setenv("APPDATA", r"C:\Users\tester\AppData\Roaming")
+    appdata = r"C:\Users\tester\AppData\Roaming"
+    monkeypatch.setenv("APPDATA", appdata)
     monkeypatch.delenv("ANTENNA_ARRAY_LOG_DIR", raising=False)
 
-    assert str(default_log_dir()).endswith(r"antenna-array\logs")
+    assert default_log_dir() == Path(appdata) / "antenna-array" / "logs"
 
 
 def test_env_override_controls_log_dir(monkeypatch, tmp_path) -> None:

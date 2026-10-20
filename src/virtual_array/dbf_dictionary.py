@@ -9,6 +9,7 @@ import numpy as np
 
 from .element_pattern import ChannelPatternSet, virtual_channel_names
 from .geometry import AntennaArray
+from .phasor import unit_phasor
 from .table_io import read_xlsx_rows
 
 
@@ -770,7 +771,7 @@ def _ideal_scan_matrix(
         u[:, None] * virtual_xy[None, :, 0]
         + v[:, None] * virtual_xy[None, :, 1]
     )
-    return np.exp(1j * phase)
+    return unit_phasor(phase)
 
 
 def _channel_pattern_response(

@@ -1330,6 +1330,11 @@ select.input {
   :root {
     --overview-width: 280px;
   }
+
+  /* Secondary actions go icon-only (they keep tooltips); the report stays labelled. */
+  .topbar-actions .btn.ghost .btn-label {
+    display: none;
+  }
 }
 
 @media (max-width: 980px) {

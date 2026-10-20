@@ -11,6 +11,7 @@ import {
   HelpCircle,
   ImageDown,
   Languages,
+  Link2,
   LineChart,
   Map as MapIcon,
   Monitor,
@@ -90,7 +91,7 @@ export function TopBar() {
       </div>
       <div className="topbar-spacer" />
       <div className="topbar-actions">
-        <Button variant="ghost" icon={<FolderOpen size={16} />} onClick={() => openDialog("projects")}>
+        <Button variant="ghost" icon={<FolderOpen size={16} />} onClick={() => openDialog("projects")} title={t("menu.projects")}>
           <span className="btn-label">{t("menu.projects")}</span>
         </Button>
         <Button variant="ghost" icon={<Save size={16} />} onClick={() => saveProject()} title={`${t("menu.save")} (Ctrl+S)`}>
@@ -98,7 +99,7 @@ export function TopBar() {
         </Button>
         <Menu
           trigger={({ toggle }) => (
-            <Button variant="ghost" icon={<Upload size={16} />} onClick={toggle}>
+            <Button variant="ghost" icon={<Upload size={16} />} onClick={toggle} title={t("menu.import")}>
               <span className="btn-label">{t("menu.import")}</span>
               <ChevronDown size={14} />
             </Button>
@@ -117,7 +118,7 @@ export function TopBar() {
         </Menu>
         <Menu
           trigger={({ toggle }) => (
-            <Button variant="ghost" icon={angleImage.running ? <Spinner /> : <Download size={16} />} onClick={toggle}>
+            <Button variant="ghost" icon={angleImage.running ? <Spinner /> : <Download size={16} />} onClick={toggle} title={t("menu.export")}>
               <span className="btn-label">{t("menu.export")}</span>
               <ChevronDown size={14} />
             </Button>
@@ -145,6 +146,9 @@ export function TopBar() {
             </>
           )}
         </Menu>
+        <Button variant="ghost" icon={<Link2 size={16} />} onClick={() => openDialog("share")} title={t("menu.shareTitle")}>
+          <span className="btn-label">{t("menu.share")}</span>
+        </Button>
         <Button variant="primary" icon={<FileText size={15} />} onClick={() => openDialog("report")}>
           <span className="btn-label">{t("menu.report")}</span>
         </Button>

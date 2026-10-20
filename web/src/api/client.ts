@@ -18,6 +18,8 @@ import type {
   ProjectRecord,
   ProjectSummary,
   ReportOptions,
+  ShareCreated,
+  ShareRecord,
   ServerConfig,
 } from "./types";
 
@@ -125,6 +127,8 @@ export const api = {
       body: JSON.stringify({ project }),
     }),
   deleteProject: (id: string) => request<void>(`/api/projects/${id}`, { method: "DELETE" }),
+  createShare: (project: Project) => post<ShareCreated>("/api/shares", { project }),
+  getShare: (id: string) => request<ShareRecord>(`/api/shares/${encodeURIComponent(id)}`),
   createReport: (project: Project, options: ReportOptions) =>
     post<Job>("/api/reports", { project, options }),
   createAngleErrorImage: (project: Project, error_limit_deg: number, language: string) =>

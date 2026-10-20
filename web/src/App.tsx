@@ -5,7 +5,7 @@ import { ControlBar, StatusBar, TopBar } from "./components/Chrome";
 import { Overview } from "./components/Overview";
 import { Button, Spinner, useFilePicker } from "./components/ui";
 import { translate, useT } from "./i18n";
-import { exportLayout, importFile, saveProject } from "./state/actions";
+import { exportLayout, importFile, openShareFromLocation, saveProject } from "./state/actions";
 import { useEvaluationSync } from "./state/compute";
 import { type ThemeMode, useStore, type ViewId } from "./state/store";
 import { ArrayView } from "./views/ArrayView";
@@ -19,6 +19,7 @@ const ReportDialog = lazy(() => import("./dialogs/ReportDialog").then((m) => ({ 
 const ProjectsDialog = lazy(() => import("./dialogs/ProjectsDialog").then((m) => ({ default: m.ProjectsDialog })));
 const SettingsDialog = lazy(() => import("./dialogs/SettingsDialog").then((m) => ({ default: m.SettingsDialog })));
 const BandView = lazy(() => import("./views/BandView").then((m) => ({ default: m.BandView })));
+const ShareDialog = lazy(() => import("./dialogs/ShareDialog").then((m) => ({ default: m.ShareDialog })));
 const HelpDialog = lazy(() => import("./dialogs/HelpDialog").then((m) => ({ default: m.HelpDialog })));
 
 const VIEW_KEYS: Record<string, ViewId> = { "1": "array", "2": "dbf1d", "3": "dbf2d", "4": "angle", "5": "band" };
@@ -101,8 +102,9 @@ function Boot({ onReady }: { onReady: () => void }) {
   const load = useCallback(() => {
     setFailed(false);
     api.config().then(
-      (config) => {
+      async (config) => {
         useStore.getState().initialize(config);
+        await openShareFromLocation();
         onReady();
       },
       () => setFailed(true),
@@ -167,6 +169,7 @@ function Workbench() {
         {dialog === "projects" && <ProjectsDialog onClose={close} />}
         {dialog === "help" && <HelpDialog onClose={close} />}
         {dialog === "settings" && <SettingsDialog onClose={close} />}
+        {dialog === "share" && <ShareDialog onClose={close} />}
       </Suspense>
     </div>
   );

@@ -8,7 +8,7 @@ export type Language = "zh" | "en" | "ja";
 export type ThemeMode = "system" | "light" | "dark";
 export type DisplayMode = "db" | "magnitude";
 export type CoordUnit = "lambda" | "mm";
-export type DialogId = "dictionary" | "patterns" | "report" | "projects" | "help" | "settings" | null;
+export type DialogId = "dictionary" | "patterns" | "report" | "projects" | "help" | "settings" | "share" | null;
 
 export interface StatusMessage {
   key: MessageKey;

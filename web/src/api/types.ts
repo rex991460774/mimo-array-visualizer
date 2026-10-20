@@ -330,6 +330,17 @@ export interface ImportResult {
   missing_assets: string[];
 }
 
+export interface ShareCreated {
+  id: string;
+  created_at: string;
+  path: string;
+}
+
+export interface ShareRecord extends ImportResult {
+  id: string;
+  created_at: string;
+}
+
 export interface Job {
   id: string;
   kind: "report" | "angle_image";

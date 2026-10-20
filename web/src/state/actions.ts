@@ -1,7 +1,8 @@
 import { ApiError, api, errorMessage } from "../api/client";
 import type { ImportResult, Project } from "../api/types";
+import { translate } from "../i18n";
 import { downloadBlob, downloadJson, safeFilename } from "../lib/format";
-import { useStore } from "./store";
+import { projectSnapshot, useStore } from "./store";
 
 function store() {
   return useStore.getState();
@@ -116,5 +117,44 @@ export async function exportBundle(): Promise<void> {
     setStatus("status.exported", "success", { name: filename });
   } catch (error) {
     setStatus("overview.error", "error", undefined, errorMessage(error));
+  }
+}
+
+const SHARE_PATH = /^\/s\/([0-9A-Za-z]{12})\/?$/;
+
+/** Absolute share-link URL for an ID on this server. */
+export function shareUrl(id: string): string {
+  return `${window.location.origin}/s/${id}`;
+}
+
+/**
+ * Open the configuration behind a `/s/<id>` link. The path is dropped right
+ * away so a reload keeps the recipient's own edits instead of re-opening the
+ * snapshot.
+ */
+export async function openShareFromLocation(): Promise<void> {
+  const match = SHARE_PATH.exec(window.location.pathname);
+  if (!match) return;
+  window.history.replaceState(null, "", "/");
+  const { project, savedSnapshot, config, language, replaceProject, setView, setStatus } = store();
+  try {
+    const record = await api.getShare(match[1]);
+    const shared = withoutMissingAssets(record.project, record.missing_assets);
+    if (project && config) {
+      const current = projectSnapshot(project);
+      const unsaved = current !== savedSnapshot && current !== projectSnapshot(config.default_project);
+      if (unsaved && current !== projectSnapshot(shared) && !window.confirm(translate(language, "share.confirmReplace"))) {
+        return;
+      }
+    }
+    replaceProject(shared, null, false);
+    setView("array");
+    if (record.missing_assets.length > 0) {
+      setStatus("status.missingAssets", "error", { count: record.missing_assets.length });
+    } else {
+      setStatus("share.opened", "success", { name: shared.name });
+    }
+  } catch (error) {
+    setStatus("share.notFound", "error", undefined, errorMessage(error));
   }
 }

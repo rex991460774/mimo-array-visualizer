@@ -35,6 +35,7 @@ from ..project import (
 )
 from ..version import APP_VERSION
 from .jobs import JobManager, JobNotFoundError, zip_directory
+from .shares import ShareNotFoundError, ShareStore
 from .store import ProjectNotFoundError, ProjectStore
 
 LOGGER = logging.getLogger(__name__)
@@ -151,6 +152,7 @@ def create_app(data_dir: str | Path | None = None, static_dir: str | Path | None
     assets = AssetStore(root / "assets")
     engine = Engine(assets)
     projects = ProjectStore(root / "projects")
+    shares = ShareStore(root / "shares")
     jobs = JobManager(root / "jobs")
     web_root = Path(static_dir) if static_dir is not None else default_static_dir()
 
@@ -170,6 +172,7 @@ def create_app(data_dir: str | Path | None = None, static_dir: str | Path | None
     app.state.engine = engine
     app.state.assets = assets
     app.state.projects = projects
+    app.state.shares = shares
     app.state.jobs = jobs
     app.state.data_dir = root
 
@@ -387,6 +390,28 @@ def create_app(data_dir: str | Path | None = None, static_dir: str | Path | None
         return Response(status_code=204)
 
     # ── Exports (background jobs) ────────────────────────────────────
+
+    # ── Share links ──────────────────────────────────────────────────
+
+    @app.post("/api/shares")
+    def create_share(request: ProjectRequest) -> dict[str, Any]:
+        record = shares.create(request.project)
+        return {"id": record["id"], "created_at": record["created_at"], "path": f"/s/{record['id']}"}
+
+    @app.get("/api/shares/{share_id}")
+    def get_share(share_id: str) -> dict[str, Any]:
+        try:
+            record = shares.get(share_id)
+        except ShareNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Share link not found.") from exc
+        project = Project.model_validate(record["project"])
+        missing = sorted(asset for asset in project.asset_ids() if not assets.exists(asset))
+        return {
+            "id": record["id"],
+            "created_at": record["created_at"],
+            "project": project.model_dump(mode="json"),
+            "missing_assets": missing,
+        }
 
     @app.post("/api/reports")
     def create_report(request: ReportRequest) -> dict[str, Any]:

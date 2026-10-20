@@ -904,3 +904,21 @@ details.collapsible[open] > summary .chevron {
   margin: 0;
   color: var(--text-secondary);
 }
+
+.share-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-subtle);
+}
+
+.share-link .input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+}

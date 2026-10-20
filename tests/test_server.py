@@ -515,3 +515,42 @@ def test_report_includes_fov_and_requirement_rows(client) -> None:
     assert manifest["array_factor_fov"]["azimuth_deg"] == [-75.0, 75.0]
     assert manifest["dbf_scan"]["search_guard_deg"] == 10.0
     assert manifest["requirement_checks"][0]["key"] == "resolution"
+
+
+def test_share_link_round_trip_is_content_addressed(client, project) -> None:
+    created = client.post("/api/shares", json={"project": project})
+    assert created.status_code == 200, created.text
+    share = created.json()
+    assert len(share["id"]) == 12 and share["id"].isalnum()
+    assert share["path"] == f"/s/{share['id']}"
+
+    # Same configuration → same link; a different layout → a different link.
+    assert client.post("/api/shares", json={"project": project}).json()["id"] == share["id"]
+    assert client.post("/api/shares", json={"project": small_project()}).json()["id"] != share["id"]
+
+    opened = client.get(f"/api/shares/{share['id']}")
+    assert opened.status_code == 200
+    body = opened.json()
+    assert body["project"]["layout"] == project["layout"]
+    assert body["project"]["band"] == project["band"]
+    assert body["missing_assets"] == []
+
+
+def test_share_link_reports_missing_assets_and_rejects_bad_ids(client, project) -> None:
+    project["element_pattern"] = {"asset": "0" * 64, "swap_axes": False}
+    share_id = client.post("/api/shares", json={"project": project}).json()["id"]
+    assert client.get(f"/api/shares/{share_id}").json()["missing_assets"] == ["0" * 64]
+
+    assert client.get("/api/shares/AAAAAAAAAAAA").status_code == 404
+    assert client.get("/api/shares/..%2F..%2Fetc").status_code == 404
+    assert client.get("/api/shares/short").status_code == 404
+
+
+def test_share_path_serves_the_web_client(tmp_path) -> None:
+    web = tmp_path / "web"
+    web.mkdir()
+    (web / "index.html").write_text("<html>app</html>", encoding="utf-8")
+    client = TestClient(create_app(data_dir=tmp_path / "data", static_dir=web))
+    response = client.get("/s/AbCdEf123456")
+    assert response.status_code == 200
+    assert "app" in response.text

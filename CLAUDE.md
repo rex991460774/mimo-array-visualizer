@@ -56,6 +56,7 @@ docker compose up -d --build
 
 - **`app.py`** — `create_app(data_dir, static_dir)`; all routes under `/api` (OpenAPI docs at `/api/docs`); serves the built SPA with index fallback.
 - **`store.py`** — file-backed project library (`<data>/projects/*.json`).
+- **`shares.py`** — immutable share-link snapshots (`<data>/shares/<id>.json`); the 12-char base62 ID is derived from the project's canonical JSON, so equal configurations share one link. The SPA opens `/s/<id>` via `GET /api/shares/{id}` (`openShareFromLocation` in `state/actions.ts`).
 - **`jobs.py`** — background export jobs (PDF report / angle-error PNG) with progress, cancel, download.
 - **`cli.py`** — `mimo-array-server` entry point (`--host`, `--port`, `--data-dir`; env `MIMO_DATA_DIR`).
 

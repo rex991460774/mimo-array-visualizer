@@ -1,0 +1,15 @@
+services:
+  mimo-array:
+    build: .
+    image: mimo-array-visualizer:1.0.0
+    container_name: mimo-array
+    ports:
+      # Change the left side to use another host port, e.g. "8080:8000".
+      - "8000:8000"
+    volumes:
+      # Projects, uploaded pattern/dictionary files, export jobs and logs.
+      - mimo-data:/data
+    restart: unless-stopped
+
+volumes:
+  mimo-data:

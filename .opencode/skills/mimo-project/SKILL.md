@@ -1,53 +1,36 @@
 ---
 name: mimo-project
-description: MIMO Array Visualizer project conventions - file structure, test commands, naming, data flow
+description: MIMO Array Visualizer project conventions - web architecture, units, test commands, data flow
 ---
 ## Project layout
 
 ```
-GUI.py              → 启动器 (import virtual_array.gui.main)
-GUI_mod.py          → 启动器 (import virtual_array.gui_mod.main) — 重构版
-src/virtual_array/
-  gui.py            → 原版 GUI (~7700 行)
-  gui_mod.py        → 重构版 GUI (1200×800 固定窗口，三子页 Notebook)
-  geometry.py       → ArrayPoint, VirtualPoint, AntennaArray
-  analysis.py       → calculate_metrics_and_psf, dbf_*_spectrum
-  element_pattern.py → ElementPattern, ChannelPatternSet
-  dbf_dictionary.py → DBF 字典配置
-  app_state.py      → JSON 持久化到 ~/Library/Application Support/antenna-array/
-  logging_config.py → 日志配置
-  grid.py           → GRID_STEP=1.0, snap_to_grid()
-  version.py        → APP_VERSION
+src/virtual_array/          Python package
+  geometry.py, analysis.py, dbf_dictionary.py, element_pattern.py,
+  table_io.py, performance_report.py   → 计算核心（无 UI 依赖，单位 λ/2）
+  project.py                → v2 项目文档（Pydantic，单位 λ），兼容 v1 阵面 JSON
+  assets.py                 → 导入文件按 SHA-256 存储
+  engine.py                 → Project → 核心对象，带 LRU 缓存的计算服务
+  server/                   → FastAPI：app.py（API + 静态前端）、store.py、jobs.py、cli.py
+web/                        React + TypeScript + Vite 前端（构建到 server/static）
 ```
 
 ## 运行命令
 
 ```bash
-python GUI.py         # 原版
-python GUI_mod.py     # 重构版
-pytest tests/ -x -q   # 测试
+pip install -e ".[dev]"                 # 后端依赖
+cd web && npm ci && npm run build       # 前端构建
+mimo-array-server --port 8000           # 启动服务
+cd web && npm run dev                   # 前端开发（/api 代理到 :8000）
+pytest -q && (cd web && npm test)       # 测试
+ruff check src tests
 ```
 
-## 重构版 (gui_mod.py) 关键布局
+## 关键约定
 
-- 窗口：1366×768，`resizable(False, False)`
-- 主布局：`main_panel` grid 4:1 (notebook : overview)
-- Notebook 三个子页（Tab 1 Physical&Virtual 1:1, Tab 2 1D DBF 1:1, Tab 3 2D DBF）
-- Overview 面板在右侧，primary 指标左右排列（name col 0, value col 1, padx=2）
-- angle 指标 az/el 上下堆叠单列
-- 字体：matplotlib 优先链 macOS→Windows→Linux，Tkinter `TkDefaultFont`/`TkFixedFont`
-- `_load_local_state()` 会从 state.json 覆盖 geometry，`main()` 里需要二次 `root.geometry()` 确保覆盖
-
-## Tab 3 (2D DBF) 通过 `_build_dbf2d_widget()` 创建
-
-- 返回 dbf2d_frame，由调用方 `pack(fill=BOTH, expand=True)` 放置
-- 创建 Figure、canvas、play/stop 按钮、status label
-- 不要设置 canvas 固定宽高
-
-## 修改注意事项
-
-- 所有坐标用 λ (wavelength) 单位，显示时乘 DISPLAY_SCALE_LAMBDA
-- 修改 figure 尺寸后同步调整 `subplots_adjust` 参数
-- `_build_response_chart` 方法签名是 `(parent, row, col, padding, mode)`，frame.grid 里不要额外 padx
-- `_build_evaluation_panel(parent)` 创建 eval_frame 并用 grid 填充 parent
-- 修改布局后检查 `_refresh_language_texts` 和 `generate_virtual_array` 里的引用
+- 项目文档与 API 坐标单位是 λ，编辑网格 0.5 λ；核心计算单位是 λ/2，只在 `project_array()` 中换算。
+- 通道名由列表顺序决定（Tx1…、Rx1…）；前端每次编辑后按 (x, y) 重新排序编号。
+- 导入文件通过 asset ID 引用，项目文档不含本地路径；`engine.py` 按依赖字段的 JSON 摘要做缓存键。
+- 大矩阵用 base64 float32 传输（`encode_array`），±inf 以字符串 "Infinity"/"-Infinity" 传输。
+- UI 文案在 `web/src/i18n/messages.ts`，zh 为基准，en/ja 必须同 key、同占位符（有单元测试校验）。
+- 修改计算核心时保持现有测试的数值结果不变。

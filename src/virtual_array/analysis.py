@@ -10,7 +10,6 @@ from .element_pattern import ChannelPatternSet, ElementPattern, virtual_channel_
 from .geometry import AntennaArray
 from .phasor import unit_phasor
 
-
 AZIMUTH_FOV = (-75.0, 75.0)
 ELEVATION_FOV = (-15.0, 15.0)
 AF_GRID_SIZE = 181

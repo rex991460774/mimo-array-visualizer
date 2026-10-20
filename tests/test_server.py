@@ -217,10 +217,10 @@ def test_asset_upload_rejects_unsupported_files(client) -> None:
 def test_channel_pattern_summary_resolves_to_physical_channels(client) -> None:
     project = small_project()
     content = (
-        '"Theta [deg]","cang_deg(a) [deg]","cang_deg(b) [deg]","cang_deg(c) [deg]",'
-        '"cang_deg(d) [deg]","cang_deg(e) [deg]"\n'
-        "-30,1,2,3,4,5\n0,2,3,4,5,6\n30,3,4,5,6,7\n"
-    ).encode()
+        b'"Theta [deg]","cang_deg(a) [deg]","cang_deg(b) [deg]","cang_deg(c) [deg]",'
+        b'"cang_deg(d) [deg]","cang_deg(e) [deg]"\n'
+        b"-30,1,2,3,4,5\n0,2,3,4,5,6\n30,3,4,5,6,7\n"
+    )
     asset = upload(client, "phase-summary.csv", content)
 
     bindings = client.post(

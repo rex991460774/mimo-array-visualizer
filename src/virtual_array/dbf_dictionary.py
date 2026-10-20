@@ -12,7 +12,6 @@ from .geometry import AntennaArray
 from .phasor import unit_phasor
 from .table_io import read_xlsx_rows
 
-
 DBF_DICT_IDEAL = "ideal"
 DBF_DICT_IDEAL_REVERSED = "ideal_reversed"
 DBF_DICT_CHANNEL_PATTERN = "channel_pattern"

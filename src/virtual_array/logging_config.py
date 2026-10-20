@@ -8,7 +8,6 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from types import TracebackType
 
-
 APP_DIR_NAME = "antenna-array"
 LOG_FILE_NAME = "antenna-array.log"
 LOG_DIR_ENV = "ANTENNA_ARRAY_LOG_DIR"

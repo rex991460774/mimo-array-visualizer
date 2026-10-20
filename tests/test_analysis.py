@@ -8,10 +8,10 @@ from virtual_array.analysis import (
     DBF_QUALITY_OK,
     DBF_SCAN_GRID_SIZE,
     calculate_metrics_and_psf,
+    dbf_2d_normalization_reference,
+    dbf_2d_spectrum,
     dbf_angle_frame_series_from_spectra,
     dbf_angle_metrics_from_spectra,
-    dbf_2d_spectrum,
-    dbf_2d_normalization_reference,
     dbf_azimuth_angle_metrics,
     dbf_azimuth_spectrum,
     dbf_azimuth_spectrum_bank,
@@ -20,13 +20,13 @@ from virtual_array.analysis import (
     dbf_peak_index,
     estimate_resolution,
 )
-from virtual_array.examples.case4_5tx7rx_sel import build_array
 from virtual_array.element_pattern import (
     PATTERN_KIND_AMPLITUDE,
     PATTERN_PLANE_HORIZONTAL,
     ChannelPatternSet,
     PatternSeries,
 )
+from virtual_array.examples.case4_5tx7rx_sel import build_array
 from virtual_array.geometry import AntennaArray
 
 

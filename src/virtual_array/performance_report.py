@@ -8,10 +8,11 @@ import math
 import os
 import textwrap
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 from matplotlib import colormaps, colors, rc_context
@@ -38,7 +39,6 @@ from .analysis import (
 from .dbf_dictionary import DbfDictionaryConfig
 from .element_pattern import ChannelPatternSet, ElementPattern, virtual_channel_names
 from .geometry import AntennaArray
-
 
 REPORT_SCHEMA_VERSION = 1
 LIGHT_SPEED_MM_PER_NS = 299.792458

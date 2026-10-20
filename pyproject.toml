@@ -47,7 +47,11 @@ extend-exclude = ["web"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM"]
-ignore = ["E501"]
+# B905: zip(strict=) is not used to avoid changing long-standing core behavior.
+ignore = ["E501", "B905"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.File"]
 
 [tool.ruff.format]
 quote-style = "double"

@@ -467,7 +467,10 @@ def create_app(data_dir: str | Path | None = None, static_dir: str | Path | None
             raise HTTPException(status_code=404, detail="Job not found.") from exc
         if job.status != "succeeded" or job.download_path is None:
             raise HTTPException(status_code=409, detail="The export is not ready.")
-        return FileResponse(job.download_path, filename=job.download_name)
+        return FileResponse(
+            job.download_path,
+            headers={"Content-Disposition": _content_disposition(job.download_name or "export")},
+        )
 
     @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
     def api_not_found(path: str) -> None:
@@ -507,7 +510,10 @@ def _mount_web_client(app: FastAPI, web_root: Path) -> None:
 def _content_disposition(filename: str) -> str:
     from urllib.parse import quote
 
-    ascii_name = filename.encode("ascii", "ignore").decode() or "project.mimo.zip"
+    suffix = ".mimo.zip" if filename.endswith(".mimo.zip") else Path(filename).suffix
+    stem = filename[: len(filename) - len(suffix)] if suffix else filename
+    ascii_stem = stem.encode("ascii", "ignore").decode().strip(" ._") or "export"
+    ascii_name = ascii_stem + suffix
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
 
 

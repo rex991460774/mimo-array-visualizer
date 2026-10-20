@@ -4,7 +4,6 @@ from pathlib import Path
 
 from virtual_array.geometry import AntennaArray
 
-
 RX_X = [0, 5, 10, 14, 19, 24, 31, 35]
 RX_Y = [-10, -10, -10, -10, -10, -14, -10, -10]
 TX_X = [0, 7, 13, 20, 24, 28, 32, 40]

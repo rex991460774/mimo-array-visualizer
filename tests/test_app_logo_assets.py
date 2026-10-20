@@ -2,7 +2,6 @@ from pathlib import Path
 
 from PIL import Image
 
-
 ASSET_DIR = Path(__file__).resolve().parents[1] / "src" / "virtual_array" / "assets"
 PNG_SIZES = (16, 24, 32, 48, 64, 128, 256, 512, 1024)
 

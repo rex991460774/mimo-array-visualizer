@@ -8,3 +8,8 @@ dist/
 *.egg-info/
 *.log
 .claude/
+node_modules/
+web/dist/
+src/virtual_array/server/static/
+data/
+*.tsbuildinfo

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .table_io import read_xlsx_rows
+from .table_io import read_spreadsheet_rows
 
 ANGLE_HEADER_KEYWORDS = ("theta", "angle", "azimuth", "az", "deg")
 GAIN_HEADER_KEYWORDS = ("gain", "db", "dbi", "realized")
@@ -567,17 +567,7 @@ def _detect_delimiter(path: Path) -> str:
 
 def _read_table_rows(path: Path) -> list[list[str]]:
     if path.suffix.lower() in {".xlsx", ".xlsm"}:
-        try:
-            from openpyxl import load_workbook
-        except ImportError:
-            rows = read_xlsx_rows(path)
-        else:
-            workbook = load_workbook(path, data_only=True, read_only=True)
-            sheet = workbook.active
-            rows = [
-                ["" if cell is None else str(cell).strip() for cell in row]
-                for row in sheet.iter_rows(values_only=True)
-            ]
+        rows = read_spreadsheet_rows(path)
         return [row for row in rows if row and not _is_comment_or_blank(row)]
 
     delimiter = _detect_delimiter(path)

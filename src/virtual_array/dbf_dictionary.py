@@ -10,7 +10,7 @@ import numpy as np
 from .element_pattern import ChannelPatternSet, virtual_channel_names
 from .geometry import AntennaArray
 from .phasor import unit_phasor
-from .table_io import read_xlsx_rows
+from .table_io import read_spreadsheet_rows
 
 DBF_DICT_IDEAL = "ideal"
 DBF_DICT_IDEAL_REVERSED = "ideal_reversed"
@@ -799,18 +799,7 @@ def _channel_pattern_response(
 
 def _read_table(path: Path) -> tuple[list[str], list[list[str]]]:
     if path.suffix.lower() in {".xlsx", ".xlsm"}:
-        try:
-            from openpyxl import load_workbook
-        except ImportError:
-            rows = read_xlsx_rows(path)
-        else:
-            workbook = load_workbook(path, data_only=True, read_only=True)
-            sheet = workbook.active
-            rows = [
-                ["" if cell is None else str(cell).strip() for cell in row]
-                for row in sheet.iter_rows(values_only=True)
-                if row and any(cell is not None and str(cell).strip() for cell in row)
-            ]
+        rows = [row for row in read_spreadsheet_rows(path) if any(row)]
     else:
         delimiter = _detect_delimiter(path)
         with path.open("r", encoding="utf-8-sig", newline="") as file:

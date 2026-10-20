@@ -239,7 +239,9 @@ function ChannelPatternsSection() {
               {SLOTS.map((slot) => (
                 <th key={`${slot.kind}${slot.plane}`}>{t(slotKey(slot.kind, slot.plane))}</th>
               ))}
-              <th />
+              <th>
+                <span className="sr-only">{t("patternDialog.clearChannel")}</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -408,7 +410,7 @@ function PatternCut({ title, angles, gains, caption }: { title: string; angles: 
       </div>
       <div className="chart-box" style={{ height: 220 }}>
         <div className="chart-body">
-          <Plot data={data} layout={layout} />
+          <Plot data={data} layout={layout} ariaLabel={title} />
         </div>
       </div>
     </div>

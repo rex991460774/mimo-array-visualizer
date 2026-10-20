@@ -58,6 +58,7 @@ docker compose up -d --build
 - **`app.py`** — `create_app(data_dir, static_dir)`; all routes under `/api` (OpenAPI docs at `/api/docs`); serves the built SPA with index fallback.
 - **`store.py`** — file-backed project library (`<data>/projects/*.json`).
 - **`shares.py`** — immutable share-link snapshots (`<data>/shares/<id>.json`); the 12-char base62 ID is derived from the project's canonical JSON, so equal configurations share one link. The SPA opens `/s/<id>` via `GET /api/shares/{id}` (`openShareFromLocation` in `state/actions.ts`).
+- **`bundles.py`** — safe `.mimo.zip` reading for `/api/import/bundle`: declared sizes checked, members stream-read with byte caps, member count and total decompressed size bounded; every asset is validated before any is stored.
 - **`jobs.py`** — background export jobs (PDF report / angle-error PNG) with progress, cancel, download.
 - **`cli.py`** — `mimo-array-server` entry point (`--host`, `--port`, `--data-dir`; env `MIMO_DATA_DIR`).
 
@@ -86,6 +87,7 @@ Browser edits Project ──POST /api/evaluate──▶ Engine.evaluate ─▶ A
 - All angle evaluation goes through `EvaluationSettings` built from `project.fov` (`engine.evaluation_settings`); do not call the ±90° bank functions directly from new service code.
 - Channel names derive from list order (`Tx1…`, `Rx1…`); the client renumbers by (x, y) after every edit, like the desktop tool.
 - Imported channel phase (HFSS far-field) already contains the geometric phase, so it is the channel response for its plane in both DBF and array-factor metrics (`_channel_response`); geometric steering is kept only for a plane without imported phase, with the sign from `_imported_phase_sign`.
+- Uploaded files are untrusted (no auth): read spreadsheets only via `table_io.read_spreadsheet_rows()` (maps damaged/oversized XLSX to `ValueError` → 4xx) and never decompress uploads without a size cap.
 - Non-finite numbers travel as `"Infinity"` / `"-Infinity"` strings; large matrices as `{dtype, shape, data(base64)}`.
 - Keep core numerics unchanged when refactoring — the analysis tests pin them.
 - Tests use `examples/case4_5tx7rx_sel.py::build_array()` (also the default project) as the reference layout.

@@ -1,4 +1,4 @@
-# One-time setup on a Windows server: Python venv, dependencies, web client.
+# Setup or upgrade (after `git pull`) on a Windows server: Python venv, dependencies, web client.
 # Requires Python 3.10+ and Node.js 20+ on PATH.
 $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
@@ -10,10 +10,11 @@ if (-not (Test-Path ".venv")) {
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 
 Push-Location web
-if (-not (Test-Path "node_modules")) {
-    npm ci --no-audit --no-fund
-}
+# Always reinstall from the lock file so an upgrade picks up new dependencies.
+npm ci --no-audit --no-fund
+if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
 npm run build
+if ($LASTEXITCODE -ne 0) { throw "web build failed" }
 Pop-Location
 
 Write-Host ""

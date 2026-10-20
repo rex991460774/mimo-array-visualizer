@@ -89,10 +89,10 @@ export function Overview() {
   return (
     <aside className={`overview${stale ? " is-stale" : ""}`} aria-label={t("overview.title")}>
       <div className="overview-section">
-        <h3>
+        <h2>
           {t("overview.title")}
           {evaluating && <Spinner />}
-        </h3>
+        </h2>
         {error && (
           <div style={{ marginBottom: 10 }}>
             <Callout tone="danger" title={t("overview.error")}>
@@ -107,13 +107,13 @@ export function Overview() {
         <>
           <RequirementSection evaluation={evaluation} />
           <div className="overview-section">
-            <h3>{t("overview.angleTitle")}</h3>
+            <h2>{t("overview.angleTitle")}</h2>
             <AngleTable evaluation={evaluation} />
           </div>
           <PatternMetrics evaluation={evaluation} />
           {(evaluation.notes.length > 0 || evaluation.layout_checks.length > 0) && (
             <div className="overview-section">
-              <h3>{t("overview.notes")}</h3>
+              <h2>{t("overview.notes")}</h2>
               <ul className="notes">
                 {evaluation.layout_checks.map((check, index) => (
                   <li key={`layout${index}`} className={check.code === "coincident" ? "bad" : ""}>
@@ -217,7 +217,7 @@ function RequirementSection({ evaluation }: { evaluation: Evaluation }) {
   const passed = applicable.filter((check) => check.status === "pass").length;
   return (
     <div className="overview-section">
-      <h3>
+      <h2>
         {t("overview.requirements")}
         {applicable.length > 0 && (
           <span className={`badge ${passed === applicable.length ? "ok" : "bad"}`}>
@@ -228,7 +228,7 @@ function RequirementSection({ evaluation }: { evaluation: Evaluation }) {
         <Button size="sm" variant="ghost" icon={<Settings2 size={13} />} onClick={() => openDialog("settings")}>
           {t("overview.edit")}
         </Button>
-      </h3>
+      </h2>
       {checks.length === 0 ? (
         <p className="subtle" style={{ margin: 0 }}>
           {t("overview.requirementsNone")}
@@ -274,7 +274,9 @@ function AngleTable({ evaluation }: { evaluation: Evaluation }) {
       <table className="angle-table">
         <thead>
           <tr>
-            <th />
+            <th>
+              <span className="sr-only">{t("band.metric")}</span>
+            </th>
             {AXES.map((axis) => (
               <th key={axis} scope="col">
                 {axisName(axis, t)}
@@ -330,7 +332,7 @@ function PatternMetrics({ evaluation }: { evaluation: Evaluation }) {
       <details className="collapsible">
         <summary>
           <ChevronRight size={14} className="chevron" />
-          <h3 style={{ margin: 0 }}>{t("overview.patternTitle")}</h3>
+          <h2 style={{ margin: 0 }}>{t("overview.patternTitle")}</h2>
         </summary>
         <dl className="metric-list" style={{ marginTop: 10 }}>
           <dt>{t("overview.az3db")}</dt>

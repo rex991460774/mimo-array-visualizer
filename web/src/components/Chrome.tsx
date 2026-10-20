@@ -69,7 +69,7 @@ export function TopBar() {
         <span className="brand-mark" aria-hidden="true">
           <Radar size={18} />
         </span>
-        <span className="brand-name">{t("app.name")}</span>
+        <h1 className="brand-name">{t("app.name")}</h1>
         <span className="brand-divider" />
       </div>
       <div className="project-title">
@@ -336,7 +336,7 @@ export function ControlBar() {
               return value !== null && value > 0 && value <= 1000 ? value : null;
             }}
             format={(value) => trimNumber(value, 6)}
-            invalidTitle={t("top.invalidFrequency")}
+            invalidTitle={(text) => (parseNumber(text, ["ghz", "g"]) === null ? t("input.notNumber") : t("top.invalidFrequency"))}
             onCommit={(value) => updateProject({ frequency_ghz: value })}
             style={{ width: 52 }}
           />
@@ -351,7 +351,7 @@ export function ControlBar() {
               return value !== null && value >= 0 && value <= 60 ? value : null;
             }}
             format={(value) => trimNumber(value, 3)}
-            invalidTitle={t("top.invalidMargin")}
+            invalidTitle={(text) => (parseNumber(text, ["db"]) === null ? t("input.notNumber") : t("top.invalidMargin"))}
             onCommit={(value) => updateProject({ ambiguity_margin_db: value })}
             style={{ width: 36 }}
           />

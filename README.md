@@ -180,6 +180,16 @@ scripts/setup_server.sh                       # 创建 .venv、安装依赖、�
 
 开机自启可参考 `deploy/mimo-array.service`（systemd）。中文报告需要系统安装 CJK 字体（如 `apt install fonts-noto-cjk`）。
 
+升级：
+
+```bash
+git pull
+scripts/setup_server.sh                       # 每次都按 lock 文件重装前端依赖并重新构建
+sudo systemctl restart mimo-array             # 或停止后重新运行上面的启动命令
+```
+
+`setup_server.sh` 失败时不要直接重启服务，否则会用旧前端配新后端。
+
 ### 方式三：Windows 服务器
 
 ```powershell
@@ -187,7 +197,7 @@ scripts/setup_server.sh                       # 创建 .venv、安装依赖、�
 .\scripts\run_server.ps1       # 默认 0.0.0.0:8000，数据目录 .\data
 ```
 
-其他电脑访问前，需要在 Windows 防火墙中放行该端口。
+其他电脑访问前，需要在 Windows 防火墙中放行该端口。升级时执行 `git pull`，再运行 `.\scripts\setup_server.ps1`，然后重启 `run_server.ps1`。
 
 ### 安全说明
 

@@ -290,7 +290,11 @@ function PhaseMatrix({ preview }: { preview: DictionaryPreview }) {
       </div>
       <div className="chart-box" style={{ height: 380 }}>
         <div className="chart-body">
-          <Plot data={data} layout={layout} />
+          <Plot
+            data={data}
+            layout={layout}
+            ariaLabel={t("dictDialog.phaseMatrix", { rows: preview.angles.length, cols: preview.channel_count })}
+          />
         </div>
       </div>
     </div>

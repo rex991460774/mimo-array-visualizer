@@ -564,3 +564,30 @@ def test_share_path_serves_the_web_client(tmp_path) -> None:
     response = client.get("/s/AbCdEf123456")
     assert response.status_code == 200
     assert "app" in response.text
+
+
+@pytest.mark.parametrize(
+    "content",
+    [b"PK\x03\x04garbage" * 10, b"not a zip at all", b""],
+    ids=["truncated-zip", "plain-text", "empty-zip-member"],
+)
+def test_damaged_xlsx_is_a_client_error_everywhere(client, project, content) -> None:
+    if not content:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("readme.txt", "no workbook here")
+        content = buffer.getvalue()
+    asset = upload(client, "x.xlsx", content)
+
+    preview = client.post("/api/element-pattern/preview", json={"asset": asset})
+    resolve = client.post(
+        "/api/channel-patterns/resolve",
+        json={"project": project, "asset": asset, "kind": "phase", "plane": "horizontal"},
+    )
+    project["dbf_dictionary"] = {**project["dbf_dictionary"], "mode": "custom", "azimuth_asset": asset}
+    dictionary = client.post("/api/dictionary/preview", json={"project": project, "axis": "azimuth"})
+    evaluate = client.post("/api/evaluate", json={"project": project})
+
+    for response in (preview, resolve, dictionary, evaluate):
+        assert 400 <= response.status_code < 500, (response.request.url, response.status_code, response.text)
+        assert "XLSX" in response.json()["detail"]

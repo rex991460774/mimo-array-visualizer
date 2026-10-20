@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time setup on a Linux/macOS server: Python venv, dependencies, web client.
+# Setup or upgrade (after `git pull`) on a Linux/macOS server: Python venv, dependencies, web client.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PYTHON="${PYTHON:-python3}"

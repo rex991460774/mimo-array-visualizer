@@ -212,7 +212,11 @@ function AngleChart({ bank, kind }: { bank: DbfBank; kind: "error" | "margin" })
 
   return (
     <div className="chart-body">
-      <Plot data={data} layout={layout} />
+      <Plot
+        data={data}
+        layout={layout}
+        ariaLabel={`${t(bank.axis === "azimuth" ? "axis.azimuth" : "axis.elevation")} ${t(kind === "error" ? "axis.error" : "axis.margin")}`}
+      />
     </div>
   );
 }

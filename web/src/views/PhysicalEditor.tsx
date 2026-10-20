@@ -272,6 +272,7 @@ export function PhysicalEditor({
       className={`plane ${deleteMode ? "delete-mode" : ""}`}
       tabIndex={0}
       onKeyDown={onKeyDown}
+      role="application"
       aria-label="Physical array editor"
     >
       {size.width > 0 && (

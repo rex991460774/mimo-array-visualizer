@@ -10,6 +10,48 @@ NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 NS_PACKAGE_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 
+# An XLSX is a zip: bound what it may expand to before any XML is parsed, so a
+# small upload cannot turn into gigabytes of worksheet data.
+MAX_XLSX_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
+
+
+def read_spreadsheet_rows(path: str | Path) -> list[list[str]]:
+    """Rows of the active worksheet as stripped strings.
+
+    Damaged or oversized workbooks raise ``ValueError`` (reported to the user as
+    a bad file) instead of leaking openpyxl/zipfile exceptions as server errors.
+    """
+    workbook_path = Path(path)
+    try:
+        with zipfile.ZipFile(workbook_path) as archive:
+            expanded = sum(info.file_size for info in archive.infolist())
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise ValueError(f"无法读取 XLSX/XLSM 文件（文件已损坏或不是 Excel 工作簿）：{workbook_path.name}") from exc
+    if expanded > MAX_XLSX_UNCOMPRESSED_BYTES:
+        raise ValueError(
+            f"XLSX/XLSM 文件解压后超过 {MAX_XLSX_UNCOMPRESSED_BYTES // (1024 * 1024)} MB，请另存为 CSV：{workbook_path.name}"
+        )
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        return read_xlsx_rows(workbook_path)
+    try:
+        workbook = load_workbook(workbook_path, data_only=True, read_only=True)
+        try:
+            sheet = workbook.active
+            if sheet is None:
+                raise ValueError(f"XLSX/XLSM 文件中没有工作表：{workbook_path.name}")
+            return [
+                ["" if cell is None else str(cell).strip() for cell in row]
+                for row in sheet.iter_rows(values_only=True)
+            ]
+        finally:
+            workbook.close()
+    except ValueError:
+        raise
+    except Exception as exc:  # openpyxl raises many unrelated types for damaged files
+        raise ValueError(f"无法读取 XLSX/XLSM 文件：{workbook_path.name}（{type(exc).__name__}）") from exc
+
 
 def read_xlsx_rows(path: str | Path) -> list[list[str]]:
     """Read the active worksheet from a simple XLSX/XLSM workbook.
@@ -23,7 +65,7 @@ def read_xlsx_rows(path: str | Path) -> list[list[str]]:
             shared_strings = _read_shared_strings(archive)
             sheet_path = _active_sheet_path(archive)
             root = ElementTree.fromstring(archive.read(sheet_path))
-    except (KeyError, zipfile.BadZipFile, ElementTree.ParseError) as exc:
+    except (KeyError, zipfile.BadZipFile, ElementTree.ParseError, OSError, EOFError) as exc:
         raise ValueError(f"无法读取 XLSX/XLSM 文件：{workbook_path.name}") from exc
 
     rows: list[list[str]] = []

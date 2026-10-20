@@ -35,6 +35,7 @@ from ..project import (
     project_from_document,
 )
 from ..version import APP_VERSION
+from .bundles import BundleError, read_bundle
 from .jobs import JobManager, JobNotFoundError, zip_directory
 from .shares import ShareNotFoundError, ShareStore
 from .store import ProjectNotFoundError, ProjectStore
@@ -331,24 +332,13 @@ def create_app(data_dir: str | Path | None = None, static_dir: str | Path | None
         if len(content) > MAX_BUNDLE_BYTES:
             raise HTTPException(status_code=413, detail="Project bundle is too large.")
         try:
-            archive = zipfile.ZipFile(io.BytesIO(content))
-        except zipfile.BadZipFile as exc:
-            raise bad_request(ValueError("Not a valid project bundle (.zip).")) from exc
-        with archive:
-            try:
-                document = json.loads(archive.read("project.json").decode("utf-8"))
-            except KeyError as exc:
-                raise bad_request(ValueError("Bundle has no project.json.")) from exc
-            remap: dict[str, str] = {}
-            for name in archive.namelist():
-                parts = name.split("/")
-                if len(parts) != 3 or parts[0] != "assets" or not parts[2]:
-                    continue
-                data = archive.read(name)
-                if len(data) > MAX_ASSET_BYTES:
-                    raise bad_request(ValueError(f"Bundled file {parts[2]} is too large."))
-                info = assets.add(parts[2], data)
-                remap[parts[1]] = info.id
+            document, bundled = read_bundle(content)
+        except BundleError as exc:
+            raise bad_request(exc) from exc
+        # Store only after the whole bundle validated, so a bad bundle leaves no files behind.
+        remap: dict[str, str] = {}
+        for item in bundled:
+            remap[item.old_id] = assets.add(item.filename, item.data).id
         text = json.dumps(document)
         for old_id, new_id in remap.items():
             text = text.replace(old_id, new_id)

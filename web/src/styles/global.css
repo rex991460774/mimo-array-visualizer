@@ -18,10 +18,13 @@
   --control-border: #8d93a0;
   --text: #161616;
   --text-secondary: #4d5360;
-  --text-tertiary: #6f7682;
+  --text-tertiary: #646b77; /* ≥ 4.5:1 on surface-subtle (WCAG AA) */
   --text-on-accent: #ffffff;
   --accent: #0f62fe;
   --accent-hover: #0353e9;
+  /* Fill behind white text (primary buttons, brand mark). */
+  --accent-solid: #0f62fe;
+  --accent-solid-hover: #0353e9;
   --accent-pressed: #002d9c;
   --accent-tint: #d0e2ff;
   --accent-soft: #edf4ff;
@@ -77,6 +80,8 @@
     --accent: #4589ff;
     --accent-hover: #6ea6ff;
     --accent-pressed: #a6c8ff;
+    --accent-solid: #2f6fe0; /* white text ≥ 4.5:1 */
+    --accent-solid-hover: #2a66d6;
     --accent-tint: #1d3a6e;
     --accent-soft: #172640;
     --focus: #78a9ff;
@@ -125,6 +130,8 @@
   --accent: #4589ff;
   --accent-hover: #6ea6ff;
   --accent-pressed: #a6c8ff;
+  --accent-solid: #2f6fe0; /* white text ≥ 4.5:1 */
+  --accent-solid-hover: #2a66d6;
   --accent-tint: #1d3a6e;
   --accent-soft: #172640;
   --focus: #78a9ff;
@@ -248,12 +255,13 @@ textarea {
   width: 30px;
   height: 30px;
   border-radius: 7px;
-  background: var(--accent);
+  background: var(--accent-solid);
   color: var(--text-on-accent);
   flex: none;
 }
 
 .brand-name {
+  margin: 0;
   font-weight: 600;
   font-size: 14px;
   white-space: nowrap;
@@ -615,14 +623,14 @@ textarea {
 }
 
 .btn.primary {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: var(--accent-solid);
+  background: var(--accent-solid);
   color: var(--text-on-accent);
 }
 
 .btn.primary:hover:not(:disabled) {
-  border-color: var(--accent-hover);
-  background: var(--accent-hover);
+  border-color: var(--accent-solid-hover);
+  background: var(--accent-solid-hover);
 }
 
 .btn.ghost {

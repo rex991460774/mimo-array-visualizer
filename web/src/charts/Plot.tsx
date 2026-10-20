@@ -32,7 +32,8 @@ export function Plot({
   onClick?: (point: PlotPoint) => void;
   className?: string;
   style?: React.CSSProperties;
-  ariaLabel?: string;
+  /** Accessible name: the container is exposed as an image (role="img"). */
+  ariaLabel: string;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const clickHandler = useRef(onClick);

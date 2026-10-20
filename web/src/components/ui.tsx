@@ -91,11 +91,14 @@ export function NumberInput({
   parse: (text: string) => number | null;
   format?: (value: number) => string;
   className?: string;
-  invalidTitle?: string;
+  /** Hint for invalid text; a function can explain *why* the current text is rejected. */
+  invalidTitle?: string | ((text: string) => string);
 } & Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange">) {
   const [text, setText] = useState(format(value));
   const [invalid, setInvalid] = useState(false);
   const focused = useRef(false);
+  // Escape must leave the value untouched: the blur it triggers skips commit.
+  const cancelled = useRef(false);
 
   useEffect(() => {
     if (!focused.current) setText(format(value));
@@ -120,7 +123,7 @@ export function NumberInput({
       className={className + (invalid ? " invalid" : "")}
       value={text}
       inputMode="decimal"
-      title={invalid ? invalidTitle : rest.title}
+      title={invalid ? (typeof invalidTitle === "function" ? invalidTitle(text) : invalidTitle) : rest.title}
       aria-invalid={invalid || undefined}
       onFocus={(event) => {
         focused.current = true;
@@ -132,13 +135,18 @@ export function NumberInput({
       }}
       onBlur={() => {
         focused.current = false;
+        if (cancelled.current) {
+          cancelled.current = false;
+          return;
+        }
         commit();
       }}
       onKeyDown={(event) => {
         if (event.key === "Enter") {
-          commit();
+          // Blur commits exactly once.
           (event.target as HTMLInputElement).blur();
         } else if (event.key === "Escape") {
+          cancelled.current = true;
           setText(format(value));
           setInvalid(false);
           (event.target as HTMLInputElement).blur();

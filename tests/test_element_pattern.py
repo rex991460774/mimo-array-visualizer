@@ -528,14 +528,17 @@ def test_element_pattern_weights_array_factor_grid() -> None:
 
 def test_physical_channel_phase_pattern_weights_virtual_channels() -> None:
     array = AntennaArray.from_xy(tx_x=[0], tx_y=[0], rx_x=[0, 1], rx_y=[0, 0])
+    angles = np.arange(-90.0, 91.0, 1.0)
     phase_series = PatternSeries(
         name="phase",
         source_path="phase.csv",
         angle_column="Theta",
         value_column="phase",
         value_kind=PATTERN_KIND_PHASE,
-        angles_deg=np.array([-90.0, 0.0, 90.0]),
-        values=np.array([180.0, 180.0, 180.0]),
+        angles_deg=angles,
+        # Imported phase carries the geometric progression of Rx2 (x = λ/2)
+        # plus a 180° offset that nulls boresight.
+        values=180.0 * np.sin(np.radians(angles)) + 180.0,
     )
     channel_patterns = ChannelPatternSet()
     channel_patterns.set_series(
@@ -558,14 +561,17 @@ def test_physical_channel_phase_pattern_weights_virtual_channels() -> None:
 
 def test_virtual_channel_phase_pattern_weights_matching_virtual_channel() -> None:
     array = AntennaArray.from_xy(tx_x=[0], tx_y=[0], rx_x=[0, 1], rx_y=[0, 0])
+    angles = np.arange(-90.0, 91.0, 1.0)
     phase_series = PatternSeries(
         name="phase",
         source_path="phase.csv",
         angle_column="Theta",
         value_column="phase",
         value_kind=PATTERN_KIND_PHASE,
-        angles_deg=np.array([-90.0, 0.0, 90.0]),
-        values=np.array([180.0, 180.0, 180.0]),
+        angles_deg=angles,
+        # Imported phase carries the geometric progression of Rx2 (x = λ/2)
+        # plus a 180° offset that nulls boresight.
+        values=180.0 * np.sin(np.radians(angles)) + 180.0,
     )
     channel_patterns = ChannelPatternSet()
     channel_patterns.set_series(

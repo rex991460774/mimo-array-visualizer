@@ -7,6 +7,7 @@ from virtual_array.analysis import (
     AF_GRID_SIZE,
     DBF_QUALITY_OK,
     DBF_SCAN_GRID_SIZE,
+    Dbf2dScanner,
     EvaluationSettings,
     calculate_metrics_and_psf,
     dbf_2d_normalization_reference,
@@ -27,6 +28,7 @@ from virtual_array.dbf_dictionary import DbfDictionaryConfig
 from virtual_array.element_pattern import (
     PATTERN_KIND_AMPLITUDE,
     PATTERN_KIND_PHASE,
+    PATTERN_PLANE_ELEVATION,
     PATTERN_PLANE_HORIZONTAL,
     ChannelPatternSet,
     PatternSeries,
@@ -572,3 +574,114 @@ def test_refined_peaks_are_exact_for_ideal_array_and_resolve_subdegree_errors() 
     center = int(np.argmin(np.abs(refined.true_angles_deg)))
     assert coarse.frame_series.errors_deg[center] in (0.0, 1.0, -1.0)
     assert 0.0 < abs(refined.frame_series.errors_deg[center]) < 1.0
+
+
+def _geometric_phase_patterns(
+    array: AntennaArray,
+    planes: tuple[str, ...],
+    sign: float = 1.0,
+    error_deg: float = 0.0,
+) -> ChannelPatternSet:
+    """Per-physical-channel phase cuts holding the geometric phase progression.
+
+    Like HFSS far-field phase, each cut already contains pi*x*sin(theta)
+    (λ/2 units); ``error_deg`` adds a small smooth per-channel deviation.
+    """
+    angles = np.arange(-90.0, 90.05, 0.1)
+    patterns = ChannelPatternSet()
+    for index, point in enumerate([*array.tx, *array.rx]):
+        for plane in planes:
+            position = point.x if plane == PATTERN_PLANE_HORIZONTAL else point.y
+            values = sign * np.degrees(np.pi * position * np.sin(np.radians(angles)))
+            values += error_deg * np.sin(np.radians(angles) * (index + 1))
+            patterns.set_series(
+                point.name,
+                PATTERN_KIND_PHASE,
+                plane,
+                PatternSeries(
+                    name="phase.csv",
+                    source_path="phase.csv",
+                    angle_column="Theta",
+                    value_column=point.name,
+                    value_kind=PATTERN_KIND_PHASE,
+                    angles_deg=angles,
+                    values=values,
+                ),
+            )
+    return patterns
+
+
+PHASE_PLANES = [
+    (PATTERN_PLANE_HORIZONTAL,),
+    (PATTERN_PLANE_ELEVATION,),
+    (PATTERN_PLANE_HORIZONTAL, PATTERN_PLANE_ELEVATION),
+]
+
+
+@pytest.mark.parametrize("planes", PHASE_PLANES)
+@pytest.mark.parametrize("sign", [1.0, -1.0])
+def test_imported_geometric_phase_matches_ideal_array_metrics(
+    planes: tuple[str, ...], sign: float
+) -> None:
+    # Imported phase already carries the geometry: the array factor must not
+    # multiply the geometric steering in again, whichever sign convention the
+    # data uses and whichever planes were imported.
+    array = build_array()
+    patterns = _geometric_phase_patterns(array, planes, sign)
+    fov = {"azimuth_fov": (-75.0, 75.0), "elevation_fov": (-45.0, 45.0)}
+    ideal_db, _az, _el, ideal = calculate_metrics_and_psf(array, **fov)
+    af_db, _az, _el, metrics = calculate_metrics_and_psf(
+        array, channel_patterns=patterns, **fov
+    )
+
+    assert metrics.azimuth_3db_beamwidth == pytest.approx(
+        ideal.azimuth_3db_beamwidth, abs=1e-3
+    )
+    assert metrics.elevation_3db_beamwidth == pytest.approx(
+        ideal.elevation_3db_beamwidth, abs=1e-3
+    )
+    assert metrics.psl_db == pytest.approx(ideal.psl_db, abs=0.01)
+    assert metrics.azimuth_psl_db == pytest.approx(ideal.azimuth_psl_db, abs=0.01)
+    assert metrics.elevation_psl_db == pytest.approx(ideal.elevation_psl_db, abs=0.01)
+    assert metrics.azimuth_islr_db == pytest.approx(ideal.azimuth_islr_db, abs=0.01)
+    # The whole 2D pattern, not only the principal cuts.
+    visible = ideal_db > -40.0
+    assert np.max(np.abs(af_db - ideal_db)[visible]) < 0.05
+
+
+@pytest.mark.parametrize("planes", PHASE_PLANES)
+def test_small_imported_phase_errors_only_perturb_array_metrics(
+    planes: tuple[str, ...],
+) -> None:
+    array = build_array()
+    patterns = _geometric_phase_patterns(array, planes, error_deg=3.0)
+    _af, _az, _el, ideal = calculate_metrics_and_psf(array)
+    _af, _az, _el, metrics = calculate_metrics_and_psf(array, channel_patterns=patterns)
+
+    assert metrics.azimuth_3db_beamwidth == pytest.approx(
+        ideal.azimuth_3db_beamwidth, rel=0.02
+    )
+    assert metrics.elevation_3db_beamwidth == pytest.approx(
+        ideal.elevation_3db_beamwidth, rel=0.02
+    )
+    assert metrics.psl_db == pytest.approx(ideal.psl_db, abs=0.5)
+    assert metrics.azimuth_psl_db == pytest.approx(ideal.azimuth_psl_db, abs=0.5)
+
+
+@pytest.mark.parametrize("planes", PHASE_PLANES)
+@pytest.mark.parametrize("sign", [1.0, -1.0])
+def test_2d_dbf_keeps_geometric_steering_for_plane_without_imported_phase(
+    planes: tuple[str, ...], sign: float
+) -> None:
+    array = build_array()
+    scanner = Dbf2dScanner(
+        array,
+        scan_azimuths_deg=np.arange(-60.0, 61.0, 1.0),
+        scan_elevations_deg=np.arange(-20.0, 21.0, 1.0),
+        channel_patterns=_geometric_phase_patterns(array, planes, sign),
+    )
+    for true_az, true_el in [(10.0, 5.0), (-30.0, -8.0), (40.0, 12.0)]:
+        spectrum = scanner.spectrum_db(true_az, true_el)
+        el_index, az_index = np.unravel_index(np.argmax(spectrum), spectrum.shape)
+        assert scanner.scan_azimuths_deg[az_index] == true_az
+        assert scanner.scan_elevations_deg[el_index] == true_el

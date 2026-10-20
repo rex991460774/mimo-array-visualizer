@@ -2129,6 +2129,11 @@ def _method_notes(
         _label(language, "note_fov"),
         _label(language, "note_hold"),
     ]
+    if any(
+        pattern.phase_horizontal is not None or pattern.phase_elevation is not None
+        for pattern in snapshot.channel_patterns.patterns.values()
+    ):
+        notes.append(_label(language, "note_imported_phase"))
     if snapshot.dbf_dictionary.mode == "custom":
         notes.append(_label(language, "note_custom_dictionary"))
         notes.extend(_dictionary_coverage_notes(snapshot, options, data))
@@ -2392,6 +2397,11 @@ _REPORT_TEXT: dict[str, dict[str, str]] = {
         "zh": "单元方向图增益会进入阵因子指标；当前 1D DBF 算法不使用 tx/rx 单元方向图，但会使用已配置的通道幅相和 DBF 字典。",
         "en": "Element-pattern gain affects array-factor metrics; the current 1D DBF does not consume tx/rx element patterns, but it does use configured channel amp/phase and the DBF dictionary.",
         "ja": "要素パターンはアレイファクタ指標にのみ反映され、1D DBFはチャネル振幅/位相と辞書を使います。",
+    },
+    "note_imported_phase": {
+        "zh": "导入的通道相位已包含几何相位，阵因子指标与 DBF 都直接以其作为该平面的通道响应，不再叠加几何导向矢量；未导入相位的平面沿用几何导向，符号按导入数据自动匹配。",
+        "en": "Imported channel phase already contains the geometric phase, so array-factor metrics and DBF use it directly as the channel response in that plane without adding the geometric steering again; a plane without imported phase keeps the geometric steering with the sign matched to the imported data.",
+        "ja": "インポートしたチャネル位相は幾何位相を含むため、アレイファクタ指標とDBFはその面のチャネル応答として直接使用し、幾何ステアリングを重ねません。位相未インポートの面は幾何ステアリングを使い、符号はインポートデータに合わせます。",
     },
     "note_grid": {
         "zh": "DBF 真实角与扫描角均为 -90°..+90°、1°步进；峰值取离散栅格最大值，未做亚栅格插值。",

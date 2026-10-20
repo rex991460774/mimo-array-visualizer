@@ -83,6 +83,7 @@ Browser edits Project ──POST /api/evaluate──▶ Engine.evaluate ─▶ A
 - Project/API coordinates are λ at the design frequency; the core uses λ/2. Convert only in `project_array()`.
 - All angle evaluation goes through `EvaluationSettings` built from `project.fov` (`engine.evaluation_settings`); do not call the ±90° bank functions directly from new service code.
 - Channel names derive from list order (`Tx1…`, `Rx1…`); the client renumbers by (x, y) after every edit, like the desktop tool.
+- Imported channel phase (HFSS far-field) already contains the geometric phase, so it is the channel response for its plane in both DBF and array-factor metrics (`_channel_response`); geometric steering is kept only for a plane without imported phase, with the sign from `_imported_phase_sign`.
 - Non-finite numbers travel as `"Infinity"` / `"-Infinity"` strings; large matrices as `{dtype, shape, data(base64)}`.
 - Keep core numerics unchanged when refactoring — the analysis tests pin them.
 - Tests use `examples/case4_5tx7rx_sel.py::build_array()` (also the default project) as the reference layout.

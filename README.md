@@ -9,6 +9,7 @@
 部署在实验室服务器上，局域网内用浏览器打开即可使用。<br>
 在同一个界面里完成排阵、DBF 测角评估、频段内性能、规格检查、方案对比、分享和 PDF 报告。
 
+[![Release](https://img.shields.io/github/v/release/rex991460774/mimo-array-visualizer?color=2ea44f)](https://github.com/rex991460774/mimo-array-visualizer/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)
@@ -127,6 +128,8 @@ docker compose up -d --build
 
 浏览器打开 `http://<服务器IP>:8000/`。首次打开时载入参考阵列 Case4 8T8R 77G，可以直接体验所有视图。
 
+没有 Docker、也不想装 Node.js 时，可以直接 [pip 安装发布包](#方式二安装发布包pip无需-nodejs)。
+
 ---
 
 ## 典型使用流程
@@ -169,7 +172,24 @@ docker compose up -d --build
 
 镜像已内置 Noto CJK 字体，可以直接生成中文/日文 PDF 报告。
 
-### 方式二：Linux 裸机
+### 方式二：安装发布包（pip，无需 Node.js）
+
+每个 [Release](https://github.com/rex991560774/mimo-array-visualizer/releases) 都附带一个 wheel，前端已经构建好打包在里面，只需要 Python 3.10+，不需要克隆仓库或安装 Node.js：
+
+```bash
+python3 -m venv mimo-env
+mimo-env/bin/pip install https://github.com/rex991460774/mimo-array-visualizer/releases/download/v1.0.0/mimo_array_visualizer-1.0.0-py3-none-any.whl
+mimo-env/bin/mimo-array-server --host 0.0.0.0 --port 8000 --data-dir ./mimo-data
+```
+
+Windows 下把 `mimo-env/bin/` 换成 `mimo-env\Scripts\`。
+
+- 校验：发布说明中给出了 wheel 的 SHA-256，可以先下载再用 `shasum -a 256`（macOS / Linux）或 `certutil -hashfile <文件> SHA256`（Windows）核对后再安装。
+- 升级：用新版本的 wheel 地址再执行一次 `pip install`，数据目录保持不变即可保留项目库和导入文件。
+- 中文 / 日文 PDF 报告需要系统安装 CJK 字体（如 `apt install fonts-noto-cjk`）。
+- 开机自启可参考 `deploy/mimo-array.service`，把其中的路径换成 `mimo-env/bin/mimo-array-server`。
+
+### 方式三：Linux 裸机（从源码）
 
 需要 Python 3.10+ 和 Node.js 20+（仅构建前端时需要）。
 
@@ -190,7 +210,7 @@ sudo systemctl restart mimo-array             # 或停止后重新运行上面�
 
 `setup_server.sh` 失败时不要直接重启服务，否则会用旧前端配新后端。
 
-### 方式三：Windows 服务器
+### 方式四：Windows 服务器（从源码）
 
 ```powershell
 .\scripts\setup_server.ps1     # 需要 Python 3.10+ 与 Node.js 20+
@@ -332,7 +352,8 @@ MIMO Array Visualizer is a web workbench for designing and evaluating MIMO Tx/Rx
 - Chinese / English / Japanese UI, light/dark themes, works at phone width.
 
 **Deploy with Docker**: `docker compose up -d --build`, then open `http://<server>:8000/`.
-**Bare metal**: `scripts/setup_server.sh` (or `scripts\setup_server.ps1` on Windows), then `mimo-array-server --host 0.0.0.0 --port 8000 --data-dir ./data`.
+**Release wheel** (no Node.js needed, Python 3.10+): `pip install https://github.com/rex991460774/mimo-array-visualizer/releases/download/v1.0.0/mimo_array_visualizer-1.0.0-py3-none-any.whl`, then `mimo-array-server --host 0.0.0.0 --port 8000 --data-dir ./mimo-data`. Each [release](https://github.com/rex991460774/mimo-array-visualizer/releases) attaches its wheel with a SHA-256 in the notes.
+**Bare metal from source**: `scripts/setup_server.sh` (or `scripts\setup_server.ps1` on Windows), then `mimo-array-server --host 0.0.0.0 --port 8000 --data-dir ./data`.
 The server has no built-in authentication; use it on a trusted network or behind an authenticating reverse proxy.
 
 ## License

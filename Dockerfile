@@ -15,6 +15,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     MPLBACKEND=Agg \
+    MALLOC_ARENA_MAX=2 \
     MIMO_DATA_DIR=/data
 
 # CJK fonts are required for Chinese/Japanese PDF reports.  They must be

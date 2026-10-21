@@ -37,7 +37,7 @@ from ..project import (
 )
 from ..version import APP_VERSION
 from .bundles import BundleError, read_bundle
-from .jobs import JobManager, JobNotFoundError, zip_directory
+from .jobs import JobManager, JobNotFoundError, JobQueueFullError, zip_directory
 from .limits import MULTIPART_OVERHEAD_BYTES, BodySizeLimitMiddleware
 from .shares import ShareNotFoundError, ShareStore
 from .store import ProjectConflictError, ProjectNotFoundError, ProjectStore
@@ -195,6 +195,14 @@ def create_app(data_dir: str | Path | None = None, static_dir: str | Path | None
     app.state.shares = shares
     app.state.jobs = jobs
     app.state.data_dir = root
+
+    @app.exception_handler(JobQueueFullError)
+    async def job_queue_full(_request: Request, exc: JobQueueFullError) -> JSONResponse:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": f"The server is busy with other exports ({exc}). Try again shortly."},
+            headers={"Retry-After": "30"},
+        )
 
     @app.exception_handler(ProjectComputationError)
     async def computation_error(_request: Request, exc: ProjectComputationError) -> JSONResponse:

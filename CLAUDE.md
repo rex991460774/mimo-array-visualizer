@@ -60,8 +60,8 @@ docker compose up -d --build
 - **`store.py`** — file-backed project library (`<data>/projects/*.json`). Each record has a `revision`; `PUT /api/projects/{id}` with `base_revision` returns 409 if someone saved in between (the client then shows `SaveConflictDialog`); omitting it overwrites.
 - **`shares.py`** — immutable share-link snapshots (`<data>/shares/<id>.json`); the 12-char base62 ID is derived from the project's canonical JSON, so equal configurations share one link. The SPA opens `/s/<id>` via `GET /api/shares/{id}` (`openShareFromLocation` in `state/actions.ts`).
 - **`bundles.py`** — safe `.mimo.zip` reading for `/api/import/bundle`: declared sizes checked, members stream-read with byte caps, member count and total decompressed size bounded; every asset is validated before any is stored.
-- **`jobs.py`** — background export jobs (PDF report / angle-error PNG) with progress, cancel, download.
-- **`cli.py`** — `mimo-array-server` entry point (`--host`, `--port`, `--data-dir`; env `MIMO_DATA_DIR`).
+- **`jobs.py`** — background export jobs (PDF report / angle-error PNG) with progress, cancel, download. Finished jobs are pruned by age (24 h), count (100) and total size (1 GiB); more than 8 queued/running jobs → `JobQueueFullError` → 429.
+- **`cli.py`** — `mimo-array-server` entry point (`--host`, `--port`, `--data-dir`; env `MIMO_DATA_DIR`). On Linux it re-execs itself once with `MALLOC_ARENA_MAX=2` unless already set (glibc per-thread arenas otherwise keep RSS at several GB).
 
 ### Web client (`web/src/`)
 

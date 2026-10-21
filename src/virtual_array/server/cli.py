@@ -11,6 +11,9 @@ from pathlib import Path
 from ..version import APP_VERSION
 from .app import DATA_DIR_ENV, configure_server_logging, create_app, default_data_dir
 
+MALLOC_ARENA_ENV = "MALLOC_ARENA_MAX"
+DEFAULT_MALLOC_ARENAS = "2"
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -56,9 +59,32 @@ def data_dir_problem(data_dir: Path) -> str | None:
     return None
 
 
+def ensure_malloc_arena_limit() -> None:
+    """Re-run the command once with ``MALLOC_ARENA_MAX`` set (Linux/glibc only).
+
+    glibc gives every thread that allocates concurrently its own malloc arena
+    and rarely hands freed numpy buffers back to the OS, so a server answering
+    from a thread pool settles at several GB of RSS (1.7 GB vs 0.6 GB with two
+    arenas under the same load).  The limit is read only at process start,
+    hence the re-exec.  An existing value, whatever it is, is respected.
+    """
+    if not sys.platform.startswith("linux") or MALLOC_ARENA_ENV in os.environ or getattr(sys, "frozen", False):
+        return
+    orig_argv = getattr(sys, "orig_argv", None)
+    if not orig_argv:
+        return
+    os.environ[MALLOC_ARENA_ENV] = DEFAULT_MALLOC_ARENAS
+    try:
+        os.execv(sys.executable, [sys.executable, *orig_argv[1:]])
+    except OSError:
+        return  # keep running with the default allocator settings
+
+
 def main(argv: list[str] | None = None) -> None:
     import uvicorn
 
+    if argv is None:
+        ensure_malloc_arena_limit()
     args = build_parser().parse_args(argv)
     data_dir = (args.data_dir or default_data_dir()).expanduser().resolve()
     problem = data_dir_problem(data_dir)

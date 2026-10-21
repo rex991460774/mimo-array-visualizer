@@ -169,6 +169,12 @@ describe("errorMessage localisation", () => {
     expect(errorMessage(new ApiError("x", 507))).toContain("disk full");
   });
 
+  it("429 maps to the localised busy message", () => {
+    expect(errorMessage(new ApiError("The server is busy…", 429))).toContain("其他导出任务");
+    useStore.setState({ language: "en" });
+    expect(errorMessage(new ApiError("x", 429))).toContain("busy with other exports");
+  });
+
   it("other ApiErrors and plain errors pass their message through", () => {
     expect(errorMessage(new ApiError("Request body exceeds 16 MB.", 413))).toBe("Request body exceeds 16 MB.");
     expect(errorMessage(new Error("JSON parse error"))).toBe("JSON parse error");

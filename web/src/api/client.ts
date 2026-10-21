@@ -156,6 +156,7 @@ export function errorMessage(error: unknown): string {
   // Status 0 means the request never reached the server (stopped, restarting, offline).
   if (error instanceof ApiError && error.status === 0) return translate(useStore.getState().language, "app.offline");
   if (error instanceof ApiError && error.status === 507) return translate(useStore.getState().language, "app.storageError");
+  if (error instanceof ApiError && error.status === 429) return translate(useStore.getState().language, "app.busy");
   if (error instanceof ApiError) return error.message;
   if (error instanceof Error) return error.message;
   return String(error);

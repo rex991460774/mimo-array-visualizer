@@ -15,6 +15,8 @@ ExecStart=/opt/mimo-array-visualizer/.venv/bin/mimo-array-server --host 0.0.0.0 
 Restart=on-failure
 RestartSec=3
 Environment=MPLBACKEND=Agg
+# Two glibc malloc arenas keep RSS near 0.6 GB under load instead of several GB.
+Environment=MALLOC_ARENA_MAX=2
 
 [Install]
 WantedBy=multi-user.target

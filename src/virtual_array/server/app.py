@@ -289,6 +289,10 @@ def create_app(data_dir: str | Path | None = None, static_dir: str | Path | None
     def dbf_bank(request: BankRequest) -> dict[str, Any]:
         return engine.dbf_bank(request.project, request.axis)
 
+    @app.post("/api/noise")
+    def noise_accuracy(request: BankRequest) -> dict[str, Any]:
+        return engine.noise_accuracy(request.project, request.axis)
+
     @app.post("/api/dbf/2d")
     def dbf_2d(request: Dbf2dRequest) -> dict[str, Any]:
         frames = [(frame.azimuth, frame.elevation) for frame in request.frames]

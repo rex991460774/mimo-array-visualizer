@@ -10,6 +10,7 @@ import type {
   DbfBank,
   DictionaryPreview,
   ElementPatternPreview,
+  NoiseAccuracy,
   Evaluation,
   ImportResult,
   Job,
@@ -110,6 +111,8 @@ export const api = {
   compare: (projects: Project[]) => post<CompareItem[]>("/api/compare", { projects }),
   dbfBank: (project: Project, axis: Axis, signal?: AbortSignal) =>
     post<DbfBank>("/api/dbf/bank", { project, axis }, signal),
+  noise: (project: Project, axis: Axis, signal?: AbortSignal) =>
+    post<NoiseAccuracy>("/api/noise", { project, axis }, signal),
   dbf2d: (project: Project, frames: { azimuth: number; elevation: number }[], signal?: AbortSignal) =>
     post<Dbf2dResult>("/api/dbf/2d", { project, frames }, signal),
   uploadAsset: (file: File) => upload<AssetInfo>("/api/assets", file),

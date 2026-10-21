@@ -8,6 +8,8 @@ export type Language = "zh" | "en" | "ja";
 export type ThemeMode = "system" | "light" | "dark";
 export type DisplayMode = "db" | "magnitude";
 export type CoordUnit = "lambda" | "mm";
+/** Angle view: noise-free systematic error, or Monte Carlo accuracy with noise. */
+export type AngleMode = "ideal" | "noise";
 export type DialogId = "dictionary" | "patterns" | "report" | "projects" | "help" | "settings" | "share" | "saveConflict" | null;
 
 export interface StatusMessage {
@@ -32,6 +34,7 @@ interface PersistedState {
   display: DisplayMode;
   view: ViewId;
   coordUnit: CoordUnit;
+  angleMode: AngleMode;
 }
 
 function readPersisted(): Partial<PersistedState> {
@@ -62,7 +65,8 @@ function withDefaults(draft: Project, defaults: Project): Project {
   return {
     ...defaults,
     ...draft,
-    band: draft.band ?? defaults.band,
+    band: { ...defaults.band, ...(draft.band ?? {}) },
+    noise: draft.noise ?? defaults.noise,
     fov: draft.fov ?? defaults.fov,
     grid_step_lambda: draft.grid_step_lambda ?? defaults.grid_step_lambda,
     requirements: { ...defaults.requirements, ...(draft.requirements ?? {}) },
@@ -96,6 +100,7 @@ interface AppState {
   theme: ThemeMode;
   display: DisplayMode;
   coordUnit: CoordUnit;
+  angleMode: AngleMode;
   status: StatusMessage | null;
   evaluation: Evaluation | null;
   evaluationError: string | null;
@@ -117,6 +122,7 @@ interface AppState {
   setTheme(theme: ThemeMode): void;
   setDisplay(display: DisplayMode): void;
   setCoordUnit(unit: CoordUnit): void;
+  setAngleMode(mode: AngleMode): void;
   setEvaluation(evaluation: Evaluation | null, error: string | null): void;
   setEvaluating(evaluating: boolean): void;
 }
@@ -139,6 +145,7 @@ export const useStore = create<AppState>((set, get) => ({
   theme: persisted.theme ?? "system",
   display: persisted.display ?? "db",
   coordUnit: persisted.coordUnit ?? "lambda",
+  angleMode: persisted.angleMode ?? "ideal",
   status: null,
   evaluation: null,
   evaluationError: null,
@@ -260,6 +267,9 @@ export const useStore = create<AppState>((set, get) => ({
   setCoordUnit(coordUnit) {
     set({ coordUnit });
   },
+  setAngleMode(angleMode) {
+    set({ angleMode });
+  },
   setEvaluation(evaluation, error) {
     set({ evaluation, evaluationError: error });
   },
@@ -281,6 +291,7 @@ useStore.subscribe((state) => {
     display: state.display,
     view: state.view,
     coordUnit: state.coordUnit,
+    angleMode: state.angleMode,
   });
 });
 

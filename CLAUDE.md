@@ -45,14 +45,15 @@ docker compose up -d --build
 - **`element_pattern.py`** — element patterns and per-channel HFSS amplitude/phase series (`ChannelPatternSet`).
 - **`performance_report.py`** — multi-page PDF report, angle-error PNG, CSV/JSON data package (matplotlib).
 - **`phasor.py`** — fast `exp(1j*phase)` helper used in hot loops.
-- **`EvaluationSettings` / `evaluate_dbf_axis`** (in `analysis.py`) — FOV-bounded true angles, scan = FOV ± 10° guard, refined peaks (`dbf_refine_peak_angles`, 0.002°). The legacy bank functions keep the ±90° grid for backward compatibility.
+- **`EvaluationSettings` / `evaluate_dbf_axis`** (in `analysis.py`) — FOV-bounded true angles, scan = FOV ± 10° guard, refined peaks (`dbf_refine_peak_angles`, 0.002°). The legacy bank functions keep the ±90° grid for backward compatibility. `dictionary_array` builds the geometric dictionary from other electrical positions than the signals (dictionary fixed at the design frequency in the band sweep).
+- **`dbf_noise_accuracy`** (in `analysis.py`) — Monte Carlo accuracy with white noise at a per-virtual-channel boresight SNR (fixed seed, 200 trials per angle on `noise_true_angles`): RMSE/std/bias over main-lobe trials, outlier rate (peak outside the noise-free main lobe), single-snapshot CRB, and an SNR sweep (−20…40 dB, reusing one noise draw via D·s + σ·D·n) giving the threshold SNR (worst-angle outliers ≤1%).
 - **`requirements.py`** — `RequirementSpec` → `check_requirements()` pass/fail list; resolution uses the measured 3 dB beamwidth.
 
 ### Service layer
 
-- **`project.py`** — Pydantic `Project` document (schema version 2, coordinates in **λ at the design frequency `frequency_ghz`**), plus `band` (60G/77G/92G presets, sweep range), `fov`, `grid_step_lambda`, `requirements`. `project_array(project, operating_ghz)` scales electrical positions by f/f_design. v1 import keeps exact coordinates (no snapping). Imported files are referenced by asset ID. Converts to the core array via `project_array()` (λ → λ/2). Reads/writes the desktop-era v1 layout JSON (`layout_from_v1`, `layout_to_v1`).
+- **`project.py`** — Pydantic `Project` document (schema version 2, coordinates in **λ at the design frequency `frequency_ghz`**), plus `band` (60G/77G/92G presets, sweep range, `dictionary_frequency` operating/design), `fov`, `grid_step_lambda`, `requirements`, `noise.snr_db`. `project_array(project, operating_ghz)` scales electrical positions by f/f_design. v1 import keeps exact coordinates (no snapping). Imported files are referenced by asset ID. Converts to the core array via `project_array()` (λ → λ/2). Reads/writes the desktop-era v1 layout JSON (`layout_from_v1`, `layout_to_v1`).
 - **`assets.py`** — content-addressed store (`<data>/assets/<sha256>/<original name>`).
-- **`engine.py`** — `Engine` turns a project into core objects and returns JSON-ready payloads (`evaluate`, `dbf_bank`, `dbf_2d`, `band_sweep`, `compare`, `dictionary_preview`, `resolve_channel_patterns`, `layout_document`, `report_snapshot`). LRU caches are keyed by the JSON digest of only the fields each result depends on.
+- **`engine.py`** — `Engine` turns a project into core objects and returns JSON-ready payloads (`evaluate`, `dbf_bank`, `noise_accuracy`, `dbf_2d`, `band_sweep`, `compare`, `dictionary_preview`, `resolve_channel_patterns`, `layout_document`, `report_snapshot`). LRU caches are keyed by the JSON digest of only the fields each result depends on.
 
 ### Server (`src/virtual_array/server/`)
 
@@ -67,7 +68,7 @@ docker compose up -d --build
 
 - `api/` typed client + payload types (mirror `project.py` / `engine.py`).
 - `state/store.ts` (zustand: project, undo/redo of layout edits, selection, UI prefs; persisted to localStorage), `state/compute.ts` (debounced evaluation, DBF bank cache), `state/actions.ts` (save/open/import/export), `state/jobs.ts`.
-- `views/` — `ArrayView` (SVG `PhysicalEditor` with drag/snap/zoom + `VirtualPlot`), `DbfView` (1D playback, client-side from one bank request), `Dbf2dView` (heatmap, prefetching frame batches), `AngleView`, `BandView` (in-band performance + design comparison).
+- `views/` — `ArrayView` (SVG `PhysicalEditor` with drag/snap/zoom + `VirtualPlot`), `DbfView` (1D playback, client-side from one bank request), `Dbf2dView` (heatmap, prefetching frame batches), `AngleView` (noise-free bias or Monte Carlo accuracy with noise, `angleMode`), `BandView` (in-band performance with the dictionary-frequency toggle + design comparison).
 - `dialogs/` — evaluation settings (band/FOV/requirements/grid), DBF dictionary, channel amp/phase + element pattern, report, project library, help.
 - `i18n/messages.ts` — zh/en/ja strings (zh is the reference; a unit test checks keys and placeholders match).
 - `charts/` — lazily loaded Plotly wrapper and theme tokens.
@@ -78,6 +79,7 @@ docker compose up -d --build
 Browser edits Project ──POST /api/evaluate──▶ Engine.evaluate ─▶ ArrayMetrics + DBF angle metrics
                       ──POST /api/dbf/bank──▶ FOV true × (FOV±10°) scan spectra + refined peaks → 1D playback in browser
                       ──POST /api/band, /api/compare──▶ in-band sweep / design comparison summaries
+                      ──POST /api/noise─────▶ Monte Carlo RMSE / CRB / outlier-vs-SNR per axis
                       ──POST /api/dbf/2d────▶ batched 2D frames (Dbf2dScanner)
                       ──POST /api/reports───▶ background job → PDF/zip download
 ```

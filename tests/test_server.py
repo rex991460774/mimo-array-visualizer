@@ -484,6 +484,57 @@ def test_band_sweep_scales_electrical_spacing_with_frequency(client) -> None:
     assert width_at_stop < width_at_design
 
 
+def test_band_sweep_with_dictionary_fixed_at_design_frequency(client, project) -> None:
+    def max_errors(sweep: dict) -> list[float]:
+        return [point["angle"]["azimuth"]["focus_max_abs_error"] for point in sweep["points"]]
+
+    tracking = client.post("/api/band", json={"project": project}).json()
+    assert tracking["dictionary_frequency"] == "operating"
+    assert [point["dictionary_ghz"] for point in tracking["points"]] == [76.0, 77.0, 81.0]
+    assert max(max_errors(tracking)) < 1e-6
+
+    project["band"]["dictionary_frequency"] = "design"
+    fixed = client.post("/api/band", json={"project": project}).json()
+    assert fixed["dictionary_frequency"] == "design"
+    assert [point["dictionary_ghz"] for point in fixed["points"]] == [77.0, 77.0, 77.0]
+    start, design, stop = max_errors(fixed)
+    assert design < 1e-6
+    assert start > 0.5 and stop > 0.5
+    # The array-factor resolution is physical and does not depend on the dictionary.
+    assert fixed["points"][2]["resolution"] == tracking["points"][2]["resolution"]
+
+
+def test_noise_accuracy_endpoint(client, project) -> None:
+    project["noise"] = {"snr_db": 10.0}
+    response = client.post("/api/noise", json={"project": project, "axis": "azimuth"})
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["snr_db"] == 10.0 and payload["trials"] == 200
+    angles = payload["true_angles"]
+    assert angles[0] == -75 and angles[-1] == 75 and 0 in angles
+    for key in ("rmse", "std", "bias", "crb", "outlier_rate", "ambiguous"):
+        assert len(payload[key]) == len(angles)
+    summary = payload["summary"]
+    assert 0 < summary["boresight_crb"] < summary["max_crb"] < 1
+    assert summary["boresight_rmse"] == pytest.approx(summary["boresight_crb"], rel=0.25)
+    assert summary["max_outlier_rate"] == 0.0
+    assert summary["threshold_snr_db"] is not None and summary["threshold_snr_db"] < 10.0
+    assert len(payload["sweep"]["snr_db"]) == len(payload["sweep"]["max_outlier_rate"])
+
+    project["noise"] = {"snr_db": 30.0}
+    quieter = client.post("/api/noise", json={"project": project, "axis": "azimuth"}).json()
+    assert quieter["summary"]["boresight_crb"] == pytest.approx(summary["boresight_crb"] / 10, rel=1e-6)
+
+
+def test_noise_settings_default_and_bounds(client, project) -> None:
+    project.pop("noise", None)
+    response = client.post("/api/noise", json={"project": project, "axis": "elevation"})
+    assert response.status_code == 200
+    assert response.json()["snr_db"] == 10.0
+    project["noise"] = {"snr_db": 99}
+    assert client.post("/api/noise", json={"project": project, "axis": "elevation"}).status_code == 422
+
+
 def test_compare_summarises_several_projects(client, project) -> None:
     other = small_project()
     other["name"] = "small"

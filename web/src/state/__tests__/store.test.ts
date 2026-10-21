@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CONFIG, project, resetStore } from "../../__tests__/fixtures";
 import { projectSnapshot, useStore } from "../store";
 
@@ -139,6 +139,22 @@ describe("project lifecycle", () => {
     expect(s().project).toEqual(CONFIG.default_project);
   });
 
+  it("initialize keeps an old draft's band and fills newer fields", () => {
+    const defaults = { ...structuredClone(CONFIG.default_project), noise: { snr_db: 10 } };
+    defaults.band = { ...defaults.band, dictionary_frequency: "operating" };
+    const draft = structuredClone(CONFIG.default_project) as Partial<typeof defaults>;
+    draft.band = { preset: "custom", start_ghz: 77, stop_ghz: 79 };
+    delete draft.noise;
+    window.localStorage.setItem("mimo-array-workbench:v1", JSON.stringify({ project: draft }));
+    vi.resetModules();
+    return import("../store").then(({ useStore: fresh }) => {
+      fresh.getState().initialize({ ...CONFIG, default_project: defaults });
+      expect(fresh.getState().project!.band).toEqual({ preset: "custom", start_ghz: 77, stop_ghz: 79, dictionary_frequency: "operating" });
+      expect(fresh.getState().project!.noise).toEqual({ snr_db: 10 });
+      expect(fresh.getState().angleMode).toBe("ideal");
+    });
+  });
+
   it("persists the working draft and preferences to localStorage", () => {
     s().setLanguage("en");
     s().updateProject({ name: "Persisted" });
@@ -162,6 +178,7 @@ describe("project lifecycle", () => {
     s().setTheme("dark");
     s().setDisplay("magnitude");
     s().setCoordUnit("mm");
+    s().setAngleMode("noise");
     s().setEvaluating(true);
     s().setEvaluation(null, "boom");
     expect(s()).toMatchObject({
@@ -170,6 +187,7 @@ describe("project lifecycle", () => {
       theme: "dark",
       display: "magnitude",
       coordUnit: "mm",
+      angleMode: "noise",
       evaluating: true,
       evaluationError: "boom",
     });

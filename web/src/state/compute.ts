@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
-import type { Axis, DbfBank, Project } from "../api/types";
+import type { Axis, DbfBank, NoiseAccuracy, Project } from "../api/types";
 import { useStore } from "./store";
 
 const EVALUATE_DEBOUNCE_MS = 120;
@@ -20,6 +20,18 @@ export function dbfKey(project: Project): string {
     project.fov,
     project.ambiguity_margin_db,
   ]);
+}
+
+/** Default per-channel SNR for projects saved before the noise analysis existed (server default). */
+export const DEFAULT_SNR_DB = 10;
+
+export function snrOf(project: Project): number {
+  return project.noise?.snr_db ?? DEFAULT_SNR_DB;
+}
+
+/** Fields that affect the noise Monte Carlo: the DBF inputs plus element gain and SNR. */
+export function noiseKey(project: Project): string {
+  return JSON.stringify([dbfKey(project), project.element_pattern, snrOf(project)]);
 }
 
 export function useEvaluationSync(): void {
@@ -50,23 +62,33 @@ export function useEvaluationSync(): void {
   }, [key]);
 }
 
-const bankCache = new Map<string, Promise<DbfBank>>();
-const BANK_CACHE_LIMIT = 8;
+const REQUEST_CACHE_LIMIT = 8;
 
-export function fetchBank(project: Project, axis: Axis): Promise<DbfBank> {
-  const key = `${axis}|${dbfKey(project)}`;
-  let pending = bankCache.get(key);
+/** One shared request per key (bounded, oldest first out); failures are retried on the next call. */
+function memoized<T>(cache: Map<string, Promise<T>>, key: string, load: () => Promise<T>): Promise<T> {
+  let pending = cache.get(key);
   if (!pending) {
-    pending = api.dbfBank(project, axis);
-    pending.catch(() => bankCache.delete(key));
-    bankCache.set(key, pending);
-    while (bankCache.size > BANK_CACHE_LIMIT) {
-      const oldest = bankCache.keys().next().value;
+    pending = load();
+    pending.catch(() => cache.delete(key));
+    cache.set(key, pending);
+    while (cache.size > REQUEST_CACHE_LIMIT) {
+      const oldest = cache.keys().next().value;
       if (oldest === undefined) break;
-      bankCache.delete(oldest);
+      cache.delete(oldest);
     }
   }
   return pending;
+}
+
+const bankCache = new Map<string, Promise<DbfBank>>();
+const noiseCache = new Map<string, Promise<NoiseAccuracy>>();
+
+export function fetchBank(project: Project, axis: Axis): Promise<DbfBank> {
+  return memoized(bankCache, `${axis}|${dbfKey(project)}`, () => api.dbfBank(project, axis));
+}
+
+export function fetchNoise(project: Project, axis: Axis): Promise<NoiseAccuracy> {
+  return memoized(noiseCache, `${axis}|${noiseKey(project)}`, () => api.noise(project, axis));
 }
 
 export interface AsyncState<T> {
@@ -76,15 +98,28 @@ export interface AsyncState<T> {
 }
 
 export function useDbfBank(axis: Axis, enabled: boolean): AsyncState<DbfBank> {
+  return useAxisRequest(axis, enabled, dbfKey, fetchBank);
+}
+
+export function useNoiseAccuracy(axis: Axis, enabled: boolean): AsyncState<NoiseAccuracy> {
+  return useAxisRequest(axis, enabled, noiseKey, fetchNoise);
+}
+
+function useAxisRequest<T>(
+  axis: Axis,
+  enabled: boolean,
+  keyOf: (project: Project) => string,
+  load: (project: Project, axis: Axis) => Promise<T>,
+): AsyncState<T> {
   const project = useStore((state) => state.project);
-  const key = project ? dbfKey(project) : "";
-  const [state, setState] = useState<AsyncState<DbfBank>>({ data: null, error: null, loading: false });
+  const key = project ? keyOf(project) : "";
+  const [state, setState] = useState<AsyncState<T>>({ data: null, error: null, loading: false });
   useEffect(() => {
     if (!project || !enabled) return;
     let cancelled = false;
     setState((previous) => ({ ...previous, loading: true, error: null }));
     const timer = window.setTimeout(() => {
-      fetchBank(project, axis).then(
+      load(project, axis).then(
         (data) => !cancelled && setState({ data, error: null, loading: false }),
         (error) => !cancelled && setState({ data: null, error: errorMessage(error), loading: false }),
       );

@@ -448,6 +448,7 @@ def dbf_azimuth_spectrum_bank(
     rx_pattern: ElementPattern | None = None,
     channel_patterns: ChannelPatternSet | None = None,
     dbf_dictionary: DbfDictionaryConfig | None = None,
+    dictionary_array: AntennaArray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return DBF spectra for many true azimuth angles.
 
@@ -466,6 +467,7 @@ def dbf_azimuth_spectrum_bank(
         rx_pattern=rx_pattern,
         channel_patterns=channel_patterns,
         dbf_dictionary=dbf_dictionary,
+        dictionary_array=dictionary_array,
     )
 
 
@@ -477,6 +479,7 @@ def dbf_elevation_spectrum_bank(
     rx_pattern: ElementPattern | None = None,
     channel_patterns: ChannelPatternSet | None = None,
     dbf_dictionary: DbfDictionaryConfig | None = None,
+    dictionary_array: AntennaArray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return DBF spectra for many true elevation angles.
 
@@ -493,6 +496,7 @@ def dbf_elevation_spectrum_bank(
         rx_pattern=rx_pattern,
         channel_patterns=channel_patterns,
         dbf_dictionary=dbf_dictionary,
+        dictionary_array=dictionary_array,
     )
 
 
@@ -1005,6 +1009,7 @@ def _dbf_spectrum_bank(
     rx_pattern: ElementPattern | None = None,
     channel_patterns: ChannelPatternSet | None = None,
     dbf_dictionary: DbfDictionaryConfig | None = None,
+    dictionary_array: AntennaArray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     if axis not in {"azimuth", "elevation"}:
         raise ValueError(f"Unknown DBF axis: {axis!r}")
@@ -1015,6 +1020,7 @@ def _dbf_spectrum_bank(
         scan_angles_deg,
         channel_patterns=channel_patterns,
         dbf_dictionary=dbf_dictionary,
+        dictionary_array=dictionary_array,
     )
     response = _dbf_correlation_response(dictionary_for(scan_angles_deg), signal_phase)
     _ = tx_pattern, rx_pattern
@@ -1030,12 +1036,20 @@ def _dbf_axis_model(
     scan_angles_deg: np.ndarray | None,
     channel_patterns: ChannelPatternSet | None,
     dbf_dictionary: DbfDictionaryConfig | None,
+    dictionary_array: AntennaArray | None = None,
 ):  # noqa: ANN202 - returns (true, scan, signals, dictionary builder)
     """Signals for each true angle plus a dictionary builder for arbitrary angles.
 
     The steering sign of the automatic ideal dictionary is chosen once on the
     scan grid, so refined searches use exactly the same dictionary.
+    ``dictionary_array`` builds the geometric dictionary from other electrical
+    positions than the signals (a radar whose dictionary is fixed at the design
+    frequency while it operates elsewhere in the band); it must have the same
+    channels.
     """
+    scan_array = array if dictionary_array is None else dictionary_array
+    if (len(scan_array.tx), len(scan_array.rx)) != (len(array.tx), len(array.rx)):
+        raise ValueError("The dictionary array must have the same Tx/Rx channels as the signal array.")
     true_angles = (
         _default_dbf_angles() if true_angles_deg is None else np.asarray(true_angles_deg, dtype=float)
     )
@@ -1051,7 +1065,7 @@ def _dbf_axis_model(
     if dbf_dictionary is not None and not dbf_dictionary.uses_auto_ideal_sign:
         def dictionary_for(angles: np.ndarray) -> np.ndarray:
             return dbf_dictionary.scan_matrix(
-                array,
+                scan_array,
                 np.asarray(angles, dtype=float),
                 axis=axis,
                 channel_patterns=channel_patterns,
@@ -1064,11 +1078,12 @@ def _dbf_axis_model(
             signal_phase,
             axis=axis,
             channel_patterns=channel_patterns,
+            dictionary_array=scan_array,
         )
 
         def dictionary_for(angles: np.ndarray) -> np.ndarray:
             return _dbf_scan_matrix(
-                array,
+                scan_array,
                 np.asarray(angles, dtype=float),
                 axis=axis,
                 steering_sign=steering_sign,
@@ -1086,6 +1101,7 @@ def dbf_refine_peak_angles(
     channel_patterns: ChannelPatternSet | None = None,
     dbf_dictionary: DbfDictionaryConfig | None = None,
     stages: tuple[tuple[float, float], ...] = DBF_REFINE_STAGES,
+    dictionary_array: AntennaArray | None = None,
 ) -> np.ndarray:
     """Refine each frame's scan-grid peak by re-evaluating the correlation finely.
 
@@ -1108,13 +1124,35 @@ def dbf_refine_peak_angles(
         scan_angles,
         channel_patterns=channel_patterns,
         dbf_dictionary=dbf_dictionary,
+        dictionary_array=dictionary_array,
     )
-    low, high = float(scan_angles[0]), float(scan_angles[-1])
+    return _refine_estimates(
+        dictionary_for, signals, estimates, (float(scan_angles[0]), float(scan_angles[-1])), stages
+    )
+
+
+def _refine_estimates(
+    dictionary_for,  # noqa: ANN001 - angles -> (len(angles), channels) dictionary rows
+    signals: np.ndarray,
+    estimates: np.ndarray,
+    limits: tuple[float, float],
+    stages: tuple[tuple[float, float], ...] = DBF_REFINE_STAGES,
+    chunk: int = 32,
+    parabolic: bool = False,
+) -> np.ndarray:
+    """Staged fine search of the correlation peak around each estimate (one per signal column).
+
+    With ``parabolic`` the last stage's peak is interpolated from its two
+    neighbours, which reaches sub-step accuracy with a coarse last stage.
+    """
+    estimates = np.array(estimates, dtype=float)
+    low, high = limits
     signal_norms = np.linalg.norm(signals, axis=0)
-    for span, step in stages:
+    for stage, (span, step) in enumerate(stages):
         offsets = np.arange(-span, span + step / 2.0, step)
-        for start in range(0, len(true_angles), 32):
-            stop = min(start + 32, len(true_angles))
+        interpolate = parabolic and stage == len(stages) - 1
+        for start in range(0, len(estimates), chunk):
+            stop = min(start + chunk, len(estimates))
             candidates = np.clip(estimates[start:stop, None] + offsets[None, :], low, high)
             dictionary = dictionary_for(candidates.ravel()).reshape(
                 stop - start, len(offsets), -1
@@ -1128,7 +1166,18 @@ def dbf_refine_peak_angles(
                 where=norms > DBF_CORRELATION_EPS,
             )
             best = np.argmax(correlation, axis=1)
-            estimates[start:stop] = candidates[np.arange(stop - start), best]
+            rows = np.arange(stop - start)
+            estimates[start:stop] = candidates[rows, best]
+            if interpolate:
+                inner = (best > 0) & (best < len(offsets) - 1)
+                left = correlation[rows, np.maximum(best - 1, 0)]
+                centre = correlation[rows, best]
+                right = correlation[rows, np.minimum(best + 1, len(offsets) - 1)]
+                curvature = left - 2.0 * centre + right
+                usable = inner & (curvature < 0.0)
+                shift = np.zeros(stop - start)
+                shift[usable] = 0.5 * (left[usable] - right[usable]) / curvature[usable] * step
+                estimates[start:stop] = np.clip(estimates[start:stop] + shift, low, high)
     return estimates
 
 
@@ -1204,6 +1253,7 @@ def evaluate_dbf_axis(
     channel_patterns: ChannelPatternSet | None = None,
     dbf_dictionary: DbfDictionaryConfig | None = None,
     ambiguity_margin_db: float = DBF_AMBIGUITY_MARGIN_DB,
+    dictionary_array: AntennaArray | None = None,
 ) -> DbfAxisEvaluation:
     """FOV-bounded DBF evaluation of one axis with optional peak refinement."""
     bank = dbf_azimuth_spectrum_bank if axis == "azimuth" else dbf_elevation_spectrum_bank
@@ -1215,6 +1265,7 @@ def evaluate_dbf_axis(
         scan_angles_deg=settings.scan_angles(axis),
         channel_patterns=channel_patterns,
         dbf_dictionary=dbf_dictionary,
+        dictionary_array=dictionary_array,
     )
     estimates = (
         dbf_refine_peak_angles(
@@ -1225,6 +1276,7 @@ def evaluate_dbf_axis(
             spectra,
             channel_patterns=channel_patterns,
             dbf_dictionary=dbf_dictionary,
+            dictionary_array=dictionary_array,
         )
         if settings.refine_peaks
         else None
@@ -1241,6 +1293,213 @@ def evaluate_dbf_axis(
         focus_range_deg=settings.fov(axis),
     )
     return DbfAxisEvaluation(axis, true_angles, scan_angles, spectra, frame_series, metrics)
+
+
+NOISE_TRIALS = 200
+NOISE_SEED = 20261021
+NOISE_ANGLE_POINTS = 30
+NOISE_SNR_SWEEP_DB = tuple(float(value) for value in range(-20, 41))
+NOISE_OUTLIER_LIMIT = 0.01
+NOISE_CRB_STEP_DEG = 0.01
+# One 0.1° search ±1° around the scan-grid peak plus parabolic interpolation:
+# within ~0.0005° of the two-stage search at a fraction of its cost.
+NOISE_REFINE_STAGES = ((1.0, 0.1),)
+
+
+@dataclass(frozen=True)
+class DbfNoiseAccuracy:
+    """Angle accuracy of one axis with white noise on every virtual channel.
+
+    ``snr_db`` is the per-virtual-channel SNR of a boresight target after the
+    range/Doppler FFTs (single snapshot); off-boresight targets lose SNR with
+    the element and channel pattern gain.  A trial is an *outlier* when its
+    peak leaves the main lobe of the noise-free spectrum (a jump to a sidelobe
+    or grating lobe); RMSE, standard deviation and bias are over the other
+    trials.  ``ambiguous`` marks angles whose noise-free peak is already
+    outside the true angle's main lobe; they are excluded from the sweep.
+    """
+
+    axis: str
+    snr_db: float
+    trials: int
+    true_angles_deg: np.ndarray
+    rmse_deg: np.ndarray
+    std_deg: np.ndarray
+    bias_deg: np.ndarray
+    crb_deg: np.ndarray
+    outlier_rate: np.ndarray
+    ambiguous: np.ndarray
+    sweep_snr_db: np.ndarray
+    sweep_max_outlier_rate: np.ndarray
+    sweep_mean_outlier_rate: np.ndarray
+    outlier_limit: float
+    threshold_snr_db: float | None
+
+
+def noise_true_angles(fov_deg: tuple[float, float], points: int = NOISE_ANGLE_POINTS) -> np.ndarray:
+    """About ``points`` whole-degree true angles across the FOV, always including 0°."""
+    low, high = float(fov_deg[0]), float(fov_deg[1])
+    step = max(1.0, float(round((high - low) / points)))
+    negative = -np.arange(step, -low + 1e-9, step)[::-1]
+    positive = np.arange(0.0, high + 1e-9, step)
+    return np.concatenate([negative, positive])
+
+
+def dbf_noise_accuracy(
+    array: AntennaArray,
+    axis: str,
+    settings: EvaluationSettings,
+    snr_db: float,
+    channel_patterns: ChannelPatternSet | None = None,
+    dbf_dictionary: DbfDictionaryConfig | None = None,
+    element_pattern: ElementPattern | None = None,
+    dictionary_array: AntennaArray | None = None,
+    trials: int = NOISE_TRIALS,
+    sweep_snr_db: tuple[float, ...] = NOISE_SNR_SWEEP_DB,
+    outlier_limit: float = NOISE_OUTLIER_LIMIT,
+    seed: int = NOISE_SEED,
+) -> DbfNoiseAccuracy:
+    """Monte Carlo DBF accuracy at ``snr_db`` plus the Cramér-Rao bound and an SNR sweep.
+
+    The estimator is the same as the noise-free evaluation (scan-grid peak,
+    then the staged fine search), so at high SNR its spread approaches the
+    single-source CRB when the dictionary matches the channels.  The sweep
+    reuses one set of noise draws: by linearity the scan response is
+    ``D·s + σ·D·n``, so each SNR level costs one magnitude/argmax pass.
+    """
+    if axis not in {"azimuth", "elevation"}:
+        raise ValueError(f"Unknown DBF axis: {axis!r}")
+    if trials < 1:
+        raise ValueError("trials must be at least 1.")
+    true_angles = noise_true_angles(settings.fov(axis))
+    scan_angles = settings.scan_angles(axis)
+    true_angles, scan_angles, signals, dictionary_for = _dbf_axis_model(
+        array,
+        axis,
+        true_angles,
+        scan_angles,
+        channel_patterns=channel_patterns,
+        dbf_dictionary=dbf_dictionary,
+        dictionary_array=dictionary_array,
+    )
+
+    def gain(angles: np.ndarray) -> np.ndarray | float:
+        azimuths, elevations = _axis_pattern_angles(axis, angles)
+        return _element_pattern_weight(element_pattern, azimuths, elevations) ** 2
+
+    signals = np.asarray(signals, dtype=complex) * gain(true_angles)
+    boresight = int(np.argmin(np.abs(true_angles)))
+    reference_power = float(np.mean(np.abs(signals[:, boresight]) ** 2))
+    if not reference_power > DBF_CORRELATION_EPS:
+        raise ValueError("The channel response at boresight is zero; SNR is undefined.")
+
+    dictionary = np.asarray(dictionary_for(scan_angles), dtype=complex)
+    row_norms = np.linalg.norm(dictionary, axis=1)
+    dictionary = np.divide(
+        dictionary, row_norms[:, None], out=np.zeros_like(dictionary), where=row_norms[:, None] > DBF_CORRELATION_EPS
+    )
+    clean = dictionary @ signals  # (scan, angles)
+    clean_db = 20.0 * np.log10(np.maximum(np.abs(clean), 1e-12))
+    lobes = []
+    ambiguous = np.zeros(len(true_angles), dtype=bool)
+    for index in range(len(true_angles)):
+        peak = int(np.argmax(clean_db[:, index]))
+        left, right = _dbf_main_lobe_bounds(clean_db[:, index], peak)
+        lobes.append((left, right))
+        ambiguous[index] = not (scan_angles[left] <= true_angles[index] <= scan_angles[right])
+    lobe_left = np.array([left for left, _right in lobes])[:, None]
+    lobe_right = np.array([right for _left, right in lobes])[:, None]
+
+    rng = np.random.default_rng(seed)
+    shape = (signals.shape[0], len(true_angles), trials)
+    noise = (rng.standard_normal(shape) + 1j * rng.standard_normal(shape)) / math.sqrt(2.0)
+    # Single precision is ample for locating the scan-grid peak and halves the sweep cost.
+    noise_response = np.einsum("sn,nat->sat", dictionary, noise).astype(np.complex64)
+    clean_single = clean.astype(np.complex64)[:, :, None]
+
+    def outliers_at(level_db: float) -> tuple[np.ndarray, np.ndarray]:
+        sigma = np.float32(math.sqrt(reference_power / 10.0 ** (level_db / 10.0)))
+        response = clean_single + sigma * noise_response
+        power = response.real**2 + response.imag**2
+        peaks = np.argmax(power, axis=0)  # (angles, trials)
+        return peaks, (peaks < lobe_left) | (peaks > lobe_right)
+
+    sweep = np.asarray(sweep_snr_db, dtype=float)
+    valid = ~ambiguous
+    sweep_max = np.full(len(sweep), np.nan)
+    sweep_mean = np.full(len(sweep), np.nan)
+    for level, value in enumerate(sweep):
+        _peaks, outlier = outliers_at(float(value))
+        rates = outlier.mean(axis=1)
+        if np.any(valid):
+            sweep_max[level] = float(np.max(rates[valid]))
+            sweep_mean[level] = float(np.mean(rates[valid]))
+    threshold: float | None = None
+    if np.any(valid):
+        passing = sweep_max <= outlier_limit
+        # Lowest level from which every higher level also passes.
+        for level in range(len(sweep) - 1, -1, -1):
+            if not passing[level]:
+                break
+            threshold = float(sweep[level])
+
+    peaks, outlier = outliers_at(float(snr_db))
+    sigma = math.sqrt(reference_power / 10.0 ** (float(snr_db) / 10.0))
+    received = (signals[:, :, None] + sigma * noise).reshape(signals.shape[0], -1)
+    estimates = scan_angles[peaks.ravel()].astype(float)
+    if settings.refine_peaks and not _dictionary_is_nearest_neighbour(dbf_dictionary, axis):
+        estimates = _refine_estimates(
+            dictionary_for,
+            received,
+            estimates,
+            (float(scan_angles[0]), float(scan_angles[-1])),
+            stages=NOISE_REFINE_STAGES,
+            chunk=256,
+            parabolic=True,
+        )
+    errors = estimates.reshape(len(true_angles), trials) - true_angles[:, None]
+    inlier = ~outlier
+    counts = inlier.sum(axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        masked = np.where(inlier, errors, 0.0)
+        bias = masked.sum(axis=1) / counts
+        rmse = np.sqrt((masked**2).sum(axis=1) / counts)
+        std = np.sqrt(np.maximum(rmse**2 - bias**2, 0.0))
+    empty = counts == 0
+    bias[empty] = rmse[empty] = std[empty] = np.nan
+
+    step = NOISE_CRB_STEP_DEG
+    plus = _dbf_signal_matrix(array, true_angles + step, axis=axis, channel_patterns=channel_patterns)
+    minus = _dbf_signal_matrix(array, true_angles - step, axis=axis, channel_patterns=channel_patterns)
+    plus = np.asarray(plus, dtype=complex) * gain(true_angles + step)
+    minus = np.asarray(minus, dtype=complex) * gain(true_angles - step)
+    derivative = (plus - minus) / (2.0 * math.radians(step))
+    signal_energy = np.sum(np.abs(signals) ** 2, axis=0)
+    cross = np.sum(np.conjugate(signals) * derivative, axis=0)
+    information = np.sum(np.abs(derivative) ** 2, axis=0) - np.abs(cross) ** 2 / np.maximum(
+        signal_energy, DBF_CORRELATION_EPS
+    )
+    with np.errstate(invalid="ignore", divide="ignore"):
+        crb = np.degrees(np.sqrt(sigma**2 / (2.0 * information)))
+    crb[~(information > 0)] = np.inf
+
+    return DbfNoiseAccuracy(
+        axis=axis,
+        snr_db=float(snr_db),
+        trials=trials,
+        true_angles_deg=true_angles,
+        rmse_deg=rmse,
+        std_deg=std,
+        bias_deg=bias,
+        crb_deg=crb,
+        outlier_rate=outlier.mean(axis=1),
+        ambiguous=ambiguous,
+        sweep_snr_db=sweep,
+        sweep_max_outlier_rate=sweep_max,
+        sweep_mean_outlier_rate=sweep_mean,
+        outlier_limit=float(outlier_limit),
+        threshold_snr_db=threshold,
+    )
 
 
 def _dbf_correlation_response(
@@ -1491,6 +1750,7 @@ def _select_dbf_steering_sign(
     signal_phase: np.ndarray,
     axis: str,
     channel_patterns: ChannelPatternSet | None,
+    dictionary_array: AntennaArray | None = None,
 ) -> int:
     if not _channel_pattern_has_phase(channel_patterns, array, axis):
         return DBF_DEFAULT_STEERING_SIGN
@@ -1502,7 +1762,7 @@ def _select_dbf_steering_sign(
     candidates: list[tuple[float, int]] = []
     for steering_sign in (DBF_DEFAULT_STEERING_SIGN, 1):
         dictionary = _dbf_scan_matrix(
-            array,
+            array if dictionary_array is None else dictionary_array,
             scan_angles_deg,
             axis=axis,
             steering_sign=steering_sign,

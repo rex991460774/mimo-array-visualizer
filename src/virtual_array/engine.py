@@ -34,8 +34,10 @@ from .analysis import (
     Dbf2dScanner,
     DbfAngleMetrics,
     DbfAxisEvaluation,
+    DbfNoiseAccuracy,
     EvaluationSettings,
     calculate_metrics_and_psf,
+    dbf_noise_accuracy,
     evaluate_dbf_axis,
 )
 from .assets import AssetStore
@@ -136,6 +138,9 @@ class StudyContext:
     dictionary: DbfDictionaryConfig
     settings: EvaluationSettings
     operating_ghz: float
+    # Electrical positions the geometric DBF dictionary is built from.
+    dictionary_array: AntennaArray
+    dictionary_ghz: float
 
 
 def encode_array(values: np.ndarray, dtype: str = "float32") -> dict[str, Any]:
@@ -177,6 +182,7 @@ class Engine:
         self._dictionary_tables = _LruCache(16)
         self._metrics = _LruCache(16)
         self._banks = _LruCache(16)
+        self._noise = _LruCache(8)
         self._scanners = _LruCache(2)
 
     # ── Project → core objects ───────────────────────────────────────
@@ -186,6 +192,8 @@ class Engine:
         self._require_assets(project)
         frequency = project.frequency_ghz if operating_ghz is None else float(operating_ghz)
         array = project_array(project, frequency)
+        dictionary_ghz = project.frequency_ghz if project.band.dictionary_frequency == "design" else frequency
+        dictionary_array = array if dictionary_ghz == frequency else project_array(project, dictionary_ghz)
         return StudyContext(
             project=project,
             array=array,
@@ -194,6 +202,8 @@ class Engine:
             dictionary=self._dictionary_config(project, array),
             settings=evaluation_settings(project),
             operating_ghz=frequency,
+            dictionary_array=dictionary_array,
+            dictionary_ghz=dictionary_ghz,
         )
 
     def _require_assets(self, project: Project) -> None:
@@ -284,6 +294,7 @@ class Engine:
             [
                 project.model_dump(include=fields | {"layout", "fov"}),
                 round(context.operating_ghz / project.frequency_ghz, 12),
+                round(context.dictionary_ghz / project.frequency_ghz, 12),
             ]
         )
 
@@ -324,11 +335,34 @@ class Engine:
                     channel_patterns=context.channel_patterns,
                     dbf_dictionary=context.dictionary,
                     ambiguity_margin_db=context.project.ambiguity_margin_db,
+                    dictionary_array=context.dictionary_array,
                 )
             except ValueError as exc:
                 raise ProjectComputationError(str(exc)) from exc
 
         return self._banks.get_or_create((self._dbf_key(context), axis), build)
+
+    def _noise_accuracy(self, context: StudyContext, axis: str) -> DbfNoiseAccuracy:
+        if axis not in AXES:
+            raise ValueError(f"Unknown DBF axis: {axis!r}")
+
+        def build() -> DbfNoiseAccuracy:
+            try:
+                return dbf_noise_accuracy(
+                    context.array,
+                    axis,
+                    context.settings,
+                    context.project.noise.snr_db,
+                    channel_patterns=context.channel_patterns,
+                    dbf_dictionary=context.dictionary,
+                    element_pattern=context.element_pattern,
+                    dictionary_array=context.dictionary_array,
+                )
+            except ValueError as exc:
+                raise ProjectComputationError(str(exc)) from exc
+
+        key = self._key(context, {"channel_patterns", "dbf_dictionary", "element_pattern", "noise"})
+        return self._noise.get_or_create((key, axis), build)
 
     def _angle_metrics(
         self, context: StudyContext, capability: dict[str, bool]
@@ -428,6 +462,48 @@ class Engine:
             "metrics": angle_metrics_payload(evaluation.metrics),
         }
 
+    def noise_accuracy(self, project: Project, axis: str) -> dict[str, Any]:
+        """Monte Carlo angle accuracy with noise at ``project.noise.snr_db`` (design frequency)."""
+        context = self.context(project)
+        result = self._noise_accuracy(context, axis)
+        valid = ~result.ambiguous
+        boresight = int(np.argmin(np.abs(result.true_angles_deg)))
+
+        def worst(values: np.ndarray) -> float | None:
+            finite = values[valid & np.isfinite(values)]
+            return float(np.max(finite)) if finite.size else None
+
+        return {
+            "axis": axis,
+            "fov": list(context.settings.fov(axis)),
+            "snr_db": result.snr_db,
+            "trials": result.trials,
+            "true_angles": num_list(result.true_angles_deg),
+            "rmse": num_list(result.rmse_deg, 5),
+            "std": num_list(result.std_deg, 5),
+            "bias": num_list(result.bias_deg, 5),
+            "crb": num_list(result.crb_deg, 5),
+            "outlier_rate": num_list(result.outlier_rate, 4),
+            "ambiguous": [bool(value) for value in result.ambiguous],
+            "sweep": {
+                "snr_db": num_list(result.sweep_snr_db),
+                "max_outlier_rate": num_list(result.sweep_max_outlier_rate, 4),
+                "mean_outlier_rate": num_list(result.sweep_mean_outlier_rate, 4),
+            },
+            "summary": {
+                "boresight_rmse": num(result.rmse_deg[boresight]),
+                "boresight_crb": num(result.crb_deg[boresight]),
+                "max_rmse": num(worst(result.rmse_deg)),
+                "max_crb": num(worst(result.crb_deg)),
+                "max_outlier_rate": num(worst(result.outlier_rate)),
+                "ambiguous_count": int(np.count_nonzero(result.ambiguous)),
+                "outlier_limit": result.outlier_limit,
+                "threshold_snr_db": num(result.threshold_snr_db),
+                "sweep_min_db": num(result.sweep_snr_db[0]),
+                "sweep_max_db": num(result.sweep_snr_db[-1]),
+            },
+        }
+
     def _scanner(self, context: StudyContext) -> Dbf2dScanner:
         return self._scanners.get_or_create(
             self._dbf_key(context),
@@ -476,6 +552,7 @@ class Engine:
         checks = self._checks(context, metrics, angle)
         return {
             "frequency_ghz": context.operating_ghz,
+            "dictionary_ghz": context.dictionary_ghz,
             "wavelength_mm": LIGHT_SPEED_MM_PER_NS / context.operating_ghz,
             "capability": capability,
             "resolution": resolution_payload(metrics),
@@ -517,6 +594,7 @@ class Engine:
         return {
             "band": band.model_dump(),
             "design_ghz": project.frequency_ghz,
+            "dictionary_frequency": band.dictionary_frequency,
             "design_in_band": band.start_ghz <= project.frequency_ghz <= band.stop_ghz,
             "uses_single_frequency_data": uses_measured_phase,
             "points": points,

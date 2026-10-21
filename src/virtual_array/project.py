@@ -39,6 +39,7 @@ GRID_STEP_LAMBDA = 0.5
 HALF_LAMBDA_PER_LAMBDA = 2.0
 DEFAULT_FREQUENCY_GHZ = 77.0
 DEFAULT_AMBIGUITY_MARGIN_DB = 0.5
+DEFAULT_SNR_DB = 10.0
 AUTO_LAYOUT_SPACING_LAMBDA = 1.0
 AUTO_LAYOUT_TX_Y_LAMBDA = 2.0
 AUTO_LAYOUT_RX_Y_LAMBDA = -2.0
@@ -138,6 +139,10 @@ class Band(_Model):
     preset: Literal["60G", "77G", "92G", "custom"] = "77G"
     start_ghz: float = Field(default=76.0, gt=0.0, le=1000.0)
     stop_ghz: float = Field(default=81.0, gt=0.0, le=1000.0)
+    # Frequency of the geometric DBF dictionary when evaluating across the band:
+    # "operating" regenerates it for every operating frequency, "design" keeps
+    # the design-frequency dictionary (firmware with one fixed steering table).
+    dictionary_frequency: Literal["operating", "design"] = "operating"
 
     @model_validator(mode="after")
     def _ordered(self) -> Band:
@@ -173,6 +178,13 @@ class Requirements(_Model):
     max_psl_db: float | None = Field(default=None, le=0.0, ge=-80.0)
 
 
+class NoiseSettings(_Model):
+    """Noise scenario for the angle-accuracy Monte Carlo."""
+
+    # Per-virtual-channel SNR of a boresight target after the range/Doppler FFTs.
+    snr_db: float = Field(default=DEFAULT_SNR_DB, ge=-20.0, le=40.0)
+
+
 class Project(_Model):
     version: int = PROJECT_SCHEMA_VERSION
     name: str = Field(default="未命名阵列", max_length=120)
@@ -183,6 +195,7 @@ class Project(_Model):
     fov: FieldOfView = Field(default_factory=FieldOfView)
     grid_step_lambda: float = 0.5
     requirements: Requirements = Field(default_factory=Requirements)
+    noise: NoiseSettings = Field(default_factory=NoiseSettings)
     layout: Layout
     dbf_dictionary: DictionarySettings = Field(default_factory=DictionarySettings)
     element_pattern: ElementPatternSettings | None = None

@@ -42,10 +42,19 @@ export interface ChannelPatternBinding {
 
 export type BandPreset = "60G" | "77G" | "92G" | "custom";
 
+/** Frequency of the geometric DBF dictionary across the band (missing in older documents: "operating"). */
+export type DictionaryFrequency = "operating" | "design";
+
 export interface Band {
   preset: BandPreset;
   start_ghz: number;
   stop_ghz: number;
+  dictionary_frequency?: DictionaryFrequency;
+}
+
+/** Per-virtual-channel SNR of a boresight target after the range/Doppler FFTs. */
+export interface NoiseSettings {
+  snr_db: number;
 }
 
 export interface FieldOfView {
@@ -73,6 +82,8 @@ export interface Project {
   fov: FieldOfView;
   grid_step_lambda: number;
   requirements: Requirements;
+  /** Missing in documents saved before the noise analysis existed. */
+  noise?: NoiseSettings;
   layout: Layout;
   dbf_dictionary: DictionarySettings;
   element_pattern: ElementPatternSettings | null;
@@ -171,6 +182,7 @@ export interface LayoutCheck {
 
 export interface PerformanceSummary {
   frequency_ghz: number;
+  dictionary_ghz?: number;
   wavelength_mm: number;
   capability: { azimuth: boolean; elevation: boolean; two_d: boolean };
   resolution: Record<Axis, AxisResolution>;
@@ -186,6 +198,7 @@ export interface PerformanceSummary {
 export interface BandSweep {
   band: Band;
   design_ghz: number;
+  dictionary_frequency?: DictionaryFrequency;
   design_in_band: boolean;
   uses_single_frequency_data: boolean;
   points: (PerformanceSummary & { role: string })[];
@@ -396,4 +409,32 @@ export interface ServerConfig {
   };
   band_presets: Record<"60G" | "77G" | "92G", { start_ghz: number; stop_ghz: number; design_ghz: number }>;
   dbf: { scan_fov: [number, number]; scan_step_deg: number; scan_grid_size: number };
+}
+
+/** Monte Carlo angle accuracy with noise (POST /api/noise). */
+export interface NoiseAccuracy {
+  axis: Axis;
+  fov: [number, number];
+  snr_db: number;
+  trials: number;
+  true_angles: number[];
+  rmse: WireNumber[];
+  std: WireNumber[];
+  bias: WireNumber[];
+  crb: WireNumber[];
+  outlier_rate: WireNumber[];
+  ambiguous: boolean[];
+  sweep: { snr_db: number[]; max_outlier_rate: WireNumber[]; mean_outlier_rate: WireNumber[] };
+  summary: {
+    boresight_rmse: WireNumber;
+    boresight_crb: WireNumber;
+    max_rmse: WireNumber;
+    max_crb: WireNumber;
+    max_outlier_rate: WireNumber;
+    ambiguous_count: number;
+    outlier_limit: number;
+    threshold_snr_db: WireNumber;
+    sweep_min_db: number;
+    sweep_max_db: number;
+  };
 }

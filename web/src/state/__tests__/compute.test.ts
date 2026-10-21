@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { EVALUATION, jsonResponse, project, resetStore } from "../../__tests__/fixtures";
-import { dbfKey, evaluationKey, fetchBank, useEvaluationSync } from "../compute";
+import { dbfKey, evaluationKey, fetchBank, fetchNoise, noiseKey, snrOf, useEvaluationSync } from "../compute";
 import { useStore } from "../store";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -22,6 +22,36 @@ describe("cache keys", () => {
     const moved = project();
     moved.layout.tx[0] = { x: -1, y: 0 };
     expect(dbfKey(moved)).not.toBe(dbfKey(project()));
+  });
+});
+
+describe("noise key", () => {
+  it("depends on SNR and element pattern but not on frequency, band or name", () => {
+    const base = project();
+    expect(snrOf(base)).toBe(10);
+    expect(noiseKey(project({ noise: { snr_db: 10 } }))).toBe(noiseKey(base));
+    expect(noiseKey(project({ noise: { snr_db: 20 } }))).not.toBe(noiseKey(base));
+    expect(noiseKey(project({ element_pattern: { asset: "a".repeat(64), swap_axes: false } }))).not.toBe(noiseKey(base));
+    expect(noiseKey(project({ name: "x", frequency_ghz: 79 }))).toBe(noiseKey(base));
+    expect(noiseKey(project({ band: { ...base.band, dictionary_frequency: "design" } }))).toBe(noiseKey(base));
+  });
+
+  it("dictionary frequency only changes the evaluation (band sweep) key", () => {
+    const base = project();
+    const fixed = project({ band: { ...base.band, dictionary_frequency: "design" } });
+    expect(dbfKey(fixed)).toBe(dbfKey(base));
+    expect(evaluationKey(fixed)).not.toBe(evaluationKey(base));
+  });
+
+  it("fetchNoise shares one request per (axis, noise key)", async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ ok: true }));
+    const p = project({ noise: { snr_db: 33 } });
+    const first = fetchNoise(p, "azimuth");
+    expect(fetchNoise(project({ ...p, name: "renamed" }), "azimuth")).toBe(first);
+    await first;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/api\/noise$/);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({ axis: "azimuth", project: { noise: { snr_db: 33 } } });
   });
 });
 

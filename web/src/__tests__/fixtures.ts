@@ -27,6 +27,7 @@ export function resetStore(language: "zh" | "en" | "ja" = "zh"): void {
     dialog: null,
     language,
     coordUnit: "lambda",
+    angleMode: "ideal",
     status: null,
     evaluation: null,
     evaluationError: null,

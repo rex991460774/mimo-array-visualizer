@@ -69,9 +69,17 @@
 
 <sub>示例：导入一组模拟的 HFSS 通道相位后，理想字典下方位视场内最大误差为 0.054°。测角误差图 PNG 可通过「导出 → 导出测角误差图 PNG」生成。</sub>
 
+上面是「无噪声」模式：它只反映字典与通道真实响应不一致带来的**系统偏差**，字典和通道都理想时，任何布局的误差都是 0。比较不同布局的测角精度，请切换到「加噪声」模式：输入单通道 SNR（视轴目标、距离-多普勒 FFT 之后，单快拍），每个角度做 200 次蒙特卡洛，给出：
+
+- **RMSE 与克拉美-罗界（CRB）**：理想字典下 DBF 峰值就是最大似然估计，高 SNR 时 RMSE 贴近 CRB；口径越大、阵元分布越靠两端，CRB 越小。
+- **异常值概率 vs SNR**：峰值跳出主瓣（跳到旁瓣或栅瓣）的概率随 SNR 变化的曲线，以及**门限 SNR**（视场内所有角度异常值都 ≤1% 所需的最低 SNR）。旁瓣高、竞争峰裕量小的布局门限更高，这是比较稀疏布局最直接的指标。
+
+<img src="docs/images/angle-noise.png" alt="测角性能（加噪声）：RMSE 与 CRB、异常值概率随 SNR 的变化" width="100%">
+
 ### 频段内性能与方案对比
 
 - **频段内性能**：天线物理位置固定，在扫频起止频率和设计频率处重新评估分辨率、不模糊范围、误差、裕量和 PSL，并逐项做规格判定。下图中，Case4 在 81 GHz 处方位不模糊范围缩到 ±64°、竞争峰裕量降到 0.5 dB：这正是 FMCW 扫频内栅瓣起始角漂移的结果。
+- **DBF 字典频率**：「跟随工作频率」表示固件按实际中心频率生成导向矢量；「固定在设计频率」表示整个频段只用一套导向表，此时偏离设计频率会让 sinθ 的估计按 f/f₀ 缩放（例如字典 77 GHz、工作在 81 GHz，15° 目标会测成 15.8°）。
 - **方案对比**：从项目库勾选最多 7 个方案（例如 60 / 77 / 92 GHz 各自的阵列），与当前项目并排比较。每个方案使用自己的频段、视场和规格。
 
 <img src="docs/images/band-compare.png" alt="频段与对比：频段内性能表和多方案对比" width="100%">
@@ -238,8 +246,9 @@ sudo systemctl restart mimo-array             # 或停止后重新运行上面�
 - **频段**：60G（57–64 GHz）、77G（76–81 GHz）、92G（默认 90–94 GHz，需按芯片修改）预设，也可自定义扫频范围。
 - **评估视场**：测角评估与方向图指标都限定在雷达视场内（DBF 搜索范围外扩 10°），视场外的栅瓣不计为视场内模糊。
 - **测角指标**：不模糊范围、视场内最大误差（峰值细化到 0.002°）、竞争峰裕量、截断原因。
+- **噪声下测角精度**：按单通道 SNR 做蒙特卡洛，给出 RMSE、克拉美-罗界、异常值概率曲线和门限 SNR；单元方向图会降低偏轴目标的 SNR。
 - **方向图指标**：实测 3 dB 分辨率、PSL（主瓣取到第一零点）、ISLR、第一旁瓣、栅瓣。
-- **频段内性能**：天线物理位置固定，在扫频起止与设计频率处重新评估。
+- **频段内性能**：天线物理位置固定，在扫频起止与设计频率处重新评估；DBF 字典可跟随工作频率或固定在设计频率。
 - **规格检查**：分辨率、视场内不模糊、视场内最大误差、竞争峰裕量、2D 峰值旁瓣逐项判定。
 - **方案对比**：项目库中的多个方案与当前项目并排比较。
 
@@ -275,7 +284,9 @@ sudo systemctl restart mimo-array             # 或停止后重新运行上面�
 | PSL 主瓣区 | 主峰两侧至第一零点（至少下降 3 dB） | 固定 ±2°/±6° 保护区会把小阵列（如 60 GHz 3T4R）的主瓣算成旁瓣 |
 | 测角范围 | 真实角在视场内 1° 步进；搜索范围外扩 10° | 实际雷达只在视场内搜索；全 ±90° 搜索会把视场外栅瓣误判为模糊 |
 | 测角误差 | 1° 网格取峰后，在峰附近重新计算相关并细化到 0.002° | 只用 1° 网格时误差只能是整数度，无法评估 HFSS 实测数据的亚度级误差 |
-| 频段内性能 | 物理坐标固定，电长度按 f/f<sub>设计</sub> 缩放；字典按工作频率匹配 | 反映 FMCW 扫频内栅瓣起始角和分辨率的漂移 |
+| 频段内性能 | 物理坐标固定，电长度按 f/f<sub>设计</sub> 缩放；字典默认按工作频率生成，也可固定在设计频率 | 反映 FMCW 扫频内栅瓣起始角和分辨率的漂移；固定字典再现只有一套导向表的固件的 sinθ 缩放误差 |
+| 噪声下精度 | 每个视场角度 200 次蒙特卡洛（固定随机种子），与无噪声评估相同的取峰和细化；同时给出单快拍、未知复幅度下的 CRB | 无噪声误差只反映模型失配；布局优劣体现在噪声下的 RMSE 和异常值门限 |
+| 异常值与门限 SNR | 峰值落在无噪声谱主瓣（第一零点之间）以外记为异常值；SNR 从 −20 到 40 dB 每 1 dB 扫描，门限为此后所有 SNR 下视场内最差角度异常值率都 ≤1% 的最低 SNR | 异常值决定低 SNR 下的可用性，RMSE 只统计主瓣内的估计 |
 | 自动排阵 | Rx 间距 λ/2、Tx 间距 N<sub>Rx</sub>·λ/2 | 得到无重复、无栅瓣的 λ/2 虚拟 ULA（标准 MIMO 布局） |
 
 导入的 HFSS 通道相位和自定义字典是单频点数据，频段内评估只缩放几何、不改变这些数据，界面会给出提示。
@@ -351,7 +362,8 @@ MIMO Array Visualizer is a web workbench for designing and evaluating MIMO Tx/Rx
 
 - **Array editor**: drag-and-snap Tx/Rx with undo/redo, standard MIMO auto layout (filled λ/2 virtual ULA), coordinate table in λ or mm, live virtual-array preview with related-channel highlighting.
 - **Angle estimation inside the radar FOV**: 1D DBF spectrum playback, 2D azimuth × elevation heatmap, per-frame angle error refined to 0.002° and competitor-peak margin, no-fold range and cut reasons.
-- **Radar-level checks**: band presets with sweep ranges, in-band performance at the sweep edges, measured 3 dB resolution, first-null PSL, requirement pass/fail, side-by-side design comparison, layout overlap checks.
+- **Accuracy with noise**: Monte Carlo RMSE against the Cramér–Rao bound at a chosen per-channel SNR, outlier probability versus SNR and the threshold SNR (≤1% outliers across the FOV).
+- **Radar-level checks**: band presets with sweep ranges, in-band performance at the sweep edges (DBF dictionary following the operating frequency or fixed at the design frequency), measured 3 dB resolution, first-null PSL, requirement pass/fail, side-by-side design comparison, layout overlap checks.
 - **Real antenna data**: HFSS channel amplitude/phase, element patterns, and imported or calibrated DBF dictionaries.
 - **Collaboration**: shared server-side project library, **share links** (`http://server:8000/s/<id>`) that open a frozen copy of the configuration for anyone on the LAN, desktop-compatible layout JSON, portable `.mimo.zip` bundles, background PDF reports with CSV/JSON data packages, and a REST API at `/api/docs`.
 - Chinese / English / Japanese UI, light/dark themes, works at phone width.

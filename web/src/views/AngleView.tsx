@@ -1,24 +1,71 @@
 import { useMemo } from "react";
-import type { Axis, DbfBank } from "../api/types";
+import type { Axis, DbfBank, NoiseAccuracy } from "../api/types";
 import { Plot } from "../charts/Plot";
 import { baseLayout, useChartTheme } from "../charts/theme";
 import { cutSummary, errorText, marginText, noFoldText } from "../components/Overview";
-import { Spinner } from "../components/ui";
+import { NumberInput, Segmented, Spinner } from "../components/ui";
 import { useT } from "../i18n";
 import { wire } from "../lib/encoding";
-import { trimNumber } from "../lib/format";
-import { useDbfBank } from "../state/compute";
-import { useStore } from "../state/store";
+import { parseNumber, trimNumber } from "../lib/format";
+import { snrOf, useDbfBank, useNoiseAccuracy } from "../state/compute";
+import { type AngleMode, useStore } from "../state/store";
 import { EmptyCapability } from "./EmptyCapability";
 
+const SNR_RANGE: [number, number] = [-20, 40];
+
 export function AngleView() {
+  const t = useT();
   const evaluation = useStore((state) => state.evaluation);
+  const mode = useStore((state) => state.angleMode);
+  const setAngleMode = useStore((state) => state.setAngleMode);
   const capability = evaluation?.capability ?? { azimuth: true, elevation: true, two_d: true };
+  const Panel = mode === "noise" ? NoiseAxisPanel : AngleAxisPanel;
   return (
-    <div className="angle-grid">
-      <AngleAxisPanel axis="azimuth" available={capability.azimuth} />
-      <AngleAxisPanel axis="elevation" available={capability.elevation} />
+    <div className="angle-view">
+      <div className="angle-mode-bar">
+        <Segmented<AngleMode>
+          label={t("angle.mode")}
+          value={mode}
+          onChange={setAngleMode}
+          options={[
+            { value: "ideal", label: t("angle.modeIdeal") },
+            { value: "noise", label: t("angle.modeNoise") },
+          ]}
+        />
+        {mode === "noise" ? <SnrInput /> : <span className="angle-mode-hint subtle">{t("angle.idealHint")}</span>}
+      </div>
+      <div className="angle-grid">
+        <Panel axis="azimuth" available={capability.azimuth} />
+        <Panel axis="elevation" available={capability.elevation} />
+      </div>
     </div>
+  );
+}
+
+function SnrInput() {
+  const t = useT();
+  const snr = useStore((state) => snrOf(state.project!));
+  const updateProject = useStore((state) => state.updateProject);
+  const parse = (text: string) => {
+    const value = parseNumber(text, ["db"]);
+    return value !== null && value >= SNR_RANGE[0] && value <= SNR_RANGE[1] ? value : null;
+  };
+  return (
+    <label className="angle-snr" title={t("angle.snrHint")}>
+      <span className="readout-label">{t("angle.snr")}</span>
+      <NumberInput
+        className="input num"
+        aria-label={t("angle.snr")}
+        value={snr}
+        parse={parse}
+        format={(value) => trimNumber(value, 1)}
+        invalidTitle={t("angle.snrHint")}
+        onCommit={(value) => updateProject({ noise: { snr_db: value } })}
+        style={{ width: 56 }}
+      />
+      <span className="subtle">dB</span>
+      <span className="angle-snr-hint subtle">{t("angle.snrHint")}</span>
+    </label>
   );
 }
 
@@ -217,6 +264,286 @@ function AngleChart({ bank, kind }: { bank: DbfBank; kind: "error" | "margin" })
         layout={layout}
         ariaLabel={`${t(bank.axis === "azimuth" ? "axis.azimuth" : "axis.elevation")} ${t(kind === "error" ? "axis.error" : "axis.margin")}`}
       />
+    </div>
+  );
+}
+
+/** Degrees with precision that suits the magnitude (accuracies span 0.001° to tens of degrees). */
+function degText(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "—";
+  const digits = value < 0.1 ? 3 : value < 10 ? 2 : 1;
+  return `${value.toFixed(digits)}°`;
+}
+
+function percentText(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "—";
+  return `${trimNumber(value * 100, 1)}%`;
+}
+
+function NoiseAxisPanel({ axis, available }: { axis: Axis; available: boolean }) {
+  const t = useT();
+  const result = useNoiseAccuracy(axis, available);
+  const fov = useStore((state) => state.project!.fov[axis]);
+  const axisLabel = t(axis === "azimuth" ? "axis.azimuth" : "axis.elevation");
+  const data = result.data;
+  return (
+    <section className="panel">
+      <header className="panel-header">
+        <div className="panel-heading">
+          <span className="panel-title">{t("angle.panelTitle", { axis: axisLabel })}</span>
+          <span className="panel-subtitle">
+            {t("overview.fov", { low: fov[0], high: fov[1] })} · {t("angle.noiseSubtitle", { trials: data?.trials ?? 200 })}
+          </span>
+        </div>
+        <div className="panel-tools">{available && result.loading && <Spinner />}</div>
+      </header>
+      {available && (
+        <div className="panel-toolbar">
+          <span className="toolbar-legend">
+            <span className="legend-line series" />
+            {t("angle.rmseSeries")}
+          </span>
+          <span className="toolbar-legend">
+            <span className="legend-line bound" />
+            {t("angle.crbSeries")}
+          </span>
+          {data && data.summary.ambiguous_count > 0 && (
+            <span className="toolbar-legend">
+              <span className="legend-swatch ambiguous" />
+              {t("angle.ambiguousShade")}
+            </span>
+          )}
+        </div>
+      )}
+      <div className="panel-body">
+        {available && data && (
+          <div className="angle-stack">
+            <div className="angle-chart">
+              <span className="angle-chart-label">{t("angle.rmseChart")}</span>
+              <RmseChart result={data} />
+            </div>
+            <div className="angle-chart">
+              <span className="angle-chart-label">{t("angle.outlierChart")}</span>
+              <OutlierChart result={data} />
+            </div>
+          </div>
+        )}
+        {available && !data && result.loading && (
+          <div className="loading-overlay">
+            <Spinner /> {t("dbf.loading")}
+          </div>
+        )}
+        {available && result.error && !result.loading && (
+          <div className="empty-state">
+            <div className="empty-state-inner">
+              <h3>{t("overview.error")}</h3>
+              <p>{result.error}</p>
+            </div>
+          </div>
+        )}
+        {!available && <EmptyCapability title={t(axis === "azimuth" ? "empty.azimuth" : "empty.elevation")} />}
+      </div>
+      {available && (
+        <footer className="panel-footer">
+          {data ? <NoiseReadout result={data} /> : <span className="subtle">{t("dbf.loading")}</span>}
+        </footer>
+      )}
+    </section>
+  );
+}
+
+function NoiseReadout({ result }: { result: NoiseAccuracy }) {
+  const t = useT();
+  const summary = result.summary;
+  const threshold = wire(summary.threshold_snr_db);
+  const thresholdText =
+    threshold === null
+      ? t("angle.thresholdAbove", { value: summary.sweep_max_db })
+      : threshold <= summary.sweep_min_db
+        ? t("angle.thresholdBelow", { value: summary.sweep_min_db })
+        : `${trimNumber(threshold, 1)} dB`;
+  return (
+    <div className="readout">
+      <span className="readout-item">
+        <span className="readout-label">{t("angle.boresightRmse")}</span>
+        <span className="readout-value">{degText(wire(summary.boresight_rmse))}</span>
+        <span className="subtle">{t("angle.crbValue", { value: degText(wire(summary.boresight_crb)) })}</span>
+      </span>
+      <span className="readout-item">
+        <span className="readout-label">{t("angle.maxRmse")}</span>
+        <span className="readout-value">{degText(wire(summary.max_rmse))}</span>
+      </span>
+      <span className="readout-item">
+        <span className="readout-label">{t("angle.outlierAtSnr")}</span>
+        <span className="readout-value">{percentText(wire(summary.max_outlier_rate))}</span>
+      </span>
+      <span className="readout-item">
+        <span className="readout-label">{t("angle.thresholdSnr", { value: trimNumber(summary.outlier_limit * 100, 1) })}</span>
+        <span className="readout-value">{thresholdText}</span>
+      </span>
+      {summary.ambiguous_count > 0 && (
+        <span className="readout-item subtle">{t("angle.ambiguousNote", { count: summary.ambiguous_count })}</span>
+      )}
+    </div>
+  );
+}
+
+function RmseChart({ result }: { result: NoiseAccuracy }) {
+  const t = useT();
+  const theme = useChartTheme();
+  const { data, layout } = useMemo(() => {
+    const x = result.true_angles;
+    const rmse = result.rmse.map(wire);
+    const crb = result.crb.map(wire);
+    const finite = [...rmse, ...crb].filter((value): value is number => value !== null && Number.isFinite(value));
+    const top = Math.max(...finite, 1e-3) * 1.15;
+    const step = x.length > 1 ? x[1] - x[0] : 1;
+    const shading = result.ambiguous.flatMap((ambiguous, i) =>
+      ambiguous
+        ? [{ type: "rect", xref: "x", yref: "paper", x0: x[i] - step / 2, x1: x[i] + step / 2, y0: 0, y1: 1, fillcolor: theme.danger, opacity: 0.12, line: { width: 0 }, layer: "below" }]
+        : [],
+    );
+    const hover = x.map((_, i) =>
+      t("angle.noiseHover", {
+        rmse: degText(rmse[i]),
+        crb: degText(crb[i]),
+        bias: degText(wire(result.bias[i])),
+        outlier: percentText(wire(result.outlier_rate[i])),
+      }),
+    );
+    return {
+      data: [
+        {
+          type: "scatter",
+          mode: "lines+markers",
+          x,
+          y: rmse,
+          line: { color: theme.line, width: 1.8 },
+          marker: { size: 4, color: theme.line },
+          name: t("angle.rmseSeries"),
+          text: hover,
+          hovertemplate: "%{x:+.0f}°  %{text}<extra></extra>",
+        },
+        {
+          type: "scatter",
+          mode: "lines",
+          x,
+          y: crb,
+          line: { color: theme.secondary, width: 1.4, dash: "dash" },
+          name: t("angle.crbSeries"),
+          hoverinfo: "skip",
+        },
+      ],
+      layout: baseLayout(theme, {
+        margin: { l: 52, r: 16, t: 26, b: 44 },
+        shapes: shading,
+        xaxis: { range: [x[0], x[x.length - 1]], dtick: x[x.length - 1] - x[0] > 90 ? 30 : 10, title: { text: t("axis.trueAngle") } },
+        yaxis: { automargin: false, range: [0, top], rangemode: "tozero" },
+      }),
+    };
+  }, [result, theme, t]);
+  return (
+    <div className="chart-body">
+      <Plot data={data} layout={layout} ariaLabel={`${t(result.axis === "azimuth" ? "axis.azimuth" : "axis.elevation")} ${t("angle.rmseChart")}`} />
+    </div>
+  );
+}
+
+function OutlierChart({ result }: { result: NoiseAccuracy }) {
+  const t = useT();
+  const theme = useChartTheme();
+  const { data, layout } = useMemo(() => {
+    const x = result.sweep.snr_db;
+    const percent = (values: (typeof result.sweep.max_outlier_rate)[number][]) =>
+      values.map((value) => {
+        const number = wire(value);
+        return number === null ? null : number * 100;
+      });
+    const threshold = wire(result.summary.threshold_snr_db);
+    const limit = result.summary.outlier_limit * 100;
+    const vertical = (at: number, color: string, dash: string) => ({
+      type: "line",
+      xref: "x",
+      yref: "paper",
+      x0: at,
+      x1: at,
+      y0: 0,
+      y1: 1,
+      line: { color, width: 1.2, dash },
+    });
+    return {
+      data: [
+        {
+          type: "scatter",
+          mode: "lines",
+          x,
+          y: percent(result.sweep.max_outlier_rate),
+          line: { color: theme.line, width: 1.8 },
+          name: t("angle.maxOutlierSeries"),
+          hovertemplate: `${t("angle.maxOutlierSeries")} %{x:.0f} dB  %{y:.1f}%<extra></extra>`,
+        },
+        {
+          type: "scatter",
+          mode: "lines",
+          x,
+          y: percent(result.sweep.mean_outlier_rate),
+          line: { color: theme.secondary, width: 1.4, dash: "dot" },
+          name: t("angle.meanOutlierSeries"),
+          hovertemplate: `${t("angle.meanOutlierSeries")} %{x:.0f} dB  %{y:.1f}%<extra></extra>`,
+        },
+      ],
+      layout: baseLayout(theme, {
+        margin: { l: 52, r: 16, t: 26, b: 44 },
+        showlegend: true,
+        legend: {
+          x: 1,
+          xanchor: "right",
+          y: 0.98,
+          yanchor: "top",
+          bgcolor: "rgba(0,0,0,0)",
+          font: { size: 11, color: theme.textSecondary },
+        },
+        shapes: [
+          { type: "line", xref: "paper", x0: 0, x1: 1, y0: limit, y1: limit, line: { color: theme.danger, width: 1.2, dash: "dash" } },
+          vertical(result.snr_db, theme.accent, "solid"),
+          ...(threshold !== null ? [vertical(threshold, theme.success, "dot")] : []),
+        ],
+        annotations: [
+          {
+            x: result.snr_db,
+            y: 1,
+            xref: "x",
+            yref: "paper",
+            text: t("angle.currentSnr"),
+            showarrow: false,
+            xanchor: "left",
+            yanchor: "top",
+            font: { size: 11, color: theme.accent },
+          },
+          ...(threshold !== null
+            ? [
+                {
+                  x: threshold,
+                  y: 0.5,
+                  xref: "x",
+                  yref: "paper",
+                  text: t("angle.thresholdMarker", { value: trimNumber(threshold, 1) }),
+                  showarrow: false,
+                  xanchor: "left",
+                  textangle: -90,
+                  font: { size: 11, color: theme.success },
+                },
+              ]
+            : []),
+        ],
+        xaxis: { range: [x[0], x[x.length - 1]], dtick: 10, title: { text: t("axis.snr") } },
+        yaxis: { automargin: false, range: [0, 100], ticksuffix: "%" },
+      }),
+    };
+  }, [result, theme, t]);
+  return (
+    <div className="chart-body">
+      <Plot data={data} layout={layout} ariaLabel={`${t(result.axis === "azimuth" ? "axis.azimuth" : "axis.elevation")} ${t("angle.outlierChart")}`} />
     </div>
   );
 }

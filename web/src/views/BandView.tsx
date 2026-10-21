@@ -1,9 +1,18 @@
 import { GitCompare, RefreshCw } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
-import type { AngleMetrics, Axis, BandSweep, CompareItem, PerformanceSummary, ProjectSummary, RequirementCheck } from "../api/types";
+import type {
+  AngleMetrics,
+  Axis,
+  BandSweep,
+  CompareItem,
+  DictionaryFrequency,
+  PerformanceSummary,
+  ProjectSummary,
+  RequirementCheck,
+} from "../api/types";
 import { errorText, marginText, noFoldText, StatusIcon } from "../components/Overview";
-import { Button, Callout, Spinner } from "../components/ui";
+import { Button, Callout, Segmented, Spinner } from "../components/ui";
 import { type Translate, useT } from "../i18n";
 import { wire } from "../lib/encoding";
 import { fmt, trimNumber } from "../lib/format";
@@ -95,6 +104,8 @@ export function BandView() {
 function BandPanel() {
   const t = useT();
   const project = useStore((state) => state.project)!;
+  const updateProject = useStore((state) => state.updateProject);
+  const dictionaryFrequency = project.band.dictionary_frequency ?? "operating";
   const key = evaluationKey(project);
   const [sweep, setSweep] = useState<BandSweep | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -143,11 +154,26 @@ function BandPanel() {
           </span>
           <span className="panel-subtitle">{t("band.subtitle")}</span>
         </div>
-        <div className="panel-tools">{loading && <Spinner />}</div>
+        <div className="panel-tools" style={{ gap: 8 }}>
+          {loading && <Spinner />}
+          <span className="subtle">{t("band.dictionaryFrequency")}</span>
+          <Segmented<DictionaryFrequency>
+            label={t("band.dictionaryFrequency")}
+            value={dictionaryFrequency}
+            onChange={(value) => updateProject({ band: { ...project.band, dictionary_frequency: value } })}
+            options={[
+              { value: "operating", label: t("band.dictionaryOperating"), title: t("band.dictionaryOperatingHint") },
+              { value: "design", label: t("band.dictionaryDesign"), title: t("band.dictionaryDesignHint") },
+            ]}
+          />
+        </div>
       </header>
       <div style={{ padding: 12 }} className="stack">
         {error && <Callout tone="danger">{error}</Callout>}
         {sweep && !sweep.design_in_band && <Callout tone="warning">{t("layout.design_outside_band")}</Callout>}
+        {sweep?.dictionary_frequency === "design" && (
+          <Callout tone="info">{t("band.dictionaryDesignNote", { design: trimNumber(sweep.design_ghz, 3) })}</Callout>
+        )}
         {sweep?.uses_single_frequency_data && <Callout tone="info">{t("band.singleFrequency")}</Callout>}
         {sweep && (
           <div className="table-wrap">

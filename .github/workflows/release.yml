@@ -1,0 +1,56 @@
+name: Release
+
+# Run from the Actions tab or: gh workflow run release.yml -f version=1.0.1
+# Builds the wheel (with the web client) from main, smoke-tests it, then tags
+# v<version> and publishes a release with docs/releases/v<version>.md as notes.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 1.0.1 (must match pyproject.toml)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check branch, version and notes
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main" || { echo "Release only from main"; exit 1; }
+          grep -qx "version = \"$VERSION\"" pyproject.toml || { echo "pyproject.toml is not $VERSION"; exit 1; }
+          grep -qx "APP_VERSION = \"$VERSION\"" src/virtual_array/version.py || { echo "version.py is not $VERSION"; exit 1; }
+          test -f "docs/releases/v$VERSION.md" || { echo "Missing docs/releases/v$VERSION.md"; exit 1; }
+          if gh release view "v$VERSION" >/dev/null 2>&1; then echo "v$VERSION already exists"; exit 1; fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - working-directory: web
+        run: npm ci --no-audit --no-fund && npm run build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build && python -m build --wheel
+      - name: Smoke-test the wheel in a clean venv
+        run: |
+          python -m venv /tmp/wheel-env
+          /tmp/wheel-env/bin/pip install dist/mimo_array_visualizer-$VERSION-py3-none-any.whl
+          /tmp/wheel-env/bin/mimo-array-server --version | grep -q "$VERSION"
+          cd /tmp && /tmp/wheel-env/bin/mimo-array-server --port 8765 --data-dir /tmp/wheel-data &
+          for _ in $(seq 60); do curl -fs http://127.0.0.1:8765/api/health >/dev/null && break; sleep 1; done
+          curl -fs http://127.0.0.1:8765/api/health | grep -q "$VERSION"
+          curl -fs http://127.0.0.1:8765/ | grep -qi "<div id=\"root\""
+      - name: Publish release
+        run: |
+          WHEEL="dist/mimo_array_visualizer-$VERSION-py3-none-any.whl"
+          cp "docs/releases/v$VERSION.md" notes.md
+          printf '\nwheel SHA-256：`%s`\n' "$(sha256sum "$WHEEL" | cut -d' ' -f1)" >> notes.md
+          gh release create "v$VERSION" "$WHEEL" --target "$GITHUB_SHA" --title "v$VERSION" --notes-file notes.md --latest

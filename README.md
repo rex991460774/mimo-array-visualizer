@@ -174,7 +174,7 @@ docker compose up -d --build
 
 ### 方式二：安装发布包（pip，无需 Node.js）
 
-每个 [Release](https://github.com/rex991560774/mimo-array-visualizer/releases) 都附带一个 wheel，前端已经构建好打包在里面，只需要 Python 3.10+，不需要克隆仓库或安装 Node.js：
+每个 [Release](https://github.com/rex991460774/mimo-array-visualizer/releases) 都附带一个 wheel，前端已经构建好打包在里面，只需要 Python 3.10+，不需要克隆仓库或安装 Node.js：
 
 ```bash
 python3 -m venv mimo-env

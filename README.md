@@ -186,7 +186,7 @@ docker compose up -d --build
 
 ```bash
 python3 -m venv mimo-env
-mimo-env/bin/pip install https://github.com/rex991460774/mimo-array-visualizer/releases/download/v1.0.1/mimo_array_visualizer-1.0.1-py3-none-any.whl
+mimo-env/bin/pip install https://github.com/rex991460774/mimo-array-visualizer/releases/download/v1.1.0/mimo_array_visualizer-1.1.0-py3-none-any.whl
 mimo-env/bin/mimo-array-server --host 0.0.0.0 --port 8000 --data-dir ./mimo-data
 ```
 
@@ -369,7 +369,7 @@ MIMO Array Visualizer is a web workbench for designing and evaluating MIMO Tx/Rx
 - Chinese / English / Japanese UI, light/dark themes, works at phone width.
 
 **Deploy with Docker**: `docker compose up -d --build`, then open `http://<server>:8000/`.
-**Release wheel** (no Node.js needed, Python 3.10+): `pip install https://github.com/rex991460774/mimo-array-visualizer/releases/download/v1.0.1/mimo_array_visualizer-1.0.1-py3-none-any.whl`, then `mimo-array-server --host 0.0.0.0 --port 8000 --data-dir ./mimo-data`. Each [release](https://github.com/rex991460774/mimo-array-visualizer/releases) attaches its wheel with a SHA-256 in the notes.
+**Release wheel** (no Node.js needed, Python 3.10+): `pip install https://github.com/rex991460774/mimo-array-visualizer/releases/download/v1.1.0/mimo_array_visualizer-1.1.0-py3-none-any.whl`, then `mimo-array-server --host 0.0.0.0 --port 8000 --data-dir ./mimo-data`. Each [release](https://github.com/rex991460774/mimo-array-visualizer/releases) attaches its wheel with a SHA-256 in the notes.
 **Bare metal from source**: `scripts/setup_server.sh` (or `scripts\setup_server.ps1` on Windows), then `mimo-array-server --host 0.0.0.0 --port 8000 --data-dir ./data`.
 The server has no built-in authentication; use it on a trusted network or behind an authenticating reverse proxy.
 
